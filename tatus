@@ -1,0 +1,3 @@
+[33md1598e0[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m Pin the fixture invariants as a vitest suite
+[33m9ce83b6[m[33m ([m[1;32mtrack/design[m[33m, [m[1;32mtrack/data[m[33m)[m 003 retier, invariant tests, rules fix
+[33mb886723[m Retier tier_bands to USD cents; fixtures, provenance, orders
