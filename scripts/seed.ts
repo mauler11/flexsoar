@@ -25,12 +25,28 @@
  *      none to grade or authenticate one. Those are direct table writes, and
  *      only the service role can make them — no table has an INSERT policy.
  *
- * So this talks to PostgREST directly with the service-role key. Where a
- * SECURITY DEFINER function does exist it is called by RPC with exactly the
- * argument names lib/api/contract.ts uses, so this still exercises the real
- * mutation path. AGENT_RULES.md's "all writes go through the contract" governs
- * components; a seed script establishing rows the schema has no RPC for is the
- * documented exception.
+ * So this talks to PostgREST directly. Where a SECURITY DEFINER function does
+ * exist it is called by RPC with exactly the argument names
+ * lib/api/contract.ts uses, so this still exercises the real mutation path.
+ * AGENT_RULES.md's "all writes go through the contract" governs components; a
+ * seed script establishing rows the schema has no RPC for is the documented
+ * exception.
+ *
+ * ------------------------------------------------------------------
+ * TWO CLIENTS, BECAUSE 005 SPLIT THE CALLERS
+ *
+ *   service-role    direct table writes, fn_list_card, fn_purchase_card,
+ *                   and the reads at the end. Bypasses RLS.
+ *   admin session   fn_mint_card and fn_advance_consignment ONLY.
+ *
+ * 005_admin_guards.sql checks `is_admin` inside those two functions against
+ * auth.uid(). The service key has no auth.uid(), so calling them with it is
+ * refused outright ("admin privileges required"). They need a genuinely
+ * signed-in admin, so this script creates one — a real auth.users row with a
+ * password — and signs in with the anon key to get a session.
+ *
+ * That auth user is the only thing here that is not a plain table row. It is
+ * created once and reused; see HANDOFF.md for how to remove it.
  *
  * ------------------------------------------------------------------
  * RE-RUNNABLE
@@ -83,6 +99,21 @@ const BUYER = {
 };
 
 /**
+ * The admin. Unlike the two above, this one needs a REAL auth.users row:
+ * 005_admin_guards.sql resolves the caller through auth.uid(), so a fabricated
+ * auth_id would not authenticate. Its id therefore comes from Supabase at
+ * creation rather than being hard-coded.
+ *
+ * The password is a fixed test credential for a seeded dev account. Override
+ * it with SEED_ADMIN_PASSWORD if the project is reachable by anyone else.
+ */
+const ADMIN = {
+  handle: 'seed_admin',
+  email: 'seed_admin@flexsoar.test',
+  password: process.env.SEED_ADMIN_PASSWORD ?? 'seed-admin-dev-only-3f9c2a',
+};
+
+/**
  * Natural key is (brand, model, colorway, size_us) — unique in 001_schema.sql.
  *
  * $180 puts the SKU in tier 3 (Rare: 12000..25000). Tier comes from this base
@@ -127,6 +158,7 @@ function requireEnv(name: string): string {
   return value;
 }
 
+/** Bypasses RLS. Everything except the two admin-guarded RPCs. */
 const supabase = createClient(
   requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
   requireEnv('SUPABASE_SERVICE_ROLE_KEY'),
@@ -234,6 +266,110 @@ async function ensureUser(spec: typeof CONSIGNOR, isConsignor: boolean): Promise
   return created;
 }
 
+/**
+ * A signed-in admin, for the two functions 005 guards.
+ *
+ * Idempotent, and in this order on purpose: try to sign in first, and only
+ * reach for the Admin API if that fails. On a re-run the auth user already
+ * exists and this is a single request.
+ *
+ * @returns a client carrying the admin's session, plus their `users.id`.
+ */
+async function ensureAdminSession(): Promise<{
+  // `typeof supabase`, not ReturnType<typeof createClient>: the latter drops
+  // createClient's generic defaults and degrades .rpc() args to never.
+  client: typeof supabase;
+  userId: UUID;
+}> {
+  const client = createClient(
+    requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
+    requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+
+  let signIn = await client.auth.signInWithPassword({
+    email: ADMIN.email,
+    password: ADMIN.password,
+  });
+
+  if (signIn.error) {
+    // No such auth user yet (or the password was rotated). Create it with the
+    // service key. email_confirm skips the confirmation mail — there is no
+    // inbox behind @flexsoar.test.
+    const created = await supabase.auth.admin.createUser({
+      email: ADMIN.email,
+      password: ADMIN.password,
+      email_confirm: true,
+    });
+
+    if (created.error) {
+      throw new Error(
+        `create the seed admin auth user: ${created.error.message}` +
+          ' (if it exists with a different password, set SEED_ADMIN_PASSWORD)',
+      );
+    }
+    detail(`${ADMIN.handle} auth user created`);
+
+    signIn = await client.auth.signInWithPassword({
+      email: ADMIN.email,
+      password: ADMIN.password,
+    });
+    if (signIn.error) {
+      throw new Error(`sign in as the seed admin: ${signIn.error.message}`);
+    }
+  }
+
+  const authUserId = signIn.data.user?.id;
+  if (!authUserId) throw new Error('sign in returned no user');
+
+  // The users row behind the auth identity. id = auth_id, per the
+  // users_id_matches_auth trigger, and is_admin is the whole point.
+  const existing = await supabase
+    .from('users')
+    .select('id, is_admin')
+    .eq('auth_id', authUserId)
+    .maybeSingle();
+
+  if (existing.error) throw new Error(`look up the admin user: ${existing.error.message}`);
+
+  if (!existing.data) {
+    ok(
+      await supabase
+        .from('users')
+        .insert({
+          id: authUserId,
+          auth_id: authUserId,
+          handle: ADMIN.handle,
+          email: ADMIN.email,
+          country_code: 'MY',
+          is_admin: true,
+        })
+        .select('id')
+        .single(),
+      'create the admin users row',
+    );
+    detail(`${ADMIN.handle} users row created (is_admin)`);
+  } else {
+    const row = existing.data as { id: UUID; is_admin: boolean };
+    if (!row.is_admin) {
+      ok(
+        await supabase
+          .from('users')
+          .update({ is_admin: true })
+          .eq('id', row.id)
+          .select('id')
+          .single(),
+        'promote the admin users row',
+      );
+      detail(`${ADMIN.handle} promoted to is_admin`);
+    } else {
+      detail(`${ADMIN.handle} already exists (is_admin) — reused`);
+    }
+  }
+
+  return { client, userId: authUserId as UUID };
+}
+
 async function ensureSku(): Promise<{ id: UUID; market_price_cents: Cents }> {
   const found = await supabase
     .from('skus')
@@ -296,12 +432,17 @@ async function nextSettlementRef(): Promise<string> {
 async function main(): Promise<void> {
   heading('FlexSoar seed — intake to settlement, against the live project');
   console.log(`  ${requireEnv('NEXT_PUBLIC_SUPABASE_URL')}`);
-  console.log('  service-role client, no Stripe call, no RNG');
+  console.log('  service-role + an admin session, no Stripe call, no RNG');
 
   // ---- participants -------------------------------------------------
   step('Ensuring the two seed users');
   const consignor = await ensureUser(CONSIGNOR, true);
   const buyer = await ensureUser(BUYER, false);
+
+  step('Signing in as the seed admin');
+  detail('005 guards fn_mint_card and fn_advance_consignment on auth.uid()');
+  const admin = await ensureAdminSession();
+  detail(`session established, users.id ${admin.userId}`);
 
   step('Ensuring the SKU');
   const sku = await ensureSku();
@@ -343,12 +484,18 @@ async function main(): Promise<void> {
   detail(`item ${item.id} (pending_intake, no float yet)`);
 
   step('Walking the consignment state machine via fn_advance_consignment');
+  detail('on the admin session — service-role is refused here since 005');
+  detail(`p_actor is deliberately wrong (${buyer.handle}); 005 ignores it and`);
+  detail('records the session identity instead, so history cannot be forged');
+
   let from: ConsignmentStatus = 'draft';
   for (const to of CONSIGNMENT_PATH) {
-    const advanced = await supabase.rpc('fn_advance_consignment', {
+    const advanced = await admin.client.rpc('fn_advance_consignment', {
       p_id: consignment.id,
       p_to: to,
-      p_actor: consignor.id,
+      // Deliberately not the real actor. Proven below against
+      // consignment_events, which records the admin regardless.
+      p_actor: buyer.id,
       p_note: `seed: ${from} -> ${to}`,
     });
     if (advanced.error) {
@@ -383,8 +530,12 @@ async function main(): Promise<void> {
 
   // ---- mint ---------------------------------------------------------
   step('Minting the card via fn_mint_card');
+  detail('also on the admin session — the mint is admin-gated inside the function');
   const cardId = ok(
-    await supabase.rpc('fn_mint_card', { p_item_id: item.id, p_owner_id: consignor.id }),
+    await admin.client.rpc('fn_mint_card', {
+      p_item_id: item.id,
+      p_owner_id: consignor.id,
+    }),
     'fn_mint_card',
   ) as UUID;
 
@@ -507,6 +658,7 @@ async function main(): Promise<void> {
     if (isPlatform || accountId === null) return 'PLATFORM';
     if (accountId === consignor.id) return consignor.handle;
     if (accountId === buyer.id) return buyer.handle;
+    if (accountId === admin.userId) return ADMIN.handle;
     return accountId.slice(0, 8);
   };
 
@@ -548,6 +700,44 @@ async function main(): Promise<void> {
       `  ${label} ${currency.length} currency legs net to ${sum} ${sum === 0 ? '✓' : '✗'}`,
     );
   }
+
+  // ---- audit trail --------------------------------------------------
+  heading('CONSIGNMENT EVENTS — the actor comes from the session, not p_actor');
+
+  const events = ok(
+    await supabase
+      .from('consignment_events')
+      .select('id, from_status, to_status, actor_id, note')
+      .eq('consignment_id', consignment.id)
+      .order('id', { ascending: true }),
+    'read consignment events',
+  ) as {
+    id: number;
+    from_status: ConsignmentStatus | null;
+    to_status: ConsignmentStatus;
+    actor_id: UUID | null;
+    note: string | null;
+  }[];
+
+  table(
+    ['from', 'to', 'actor_id recorded'],
+    events.map((event) => [
+      event.from_status ?? '—',
+      event.to_status,
+      handleOf(event.actor_id, false),
+    ]),
+  );
+
+  const forged = events.filter((event) => event.actor_id === buyer.id);
+  console.log('');
+  console.log(`  every call passed p_actor = ${buyer.handle} (the wrong user)`);
+  console.log(
+    `  events recording ${buyer.handle}: ${forged.length} ${forged.length === 0 ? '✓' : '✗'}`,
+  );
+  console.log(
+    `  events recording ${ADMIN.handle}: ` +
+      `${events.filter((e) => e.actor_id === admin.userId).length}/${events.length} ✓`,
+  );
 
   // ---- provenance ---------------------------------------------------
   heading('PROVENANCE — the ownership chain, oldest hop first');
