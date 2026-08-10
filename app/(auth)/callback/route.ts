@@ -95,12 +95,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // First sign-in creates the users row; every later sign-in no-ops. If this
   // throws, the session cookie is already set but the app has no users row to
   // hang anything on, so send them back rather than into a half-signed-in app.
+  //
+  // `supabase` is passed in deliberately: it is carrying the session that was
+  // just established above, so the insert runs as the user and 006's
+  // users_self_insert policy vets it. See lib/db/provision.ts.
   try {
-    await ensureUserRow({
-      id: authUserId,
-      email: authEmail,
-      user_metadata: authMetadata,
-    });
+    await ensureUserRow(
+      {
+        id: authUserId,
+        email: authEmail,
+        user_metadata: authMetadata,
+      },
+      supabase,
+    );
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     await supabase.auth.signOut();

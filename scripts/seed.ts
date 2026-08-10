@@ -333,6 +333,11 @@ async function ensureAdminSession(): Promise<{
   if (existing.error) throw new Error(`look up the admin user: ${existing.error.message}`);
 
   if (!existing.data) {
+    // Service-role, necessarily: 006's users_self_insert policy allows a user
+    // to provision themselves but pins `is_admin = false`, precisely so nobody
+    // can self-promote. Seeding an admin is the legitimate exception, and it
+    // is why this runs with the service key rather than through the session
+    // that was just established above.
     ok(
       await supabase
         .from('users')

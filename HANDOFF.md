@@ -307,3 +307,74 @@ Verified by breaking the fixtures three ways and confirming each is caught:
 the old `A/B/C` palette (7 glyphs unresolved), an unknown `sprite_key`, and a
 non-hex palette value. All three restored afterwards.
 
+---
+
+#### 14. 006 put RLS on `users` — embedded profiles are now partly placeholder
+
+**Every embedded user now comes from the `public_profiles` view.** Card owners,
+listing sellers, consignors and every hop on a provenance chain. Reading
+`users` for someone else does not error under a session, it silently yields
+null — which an `!inner` embed turns into a listing that vanishes from the
+market grid, and a plain embed turns into a `NOT_FOUND` out of
+`requireEmbed()`. Verified against the live project before and after.
+
+**THE PART THAT WILL BITE YOU.** `UserSummary` declares eight fields; the view
+exposes five. These three are placeholders on any *embedded* user:
+
+| field                   | real value | what you get |
+| ----------------------- | ---------- | ------------ |
+| `portfolio_value_cents` | in `users` | always `0`     |
+| `is_admin`              | in `users` | always `false` |
+| `is_consignor`          | in `users` | always `false` |
+
+The contract is frozen, so `UserSummary` cannot be narrowed to say so in the
+type. Do not render a portfolio total from an embedded user, and never treat
+`is_admin` there as a permission check — a real admin reads as `false`. The
+substitution lives in one function, `toUserSummary()`, rather than scattered
+across the six call sites.
+
+**Ask me to widen this if you need it.** `portfolio_value_cents` is the one
+with a genuine display use (`/u/[handle]`), and it is not really a secret: it
+is derivable from a user's public cards, since `cards_public_read` is
+`using (true)` and `fn_card_value_cents` is callable. Adding it to the view in
+a 007 would be defensible. `is_admin` and `is_consignor` arguably should stay
+off a public view regardless.
+
+**`getUser()` no longer finds strangers, and this blocks
+`app/(market)/u/[handle]`.** It returns `User`, which includes `email`, so it
+cannot move to the view — that would mean either leaking email or fabricating
+one. It now returns your own row, or any row if you are an admin, and `null`
+otherwise. That is correct behaviour, but it leaves track/market with no way to
+turn a handle into a profile, and no contract read covers it:
+`getCards({ ownerId })` needs an id.
+
+Three ways out, your call — I have not picked one:
+1. Unfreeze the contract for one addition, `getPublicProfile(handle)`.
+2. Let me export a `lib/db/profiles.ts` helper (my path) that track/market
+   imports directly, accepting that it is a read outside the contract.
+3. Route the page by user id instead of handle, so `getCards({ ownerId })` is
+   enough — cheapest, but the URL stops being human-readable.
+
+**`lib/db/provision.ts` now provisions on the caller's session, not the service
+key.** 006's `users_self_insert` pins `auth_id = auth.uid()`, `id = auth.uid()`
+and `is_admin = false`, so running as the user makes the database enforce all
+three; under service-role they are bypassed and a bug here could mint an admin
+that 005's `fn_require_admin()` would then honour. Verified on a throwaway
+account: a self-insert carrying `is_admin: true` is refused with `42501`
+(mapped to `FORBIDDEN`), the normal insert is accepted and readable back, and
+the account was deleted afterwards.
+
+One branch still needs the service key and cannot move: adopting a
+pre-existing row seeded with `auth_id = null`. That row is invisible to
+`users_self_read`, and 006 ships no UPDATE policy at all. It is marked in the
+file.
+
+While there, that branch had a latent bug 004 introduced: it used to
+`console.warn` and carry on when the existing row's `id` did not match the auth
+id, but the `users_id_matches_auth` trigger now rejects that UPDATE outright.
+It raises a clear error naming the mismatch instead of letting a trigger
+message surface from three frames down.
+
+**Still no UPDATE policy on `users`.** Nobody can change their own handle. 006
+calls this out deliberately; it needs a column-scoped policy in a later
+migration before any profile-editing UI is possible.

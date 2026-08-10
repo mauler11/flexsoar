@@ -351,8 +351,23 @@ export interface SkusQuery {
 // the contract's surface is exactly the functions and types declared above.
 
 /** Column projections. Never `select *` — AGENT_RULES.md. */
-const USER_SUMMARY_COLUMNS =
-  'id, handle, level, xp_total, portfolio_value_cents, is_admin, is_consignor, created_at';
+
+/**
+ * Every user embedded in someone else's row — a card's owner, a listing's
+ * seller, a consignor, a hop on a provenance chain — comes from the
+ * `public_profiles` view, NOT from `users`.
+ *
+ * 006_users_rls.sql put RLS on `users`: a session may read its own row and an
+ * admin may read any, and that is all. RLS is row-level, so there is no policy
+ * that could expose `handle` while hiding `email`; the view is how 006 draws
+ * that line. Reading `users` for someone else's handle does not error, it
+ * silently yields null — which an `!inner` embed turns into a listing that
+ * vanishes from the market grid, and a plain embed turns into a NOT_FOUND out
+ * of requireEmbed(). Verified against the live project.
+ *
+ * NEVER add `email` here. The view does not expose it, and that is the point.
+ */
+const PUBLIC_PROFILE_COLUMNS = 'id, handle, level, xp_total, created_at';
 
 const USER_COLUMNS =
   'id, auth_id, handle, email, country_code, kyc_status, is_consignor, is_admin, ' +
@@ -488,6 +503,15 @@ function statusFilter<T extends string>(
 /** The SKU embed comes back exactly as SkuRef projects it. */
 type SkuRefRow = SkuRef;
 
+/** Exactly what `public_profiles` exposes. Deliberately narrower than User. */
+interface PublicProfileRow {
+  id: UUID;
+  handle: string;
+  level: number;
+  xp_total: number;
+  created_at: Timestamptz;
+}
+
 interface CardRow {
   id: UUID;
   sku_id: UUID;
@@ -519,7 +543,7 @@ interface ListingRow {
   created_at: Timestamptz;
   sold_at: Timestamptz | null;
   card: CardRow | CardRow[];
-  seller: UserSummary | UserSummary[];
+  seller: PublicProfileRow | PublicProfileRow[];
 }
 
 interface ItemRow {
@@ -537,7 +561,7 @@ interface ItemRow {
 }
 
 interface ConsignmentRow extends Consignment {
-  consignor: UserSummary | UserSummary[];
+  consignor: PublicProfileRow | PublicProfileRow[];
 }
 
 interface ProvenanceRow {
@@ -545,10 +569,47 @@ interface ProvenanceRow {
   acquired_at: Timestamptz;
   released_at: Timestamptz | null;
   price_cents: Cents | null;
-  owner: UserSummary | UserSummary[];
+  owner: PublicProfileRow | PublicProfileRow[];
 }
 
 // ---- mappers ----
+
+/**
+ * A `public_profiles` row widened to the frozen `UserSummary` shape.
+ *
+ * ---- READ THIS BEFORE USING is_admin / is_consignor / portfolio_value_cents
+ * ON AN EMBEDDED USER ----
+ *
+ * `UserSummary` declares eight fields. The view exposes five. The three below
+ * are therefore NOT the values in the database — they are fixed placeholders,
+ * because the contract is frozen and the type cannot be narrowed to say so.
+ *
+ *   portfolio_value_cents  always 0
+ *   is_admin               always false
+ *   is_consignor           always false
+ *
+ * They are safe to render only where a wrong answer is invisible. Do not
+ * branch on them, do not show a portfolio total from an embedded user, and do
+ * not use `is_admin` here for anything resembling a permission check — an
+ * actual admin reads as false. `getUser()` still returns the real row, for
+ * yourself or if you are an admin.
+ *
+ * Centralised in one function on purpose: the substitution is a real
+ * compromise and should be visible in one place rather than smeared across six
+ * call sites. Flagged in HANDOFF.md — the fix is columns on the view.
+ */
+function toUserSummary(row: PublicProfileRow): UserSummary {
+  return {
+    id: row.id,
+    handle: row.handle,
+    level: row.level,
+    xp_total: row.xp_total,
+    created_at: row.created_at,
+    portfolio_value_cents: 0,
+    is_admin: false,
+    is_consignor: false,
+  };
+}
 
 function toCardSummary(row: CardRow, listing: ListingRef | null): CardSummary {
   return {
@@ -600,7 +661,7 @@ function toConsignmentSummary(row: ConsignmentRow): ConsignmentSummary {
   const { consignor, ...consignment } = row;
   return {
     ...consignment,
-    consignor: requireEmbed(consignor, 'consignments.consignor'),
+    consignor: toUserSummary(requireEmbed(consignor, 'consignments.consignor')),
   };
 }
 
@@ -662,13 +723,19 @@ async function listingVisibilityFilter(
   if (viewerId) {
     arms.push(`seller_id.eq.${viewerId}`);
 
+    // public_profiles, not users: since 006 a session can only read its own
+    // `users` row, so looking the level up there returns nothing whenever
+    // viewerId is anyone but the caller. That failure is silent — the
+    // early-access arm would just be dropped and the listing would look
+    // invisible rather than locked. `level` is on the view, so this works for
+    // any viewerId the caller passes.
     const result = await supabase
-      .from('users')
+      .from('public_profiles')
       .select('level')
       .eq('id', viewerId)
       .maybeSingle();
 
-    if (result.error && !isNoRows(result.error)) fail(result.error, 'users');
+    if (result.error && !isNoRows(result.error)) fail(result.error, 'public_profiles');
     const level = (result.data as { level: number } | null)?.level;
     if (typeof level === 'number') arms.push(`early_access_level.lte.${level}`);
   }
@@ -910,7 +977,7 @@ export async function getCard(cardId: UUID): Promise<CardDetail | null> {
     .select(
       `${CARD_SUMMARY_COLUMNS}, exceptional_reason, ` +
         `sku:skus(${SKU_REF_COLUMNS}), ` +
-        `owner:users(${USER_SUMMARY_COLUMNS}), ` +
+        `owner:public_profiles(${PUBLIC_PROFILE_COLUMNS}), ` +
         `item:items(id, status, photos, grading_notes, graded_at, authenticated_at)`,
     )
     .eq('id', cardId)
@@ -921,7 +988,7 @@ export async function getCard(cardId: UUID): Promise<CardDetail | null> {
   const row = result.data as
     | (CardRow & {
         exceptional_reason: string | null;
-        owner: UserSummary | UserSummary[];
+        owner: PublicProfileRow | PublicProfileRow[];
         item: CardDetail['item'] | CardDetail['item'][];
       })
     | null;
@@ -936,7 +1003,7 @@ export async function getCard(cardId: UUID): Promise<CardDetail | null> {
       .from('card_provenance')
       .select(
         `owner_level, acquired_at, released_at, price_cents, ` +
-          `owner:users(${USER_SUMMARY_COLUMNS})`,
+          `owner:public_profiles(${PUBLIC_PROFILE_COLUMNS})`,
       )
       .eq('card_id', cardId)
       .order('acquired_at', { ascending: true })
@@ -949,11 +1016,11 @@ export async function getCard(cardId: UUID): Promise<CardDetail | null> {
   return {
     ...toCardSummary(row, listings.get(row.id) ?? null),
     exceptional_reason: row.exceptional_reason,
-    owner: requireEmbed(row.owner, 'cards.owner'),
+    owner: toUserSummary(requireEmbed(row.owner, 'cards.owner')),
     item: requireEmbed(row.item, 'cards.item'),
     oracle_value_cents: oracleValue,
     provenance: chain.map((hop) => ({
-      owner: requireEmbed(hop.owner, 'card_provenance.owner'),
+      owner: toUserSummary(requireEmbed(hop.owner, 'card_provenance.owner')),
       owner_level: hop.owner_level,
       acquired_at: hop.acquired_at,
       released_at: hop.released_at,
@@ -1049,7 +1116,7 @@ export async function getListings(query: ListingsQuery = {}): Promise<ListingSum
     .select(
       `${LISTING_COLUMNS}, ` +
         `card:cards!inner(${CARD_SUMMARY_COLUMNS}, sku:skus!inner(${SKU_REF_COLUMNS})), ` +
-        `seller:users!inner(${USER_SUMMARY_COLUMNS})`,
+        `seller:public_profiles!inner(${PUBLIC_PROFILE_COLUMNS})`,
     )
     .in('status', statusFilter<ListingStatus>(query.status, LIVE_LISTING_STATUSES));
 
@@ -1122,7 +1189,7 @@ function toListingSummary(row: ListingRow): ListingSummary {
     created_at: row.created_at,
     sold_at: row.sold_at,
     card: toCardSummary(card, isLive ? toListingRef(row) : null),
-    seller: requireEmbed(row.seller, 'listings.seller'),
+    seller: toUserSummary(requireEmbed(row.seller, 'listings.seller')),
   };
 }
 
@@ -1135,7 +1202,7 @@ export async function getListing(listingId: UUID): Promise<ListingDetail | null>
     .select(
       `${LISTING_COLUMNS}, ` +
         `card:cards!inner(${CARD_SUMMARY_COLUMNS}, sku:skus!inner(${SKU_REF_COLUMNS})), ` +
-        `seller:users!inner(${USER_SUMMARY_COLUMNS})`,
+        `seller:public_profiles!inner(${PUBLIC_PROFILE_COLUMNS})`,
     )
     .eq('id', listingId)
     .maybeSingle();
@@ -1168,7 +1235,7 @@ export async function getConsignment(
 
   const result = await supabase
     .from('consignments')
-    .select(`${CONSIGNMENT_COLUMNS}, consignor:users(${USER_SUMMARY_COLUMNS})`)
+    .select(`${CONSIGNMENT_COLUMNS}, consignor:public_profiles(${PUBLIC_PROFILE_COLUMNS})`)
     .eq('id', consignmentId)
     .maybeSingle();
 
@@ -1232,7 +1299,7 @@ export async function getConsignments(
 
   let builder = supabase
     .from('consignments')
-    .select(`${CONSIGNMENT_COLUMNS}, consignor:users(${USER_SUMMARY_COLUMNS})`);
+    .select(`${CONSIGNMENT_COLUMNS}, consignor:public_profiles(${PUBLIC_PROFILE_COLUMNS})`);
 
   if (query.consignorId) builder = builder.eq('consignor_id', query.consignorId);
   if (query.status?.length) {
@@ -1250,7 +1317,22 @@ export async function getConsignments(
   return (rows ?? []).map(toConsignmentSummary);
 }
 
-/** By id, handle, or auth id. Returns null when there is no such user. */
+/**
+ * By id, handle, or auth id. Returns null when there is no such user.
+ *
+ * STILL READS `users`, AND SINCE 006 THAT MEANS YOURSELF OR — IF YOU ARE AN
+ * ADMIN — ANYONE. For any other user it returns null, exactly as if the handle
+ * did not exist.
+ *
+ * It cannot move to `public_profiles`: it returns `User`, which includes
+ * `email`, and the whole point of 006 is that the view does not carry email.
+ * Returning a `User` with a fabricated email would be far worse than returning
+ * null.
+ *
+ * So this is no longer a way to look up a stranger's profile — see HANDOFF.md,
+ * because `app/(market)/u/[handle]` needs exactly that and the frozen contract
+ * has no read for it.
+ */
 export async function getUser(lookup: UserLookup): Promise<User | null> {
   const supabase = await createServerSupabase();
 
