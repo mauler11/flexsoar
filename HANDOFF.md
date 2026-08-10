@@ -17,11 +17,6 @@ some of these.
   deleted and `tsc --noEmit` passes against the real published types with no
   code changes — the shims were faithful.
 
-  Note that `package.json` on `main` has them but this branch's does not, so
-  this worktree's `node_modules` was synced with `npm i --no-save` rather than
-  by editing `package.json`. Nothing to do: the two converge when track/data
-  merges into `main`.
-
 - **`users.id` = `auth_id`** is now enforced by the `users_id_matches_auth`
   trigger, and `fn_current_user_id()` resolves `auth.uid()` consistently across
   every policy. `lib/db/provision.ts` already did this; the trigger makes a
@@ -45,11 +40,9 @@ some of these.
 
 #### 6. `middleware.ts` is deprecated in Next 16
 
-Next 16 renamed the convention to `proxy.ts`
-(`node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md`).
-`middleware.ts` still works and is the path this track was scoped to own, so
-the rename was left alone — `proxy.ts` is not one of my paths. Run when
-convenient:
+Next 16 renamed the convention to `proxy.ts`. `middleware.ts` still works and
+is the path this track was scoped to own, so the rename was left alone —
+`proxy.ts` is not one of my paths. Run when convenient:
 
 ```bash
 npx @next/codemod@canary middleware-to-proxy .
@@ -62,13 +55,19 @@ npx @next/codemod@canary middleware-to-proxy .
 `middleware.ts` redirects non-admins away from `/admin`, and it fails closed.
 But the Next docs are explicit that proxy/middleware is for optimistic checks,
 not authorisation, and it does not run on Server Action invocations reached
-from an already-loaded page. **Every admin page and action must re-check
+from an already-loaded page. **Every admin page and action should re-check
 `is_admin` server-side**, e.g.:
 
 ```ts
 const user = await getUser({ authId: authUserId });
 if (!user?.is_admin) notFound();
 ```
+
+Since 005 this is defence in depth rather than the only defence: `mintCard` and
+`advanceConsignment` are enforced inside the database against `auth.uid()` (see
+item 11). Do it anyway — it turns a raw `FORBIDDEN` from Postgres into a
+sensible page, and it is the only guard on admin screens that read data or call
+anything else.
 
 ---
 
@@ -154,41 +153,52 @@ recommendation:
 
 ---
 
-#### 11. Three more RPCs are now service-role, and one is effectively internal
+#### 11. Which client each mutation runs on (after 004 and 005)
 
-004_rls_and_grants.sql revoked execute from `anon` and `authenticated` on five
-functions. Four of them are reachable through the contract, so those calls
-moved to the service-role client or they would fail with `permission denied
-for function ...`:
+004 revoked execute on five functions; 005 granted two of them back and put an
+`is_admin` check inside instead. Net result:
 
-| contract function      | client        | note                                   |
+| contract function      | client        | authorisation                          |
 | ---------------------- | ------------- | -------------------------------------- |
-| `mintCard`             | service-role  | **admin only** — gate it yourself       |
-| `advanceConsignment`   | service-role  | **admin only** — gate it yourself       |
-| `purchaseCard`         | service-role  | webhook only, unchanged                |
-| `refreshLevels`        | service-role  | nightly job, unchanged                 |
-| `awardXp`              | service-role  | internal; see below                    |
-| `listCard`             | user session  | unchanged — checks ownership itself   |
-| `cancelListing`        | user session  | unchanged — checks ownership itself   |
-| `redeemCard`           | user session  | unchanged — checks ownership itself   |
+| `mintCard`             | **session**   | `fn_require_admin()` inside the SQL     |
+| `advanceConsignment`   | **session**   | `fn_require_admin()` inside the SQL     |
+| `purchaseCard`         | service-role  | webhook only; no session exists         |
+| `refreshLevels`        | service-role  | nightly job; no session exists          |
+| `awardXp`              | service-role  | internal helper, see below              |
+| `listCard`             | session       | checks ownership itself                 |
+| `cancelListing`        | session       | checks ownership itself                 |
+| `redeemCard`           | session       | checks ownership itself                 |
 
-**For track/admin, the important part:** the revoke closed the PostgREST
-surface, it did **not** add a caller check. Nothing inside `fn_mint_card` or
-`fn_advance_consignment` asks who is calling, and the contract now calls them
-with a key that bypasses RLS entirely. So an admin page that invokes either
-without first checking `users.is_admin` server-side is an unauthenticated mint
-button. The middleware gate is not enough — see item 7.
+**For track/admin, this is now much better news than item 7 suggested.**
+`fn_mint_card` and `fn_advance_consignment` enforce `is_admin` themselves,
+against `auth.uid()`, inside the transaction. A Server Action that reaches them
+without an admin session is refused by the database, not merely by a route
+gate. You should still check `is_admin` in the page for a decent error, but it
+is no longer the only thing standing between a user and a mint button.
 
-`advanceConsignment(id, to, actorId, note)` also only *records* `actorId` onto
-`consignment_events`; it is not verified. Pass the real signed-in user or the
-audit trail lies.
+The refusal surfaces as `ContractError` with code **`FORBIDDEN`** and message
+`admin privileges required`. Branch on the code.
 
-**`awardXp` is now effectively internal.** 004 classifies `fn_award_xp` as a
-helper — mint, purchase and redemption already award their own XP inside the
-same transaction, and an unguarded award is a self-service fee discount
-(XP → rank_score → level → seller_fee_bps). It stays exported because the
+**`advanceConsignment(id, to, actorId, note)` ignores `actorId`.** 005 takes
+the actor from the session — `fn_require_admin()` returns the caller's
+`users.id` and that is what lands on `consignment_events.actor_id`, so a
+mismatched argument can no longer forge history. The parameter survives only
+because this contract is frozen. Keep passing the signed-in user so the call
+site stops lying the day the signature can change; `scripts/seed.ts` verifies
+the behaviour by passing the wrong id on purpose and asserting 0 of 6 events
+recorded it.
+
+**Do not call either one service-role.** Under the service key `auth.uid()` is
+null, no `users` row resolves, and the guard refuses. That is also why
+`purchaseCard` stays service-role and cannot adopt the same pattern: the Stripe
+webhook has no session to check.
+
+**`awardXp` is effectively internal.** 004 classifies `fn_award_xp` as a helper
+— mint, purchase and redemption already award their own XP inside the same
+transaction, and an unguarded award is a self-service fee discount
+(XP -> rank_score -> level -> seller_fee_bps). It stays exported because the
 contract is frozen, but if you are reaching for it, the XP probably belongs
-inside a SQL function instead. Say so here and it can go into 005.
+inside a SQL function. Say so here and it can go into 006.
 
 ---
 
@@ -210,28 +220,37 @@ invariants restated.
   there was nothing to do — and each run therefore adds one card and one
   settled order.
 - **It does not import `lib/api/contract.ts`,** for two reasons that are not
-  preferences: the contract's reads and three of its mutations call `cookies()`
-  from `next/headers`, which only resolves inside a Next request; and most of
-  what seeding needs (users, SKUs, consignments, items, grading,
-  authentication) has no RPC at all in 002_operations.sql. It uses the
-  service-role client directly, calling each RPC with exactly the argument
-  names the contract uses.
+  preferences: the contract's reads and several of its mutations call
+  `cookies()` from `next/headers`, which only resolves inside a Next request;
+  and most of what seeding needs (users, SKUs, consignments, items, grading,
+  authentication) has no RPC at all in 002_operations.sql. It calls each RPC
+  with exactly the argument names the contract uses.
+- **It uses two clients, mirroring the split in item 11.** Service-role for
+  direct table writes, `fn_list_card`, `fn_purchase_card` and the closing
+  reads; an admin session for `fn_mint_card` and `fn_advance_consignment`,
+  which 005 refuses under the service key.
+- **It creates one real auth user**, `seed_admin@flexsoar.test`, because an
+  admin session needs an `auth.users` row to sign in as — the other two seed
+  users are plain `users` rows with fabricated `auth_id`s and never
+  authenticate. Password defaults to a fixed dev credential in the file;
+  override with `SEED_ADMIN_PASSWORD`. To remove it: delete the user in
+  Authentication -> Users, then its `users` row.
 - **Node runs it with `--experimental-strip-types`,** which prints a
   `MODULE_TYPELESS_PACKAGE_JSON` warning on every run. Harmless. It goes away
   with `"type": "module"` in `package.json`, or by renaming the file to
   `scripts/seed.mts` — both are outside my paths, and the file name was
   specified.
 
-**One piece of stray data on the live project, from me.** An early run was
-killed mid-flight (I piped its output to `head`, which closed the pipe). It
-left one orphan: a `completed` consignment whose item is still
-`pending_intake`, ungraded, with no card. Harmless and self-consistent, but it
-is not a shape the pipeline would otherwise produce. Say the word and I will
-delete those two rows — I have not, because deleting from the live project is
-not reversible and you did not ask for it.
+Current state after five completed runs: 5 cards (mints #1–#5), 5 settled
+orders (`seed_pi_001`–`005`), 6 consignments, and the `seed_admin` auth user.
 
-Current state after three completed runs: 3 cards (mints #1–#3), 3 settled
-orders (`seed_pi_001`–`003`), 4 consignments (one of them the orphan above).
+An earlier run was killed mid-flight and left an orphan — a `completed`
+consignment whose item was still `pending_intake`, ungraded, with no card.
+Those two rows have since been deleted from the live project. Not a shape the
+pipeline can otherwise produce; if it reappears, a run was interrupted.
+
+---
+
 ### Design track → data track — fixture palettes need re-keying
 
 `lib/sprites` now ships the 40-wide maps with 9-key palettes

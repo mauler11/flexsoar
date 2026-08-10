@@ -687,19 +687,22 @@ async function listingVisibilityFilter(
  * assigned from the SKU's base oracle price; the float is copied across and is
  * immutable from here.
  *
- * ADMIN ONLY. 004_rls_and_grants.sql revoked execute on fn_mint_card from
- * anon and authenticated, so this runs service-role: a user session gets
- * "permission denied for function fn_mint_card" instead. The revoke closed the
- * PostgREST surface, it did NOT add a caller check — nothing inside the
- * function asks who is minting. Callers must gate on `users.is_admin`
- * themselves, server-side. See HANDOFF.md.
+ * ADMIN ONLY, AND RUNS ON THE SESSION CLIENT.
+ * 005_admin_guards.sql granted execute back to `authenticated` and moved the
+ * check inside the function: fn_require_admin() resolves auth.uid() to a
+ * `users` row and raises unless `is_admin`. That check is the authorisation
+ * boundary now — not the middleware gate, which does not cover Server Actions.
+ *
+ * It must NOT be called service-role. Under the service key auth.uid() is
+ * null, fn_require_admin() finds no row, and the call is refused. The signed-in
+ * caller has to be a real admin.
  *
  * @returns the new card id.
- * @throws MINT_CAP_REACHED, WRONG_STATUS, NOT_GRADED, NOT_AUTHENTICATED,
- *         NO_ORACLE_PRICE.
+ * @throws FORBIDDEN ("admin privileges required"), MINT_CAP_REACHED,
+ *         WRONG_STATUS, NOT_GRADED, NOT_AUTHENTICATED, NO_ORACLE_PRICE.
  */
 export async function mintCard(itemId: UUID, ownerId: UUID): Promise<UUID> {
-  const supabase = createServiceSupabase();
+  const supabase = await createServerSupabase();
   return unwrap(
     await supabase.rpc('fn_mint_card', { p_item_id: itemId, p_owner_id: ownerId }),
     'fn_mint_card',
@@ -812,13 +815,20 @@ export async function redeemCard(
  * The state machine lives in the CASE block of the SQL function. Read it
  * there; do not re-derive the allowed edges from the enum order.
  *
- * ADMIN ONLY, and service-role for the same reason as mintCard():
- * 004_rls_and_grants.sql revoked execute from anon and authenticated. Note
- * that `actorId` is only recorded onto consignment_events — the function does
- * not check it, so passing someone else's id writes a false audit trail.
- * Callers must pass the real signed-in user and gate on `is_admin`.
+ * ADMIN ONLY, and on the session client for the same reason as mintCard():
+ * 005_admin_guards.sql checks is_admin inside the function via auth.uid(), so
+ * a service-role call is refused.
  *
- * @throws ILLEGAL_TRANSITION, NOT_FOUND.
+ * `actorId` IS NOW IGNORED BY THE DATABASE. Before 005 it was written straight
+ * onto consignment_events, which meant passing someone else's id forged the
+ * audit trail. 005 takes the actor from the session instead —
+ * fn_require_admin() returns the caller's `users.id` and that is what gets
+ * recorded. The parameter is kept only because this contract is frozen;
+ * whatever you pass has no effect. Pass the signed-in user anyway, so the call
+ * site stops lying the day the signature can change.
+ *
+ * @throws FORBIDDEN ("admin privileges required"), ILLEGAL_TRANSITION,
+ *         NOT_FOUND.
  */
 export async function advanceConsignment(
   consignmentId: UUID,
@@ -826,7 +836,7 @@ export async function advanceConsignment(
   actorId: UUID,
   note?: string | null,
 ): Promise<void> {
-  const supabase = createServiceSupabase();
+  const supabase = await createServerSupabase();
   unwrap(
     await supabase.rpc('fn_advance_consignment', {
       p_id: consignmentId,

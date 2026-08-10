@@ -39,6 +39,12 @@ export interface PostgresErrorLike {
  * `listing % is %` status pattern, so it has to be tested before it.
  */
 const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
+  // 005_admin_guards.sql, fn_require_admin() — raised by fn_mint_card and
+  // fn_advance_consignment before anything else, so it is checked first here
+  // too. Fires when the caller is not an admin, and also when the call was
+  // made service-role: auth.uid() is null there, so no users row resolves.
+  { pattern: /admin privileges required/i, code: 'FORBIDDEN' },
+
   // fn_purchase_card — 'listing % is in early access until %'
   { pattern: /is in early access until/i, code: 'EARLY_ACCESS_LOCKED' },
 
