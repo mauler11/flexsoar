@@ -9,6 +9,11 @@
 --    and app/(market)/u/[handle] needs it. email, auth_id, kyc_status
 --    and is_admin stay out.
 --
+--    NOTE: `create or replace view` matches columns BY POSITION, so it
+--    cannot insert a column in the middle — it reads that as renaming
+--    the column already in that slot and fails with 42P16. The view is
+--    therefore dropped and recreated, and the grant reapplied after.
+--
 -- 2. 006 shipped no UPDATE policy at all, so nobody could change their
 --    own handle. Adding a plain UPDATE policy would expose every column
 --    including is_admin, which 005's fn_require_admin() trusts. RLS is
@@ -21,7 +26,9 @@
 -- 1. Portfolio value on the public view
 -- ------------------------------------------------------------
 
-create or replace view public_profiles
+drop view if exists public_profiles;
+
+create view public_profiles
 with (security_invoker = false) as
   select id, handle, level, xp_total, portfolio_value_cents, created_at
   from users;
@@ -31,6 +38,8 @@ grant select on public_profiles to anon, authenticated;
 -- ------------------------------------------------------------
 -- 2. Handle-only self-update
 -- ------------------------------------------------------------
+
+drop policy if exists users_self_update on users;
 
 create policy users_self_update on users for update
   using (auth_id = auth.uid())
@@ -44,5 +53,6 @@ grant update (handle) on users to authenticated;
 
 -- Handles appear in provenance chains, so they should not churn freely.
 -- Enforce a shape and let the existing unique index handle collisions.
+alter table users drop constraint if exists users_handle_format;
 alter table users add constraint users_handle_format
   check (handle ~ '^[a-zA-Z0-9._-]{3,24}$');
