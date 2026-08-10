@@ -260,3 +260,40 @@ holds the old 3-key A/B/C format, so `paletteFromJson` resolves only `C` and
 styleguide rarity frames) renders mostly transparent. Re-key the six fixture
 palettes to the 9-key format — the four shipped palettes are the reference, see
 `PALETTES` in `lib/sprites/maps.ts`.
+
+---
+
+#### 13. I edited `lib/mock/fixtures.ts`, which is not one of my paths
+
+Flagging it because AGENT_RULES.md says not to, and you should know it happened
+rather than find it in a merge.
+
+You asked for it directly, `track/design` had already merged into this branch
+(so `lib/sprites/` is present and the concurrent-edit risk the rule guards
+against was largely gone), and no track lists `lib/mock/**` as its own — it is
+a Phase 0 artifact. I treated the instruction as extending my paths the way
+`scripts/**` was extended. If that was not the intent, revert the single commit
+and hand it to `track/design`, who own the sprite format.
+
+**What changed:** all six `skus.palette` values re-keyed from the old 3-key
+`A/B/C` format to the 9-key `D C c B b W I i G` format, using `PALETTES` in
+`lib/sprites/maps.ts` as the reference. The Jordan Chicago fixture is set to
+exactly `PALETTE_CHICAGO`, since it is literally the same colourway — fixture
+and styleguide now render that shoe identically.
+
+Roles were reassigned, not renamed: the old `C` was usually the lightest
+colour, while the new `C` is the upper regardless of lightness (black canvas on
+the Vans, cream leather on the Chicago). A mechanical `A->C, B->B, C->W` rename
+would have looked plausible and been wrong on four of the six.
+
+Verified: both base maps use all nine glyphs, and all six palettes now resolve
+100% of painted cells. Before the change each palette covered 1 of the 9 keys
+in use, so roughly 96% of every fixture sprite was transparent.
+
+**The gap that let this drift:** `tests/invariants.test.ts` pins the fixtures
+hard against the SQL functions but asserts nothing about `palette` or
+`sprite_key`, so the format change landed green. `tests/**` is not my path, but
+it is about eight lines to close — for each SKU, every non-`.` glyph in
+`SPRITE_MAPS[sku.sprite_key]` must have a palette entry, and `sprite_key` must
+name a real map. Worth adding before another track re-keys anything.
+
