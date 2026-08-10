@@ -62,3 +62,5 @@ breaking one, stop and write it to `HANDOFF.md`.
 - Condition floats are `numeric(4,3)` — 3 decimal places, always.
 - Never `select *`. Project the columns you need.
 - Surface server errors verbatim on failure. Never swallow one.
+
+Never edit the .sql files. They are the source of truth. Schema changes are made by the human as a new numbered migration, never by a track agent.
