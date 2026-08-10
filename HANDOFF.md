@@ -7,107 +7,39 @@ another track's files.
 
 ---
 
-#### 1. BLOCKER — install the packages in DEPS.md, then delete the shims
+#### RESOLVED — items 1 to 5 (was: deps, users.id, items RLS, users RLS, fn_award_xp)
 
-`@supabase/ssr`, `@supabase/supabase-js` and `stripe` are not in
-`package.json`, and AGENT_RULES.md forbids a track agent from putting them
-there. Everything this track wrote imports them.
+Left as a record of what changed, since tracks C and D were told to expect
+some of these.
 
-```bash
-npm i @supabase/ssr @supabase/supabase-js stripe
-rm lib/db/vendor-shims.d.ts
-npx tsc --noEmit
-```
+- **Dependencies installed.** `@supabase/ssr` 0.12.4, `@supabase/supabase-js`
+  2.112.2 and `stripe` 22.4.0 are on `main`. `lib/db/vendor-shims.d.ts` is
+  deleted and `tsc --noEmit` passes against the real published types with no
+  code changes — the shims were faithful.
 
-`lib/db/vendor-shims.d.ts` declares those three modules so `tsc --noEmit`
-passes in the meantime. **TypeScript resolves ambient module declarations
-before `node_modules`, so it keeps shadowing the real types until it is
-deleted.** Deleting it is part of the install, not a follow-up.
+  Note that `package.json` on `main` has them but this branch's does not, so
+  this worktree's `node_modules` was synced with `npm i --no-save` rather than
+  by editing `package.json`. Nothing to do: the two converge when track/data
+  merges into `main`.
 
-Until this is done, `npm test` and `tsc --noEmit` pass but `next build` and
-`next dev` fail on unresolved imports. That is the expected state of this
-branch.
+- **`users.id` = `auth_id`** is now enforced by the `users_id_matches_auth`
+  trigger, and `fn_current_user_id()` resolves `auth.uid()` consistently across
+  every policy. `lib/db/provision.ts` already did this; the trigger makes a
+  seed or manual insert that forgets it fail loudly.
 
----
+- **`items_admin_read` / `items_consignor_read` landed**, so the pre-mint
+  pipeline is visible to the admin grading queue and to the consignor. The
+  service-role workaround in `getConsignment()` is deleted — it reads as the
+  user again.
 
-#### 2. BLOCKER — `users.id` must equal the Supabase auth user id
+- **`fn_award_xp` is revoked** from `anon` and `authenticated`, along with
+  `fn_refresh_float_percentiles` and `fn_refresh_levels`. See item 11 for what
+  that means for `awardXp()`.
 
-Every RLS policy in `001_schema.sql` compares a `users.id`-valued column
-against `auth.uid()`:
-
-```sql
-ledger_own_read      account_id = auth.uid()
-orders_own_read      buyer_id = auth.uid() or seller_id = auth.uid()
-listings_visibility  seller_id = auth.uid()
-```
-
-`auth.uid()` returns the **auth** user id. `users.id` defaults to
-`gen_random_uuid()` and `users.auth_id` is a separate column, so taking the
-default would leave every one of those arms permanently false — silently
-killing order visibility and the entire early-access window.
-
-`lib/db/provision.ts` therefore inserts `id = auth_id = <auth user id>` on
-first sign-in. **Any other way of creating a user must do the same**: seed
-scripts, manual inserts, imports. If a row exists with a mismatched id,
-provisioning links `auth_id` and logs a warning but cannot renumber the
-primary key — other tables reference it.
-
-The alternative is a 004 migration rewriting the policies to
-`(select id from users where auth_id = auth.uid())`. Either is fine; pick one
-before seeding real data. I cannot edit the `.sql` files.
-
----
-
-#### 3. `items_public_read` hides the whole pre-mint pipeline
-
-```sql
-create policy items_public_read on items for select
-  using (status in ('minted','redemption_hold','shipped'));
-```
-
-Items at `pending_intake`, `in_custody`, `released` or
-`returned_to_consignor` are invisible to **everyone**, admins included. That
-is exactly the set track/admin's grading and mint queues need, and
-`getConsignment()` is the only contract read that exposes items at all.
-
-Worked around inside my own lane: `getConsignment()` reads its items through
-the service role **only** when the signed-in user is `is_admin` or is the
-consignment's own consignor, and through the normal session client otherwise.
-This does not widen who may see them — it restores who the missing policy was
-meant to admit.
-
-The real fix is a 004 migration adding something like:
-
-```sql
-create policy items_staff_read on items for select using (
-  exists (select 1 from users u where u.auth_id = auth.uid() and u.is_admin)
-  or consignor_id = auth.uid()
-);
-```
-
-When that lands, delete the `privileged` branch in `getConsignment()`.
-
----
-
-#### 4. `users` has no RLS at all
-
-`alter table users enable row level security` is absent from `001_schema.sql`,
-so any client holding the anon key can read every row — including `email`.
-Middleware and the contract rely on reading `users` (for `is_admin` and
-`level`), so this is currently load-bearing; adding RLS needs a matching
-self-read policy in the same migration or the `/admin` gate fails closed for
-everyone.
-
----
-
-#### 5. `fn_award_xp` is SECURITY DEFINER with no caller check
-
-It is reachable over PostgREST as `rpc/fn_award_xp` by any authenticated user,
-with arbitrary `p_user` and `p_delta`. XP feeds `rank_score`, which feeds
-level, which feeds `seller_fee_bps` — so this is a self-service fee discount.
-`awardXp()` in the contract is implemented as specified; the gap is in the SQL
-and needs a 004 migration (an `is_admin` check, or `revoke execute ... from
-authenticated`).
+- **`users` still has no RLS.** 004 did not enable it, and it remains readable
+  by anyone holding the anon key, `email` included. Still worth a migration —
+  it needs a self-read policy in the same change or the `/admin` gate fails
+  closed for everyone.
 
 ---
 
@@ -220,7 +152,83 @@ recommendation:
   Single-card values come from the RPC and are exact. If either SQL function
   changes, change that file with it.
 
-- **A seed script that mints → lists → purchases end to end was not written.**
-  Nothing in my paths is a natural home for one (`scripts/**` is not mine), and
-  it cannot run before the packages in DEPS.md are installed. Point me at a
-  path and I will add it.
+---
+
+#### 11. Three more RPCs are now service-role, and one is effectively internal
+
+004_rls_and_grants.sql revoked execute from `anon` and `authenticated` on five
+functions. Four of them are reachable through the contract, so those calls
+moved to the service-role client or they would fail with `permission denied
+for function ...`:
+
+| contract function      | client        | note                                   |
+| ---------------------- | ------------- | -------------------------------------- |
+| `mintCard`             | service-role  | **admin only** — gate it yourself       |
+| `advanceConsignment`   | service-role  | **admin only** — gate it yourself       |
+| `purchaseCard`         | service-role  | webhook only, unchanged                |
+| `refreshLevels`        | service-role  | nightly job, unchanged                 |
+| `awardXp`              | service-role  | internal; see below                    |
+| `listCard`             | user session  | unchanged — checks ownership itself   |
+| `cancelListing`        | user session  | unchanged — checks ownership itself   |
+| `redeemCard`           | user session  | unchanged — checks ownership itself   |
+
+**For track/admin, the important part:** the revoke closed the PostgREST
+surface, it did **not** add a caller check. Nothing inside `fn_mint_card` or
+`fn_advance_consignment` asks who is calling, and the contract now calls them
+with a key that bypasses RLS entirely. So an admin page that invokes either
+without first checking `users.is_admin` server-side is an unauthenticated mint
+button. The middleware gate is not enough — see item 7.
+
+`advanceConsignment(id, to, actorId, note)` also only *records* `actorId` onto
+`consignment_events`; it is not verified. Pass the real signed-in user or the
+audit trail lies.
+
+**`awardXp` is now effectively internal.** 004 classifies `fn_award_xp` as a
+helper — mint, purchase and redemption already award their own XP inside the
+same transaction, and an unguarded award is a self-service fee discount
+(XP → rank_score → level → seller_fee_bps). It stays exported because the
+contract is frozen, but if you are reaching for it, the XP probably belongs
+inside a SQL function instead. Say so here and it can go into 005.
+
+---
+
+#### 12. `scripts/seed.ts` — what it does and how to run it
+
+```bash
+node --env-file=.env.local --experimental-strip-types scripts/seed.ts
+```
+
+Walks one shoe end to end against the live project: consignment `draft ->
+completed`, item graded and authenticated, minted, listed, purchased with a
+fabricated `settlement_ref` (`seed_pi_001`, `seed_pi_002`, …), then prints the
+ledger and the provenance chain with the net-to-zero and single-open-hop
+invariants restated.
+
+- **Re-runnable.** The two users (`seed_consignor`, `seed_buyer`) and the SKU
+  have fixed identities and are reused. Everything downstream is created fresh
+  per run, so each run exercises the whole path rather than reporting that
+  there was nothing to do — and each run therefore adds one card and one
+  settled order.
+- **It does not import `lib/api/contract.ts`,** for two reasons that are not
+  preferences: the contract's reads and three of its mutations call `cookies()`
+  from `next/headers`, which only resolves inside a Next request; and most of
+  what seeding needs (users, SKUs, consignments, items, grading,
+  authentication) has no RPC at all in 002_operations.sql. It uses the
+  service-role client directly, calling each RPC with exactly the argument
+  names the contract uses.
+- **Node runs it with `--experimental-strip-types`,** which prints a
+  `MODULE_TYPELESS_PACKAGE_JSON` warning on every run. Harmless. It goes away
+  with `"type": "module"` in `package.json`, or by renaming the file to
+  `scripts/seed.mts` — both are outside my paths, and the file name was
+  specified.
+
+**One piece of stray data on the live project, from me.** An early run was
+killed mid-flight (I piped its output to `head`, which closed the pipe). It
+left one orphan: a `completed` consignment whose item is still
+`pending_intake`, ungraded, with no card. Harmless and self-consistent, but it
+is not a shape the pipeline would otherwise produce. Say the word and I will
+delete those two rows — I have not, because deleting from the live project is
+not reversible and you did not ask for it.
+
+Current state after three completed runs: 3 cards (mints #1–#3), 3 settled
+orders (`seed_pi_001`–`003`), 4 consignments (one of them the orphan above).

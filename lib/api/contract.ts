@@ -652,26 +652,6 @@ async function floatCurvesFor(
   return rows ?? [];
 }
 
-/**
- * The signed-in user, resolved from the session cookie to the `users` row.
- * Null when nobody is signed in — reads stay anonymous rather than throwing.
- */
-async function currentUser(
-  supabase: Supabase,
-): Promise<{ id: UUID; is_admin: boolean } | null> {
-  const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user) return null;
-
-  const result = await supabase
-    .from('users')
-    .select('id, is_admin')
-    .eq('auth_id', data.user.id)
-    .maybeSingle();
-
-  if (result.error && !isNoRows(result.error)) fail(result.error, 'users');
-  return (result.data as { id: UUID; is_admin: boolean } | null) ?? null;
-}
-
 /** The `.or()` arms that reproduce the `listings_visibility` RLS policy. */
 async function listingVisibilityFilter(
   supabase: Supabase,
@@ -707,12 +687,19 @@ async function listingVisibilityFilter(
  * assigned from the SKU's base oracle price; the float is copied across and is
  * immutable from here.
  *
+ * ADMIN ONLY. 004_rls_and_grants.sql revoked execute on fn_mint_card from
+ * anon and authenticated, so this runs service-role: a user session gets
+ * "permission denied for function fn_mint_card" instead. The revoke closed the
+ * PostgREST surface, it did NOT add a caller check — nothing inside the
+ * function asks who is minting. Callers must gate on `users.is_admin`
+ * themselves, server-side. See HANDOFF.md.
+ *
  * @returns the new card id.
  * @throws MINT_CAP_REACHED, WRONG_STATUS, NOT_GRADED, NOT_AUTHENTICATED,
  *         NO_ORACLE_PRICE.
  */
 export async function mintCard(itemId: UUID, ownerId: UUID): Promise<UUID> {
-  const supabase = await createServerSupabase();
+  const supabase = createServiceSupabase();
   return unwrap(
     await supabase.rpc('fn_mint_card', { p_item_id: itemId, p_owner_id: ownerId }),
     'fn_mint_card',
@@ -825,6 +812,12 @@ export async function redeemCard(
  * The state machine lives in the CASE block of the SQL function. Read it
  * there; do not re-derive the allowed edges from the enum order.
  *
+ * ADMIN ONLY, and service-role for the same reason as mintCard():
+ * 004_rls_and_grants.sql revoked execute from anon and authenticated. Note
+ * that `actorId` is only recorded onto consignment_events — the function does
+ * not check it, so passing someone else's id writes a false audit trail.
+ * Callers must pass the real signed-in user and gate on `is_admin`.
+ *
  * @throws ILLEGAL_TRANSITION, NOT_FOUND.
  */
 export async function advanceConsignment(
@@ -833,7 +826,7 @@ export async function advanceConsignment(
   actorId: UUID,
   note?: string | null,
 ): Promise<void> {
-  const supabase = await createServerSupabase();
+  const supabase = createServiceSupabase();
   unwrap(
     await supabase.rpc('fn_advance_consignment', {
       p_id: consignmentId,
@@ -849,6 +842,17 @@ export async function advanceConsignment(
  * fn_award_xp(p_user, p_type, p_delta, p_ref) -> void
  *
  * Append-only. XP is non-transferable and never redeemable.
+ *
+ * SERVICE-ROLE, AND ALMOST CERTAINLY NOT YOURS TO CALL.
+ * 004_rls_and_grants.sql revoked execute from anon and authenticated,
+ * classifying this as an internal helper: the mint, purchase and redemption
+ * functions already award their own XP from inside the same transaction.
+ * The revoke exists because XP feeds rank_score -> level -> seller_fee_bps,
+ * so an unguarded award is a self-service fee discount.
+ *
+ * It stays exported because the contract is frozen. If you find yourself
+ * reaching for it, the XP almost certainly belongs inside a SQL function
+ * instead — write it to HANDOFF.md.
  */
 export async function awardXp(
   userId: UUID,
@@ -856,7 +860,7 @@ export async function awardXp(
   xpDelta: number,
   refId?: UUID | null,
 ): Promise<void> {
-  const supabase = await createServerSupabase();
+  const supabase = createServiceSupabase();
   unwrap(
     await supabase.rpc('fn_award_xp', {
       p_user: userId,
@@ -1165,19 +1169,12 @@ export async function getConsignment(
 
   const summary = toConsignmentSummary(row);
 
-  // items_public_read only exposes minted/redemption_hold/shipped items, so a
-  // consignment in intake looks empty through the session client — including
-  // to the admin whose grading queue it is. Admins and the consignor read the
-  // items through the service role instead. This does not widen who may see
-  // them; it restores who the missing policy was meant to let in. See
-  // HANDOFF.md — the real fix is a policy in a 004 migration.
-  const viewer = await currentUser(supabase);
-  const privileged =
-    viewer !== null && (viewer.is_admin || viewer.id === summary.consignor_id);
-  const itemsClient = privileged ? createServiceSupabase() : supabase;
-
+  // Reads as the user. 004_rls_and_grants.sql added items_admin_read and
+  // items_consignor_read alongside items_public_read, so the pre-mint pipeline
+  // is now visible to the admin grading queue and to the consignor through
+  // their own session. The service-role workaround this used to need is gone.
   const [itemRows, eventRows] = await Promise.all([
-    itemsClient
+    supabase
       .from('items')
       .select(`${ITEM_SUMMARY_COLUMNS}, sku:skus(${SKU_REF_COLUMNS})`)
       .eq('consignment_id', consignmentId)

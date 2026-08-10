@@ -1,40 +1,33 @@
 ## Requested dependencies
 
-Requested by track/data. Nothing here is installed — `package.json` is
-untouched, per AGENT_RULES.md. Install with:
+Requested by track/data, and **now installed on `main`** — see the next
+section. `package.json` was never edited from this branch, per AGENT_RULES.md.
 
-```bash
-npm i @supabase/ssr @supabase/supabase-js stripe
-```
-
-- @supabase/ssr@^0.7.0 — SSR-safe Supabase clients with cookie-based
+- @supabase/ssr@^0.12.4 — SSR-safe Supabase clients with cookie-based
   sessions. `createServerClient` in `lib/supabase/server.ts` and
   `middleware.ts`, `createBrowserClient` in `lib/supabase/client.ts`.
-- @supabase/supabase-js@^2.58.0 — the underlying client `@supabase/ssr`
-  returns. Peer of the above; listed explicitly because `lib/db/errors.ts`
-  and `lib/api/contract.ts` are written against its `PostgrestError` and
-  query-builder shapes.
-- stripe@^18.0.0 — `app/api/webhooks/stripe/route.ts` only, for
+- @supabase/supabase-js@^2.112.2 — the underlying client `@supabase/ssr`
+  returns. Peer of the above; listed explicitly because `lib/db/errors.ts`,
+  `lib/api/contract.ts` and `scripts/seed.ts` are written against its
+  `PostgrestError` and query-builder shapes.
+- stripe@^22.4.0 — `app/api/webhooks/stripe/route.ts` only, for
   `webhooks.constructEventAsync()` signature verification. The webhook is
   the sole caller of `purchaseCard()`; no client code imports this.
 
-Version ranges are the ones the code was written against — pin whatever
-`npm i` resolves and re-run `npx tsc --noEmit`.
+### Installed — nothing outstanding
 
-### After installing, delete the type shims
+All three are on `main` (`@supabase/ssr` 0.12.4, `@supabase/supabase-js`
+2.112.2, `stripe` 22.4.0) and `lib/db/vendor-shims.d.ts` has been deleted.
+`tsc --noEmit` passes against the real published types with no code changes.
 
-`lib/db/vendor-shims.d.ts` declares the three modules above so `tsc
---noEmit` passes before they exist. **TypeScript resolves ambient module
-declarations before `node_modules`, so that file will keep shadowing the
-real types after installation.** Delete it as part of the install:
+`package.json` on this branch does not list them — a track agent may not edit
+it — so this worktree's `node_modules` was synced with `npm i --no-save`. The
+two converge when track/data merges into `main`. If you need to re-sync a fresh
+worktree of this branch before that merge:
 
 ```bash
-rm lib/db/vendor-shims.d.ts && npx tsc --noEmit
+npm i --no-save @supabase/ssr@^0.12.4 @supabase/supabase-js@^2.112.2 stripe@^22.4.0
 ```
-
-Everything in `lib/supabase/**`, `lib/db/**`, and `lib/api/contract.ts` is
-written against the real published APIs, so deleting the shims should not
-require code changes.
 
 ### Environment variables the code reads
 
