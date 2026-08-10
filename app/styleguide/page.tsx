@@ -22,9 +22,11 @@ import {
   DEFAULT_PALETTE,
   HIGH_TOP,
   LOW_TOP,
+  PALETTES,
   paletteFromJson,
   spriteMapForKey,
 } from "@/lib/sprites";
+import type { SpriteMap } from "@/lib/sprites";
 import { CardFrame } from "@/components/card/CardFrame";
 import { CardDetail } from "@/components/card/CardDetail";
 import { CardTile } from "@/components/card/CardTile";
@@ -87,6 +89,12 @@ const EMPTY_ICON = (
     ))}
   </div>
 );
+
+/** The Sprites section: both silhouettes, one block per shipped palette. */
+const SPRITE_ROWS: { label: string; map: SpriteMap }[] = [
+  { label: "High-top", map: HIGH_TOP },
+  { label: "Low-top", map: LOW_TOP },
+];
 
 function Section({
   title,
@@ -218,49 +226,30 @@ export default function StyleguidePage() {
         {/* ------------------------------------------------------------ */}
         <Section
           title="Sprites"
-          subtitle="Two base silhouettes, six fixture colourways. One silhouette, many palettes — swap skus.palette, keep the map."
+          subtitle="Both silhouettes across all four shipped palettes. One map, many colourways — swap skus.palette, keep the silhouette. px=2 is the thumbnail size, px=7 the hero."
         >
-          <div className="grid gap-6 sm:grid-cols-2">
-            <div>
-              <div className="mb-2 font-mono text-[10px] uppercase tracking-tight text-muted">
-                Low-top · Vans Old Skool palette
+          <div className="flex flex-col gap-8">
+            {SPRITE_ROWS.map(({ label, map }) => (
+              <div key={label}>
+                <div className="mb-2 font-mono text-[10px] uppercase tracking-tight text-muted">
+                  {label}
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  {Object.entries(PALETTES).map(([name, palette]) => (
+                    <div key={name} className="border border-line bg-raised p-4">
+                      <div className="mb-3 font-mono text-[9px] uppercase tracking-tight text-muted">
+                        {name.replace("_", " ")}
+                      </div>
+                      <div className="flex flex-wrap items-end gap-6">
+                        {[2, 4, 7].map((px) => (
+                          <Sprite key={px} map={map} palette={palette} px={px} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-wrap items-end gap-6 border border-line bg-raised p-4">
-                <Sprite map={LOW_TOP} palette={paletteFromJson(skuById(cards[0].sku_id)!.palette) ?? DEFAULT_PALETTE} px={4} />
-                <Sprite map={LOW_TOP} palette={paletteFromJson(skuById(cards[0].sku_id)!.palette) ?? DEFAULT_PALETTE} px={6} />
-                <Sprite map={LOW_TOP} palette={paletteFromJson(skuById(cards[0].sku_id)!.palette) ?? DEFAULT_PALETTE} px={8} />
-              </div>
-            </div>
-            <div>
-              <div className="mb-2 font-mono text-[10px] uppercase tracking-tight text-muted">
-                High-top · Jordan Chicago palette
-              </div>
-              <div className="flex flex-wrap items-end gap-6 border border-line bg-raised p-4">
-                <Sprite map={HIGH_TOP} palette={paletteFromJson(skuById(cards[7].sku_id)!.palette) ?? DEFAULT_PALETTE} px={4} />
-                <Sprite map={HIGH_TOP} palette={paletteFromJson(skuById(cards[7].sku_id)!.palette) ?? DEFAULT_PALETTE} px={6} />
-                <Sprite map={HIGH_TOP} palette={paletteFromJson(skuById(cards[7].sku_id)!.palette) ?? DEFAULT_PALETTE} px={8} />
-              </div>
-            </div>
-          </div>
-          <div className="mt-4 border border-line bg-raised p-4">
-            <div className="mb-3 font-mono text-[10px] uppercase tracking-tight text-muted">
-              Colourways across the catalog
-            </div>
-            <div className="flex flex-wrap gap-8">
-              {cards.map((card) => {
-                const sku = skuById(card.sku_id)!;
-                const palette = paletteFromJson(sku.palette) ?? DEFAULT_PALETTE;
-                const map = spriteMapForKey(sku.sprite_key);
-                return (
-                  <div key={card.id} className="flex flex-col items-center gap-1.5">
-                    <Sprite map={map} palette={palette} px={5} />
-                    <span className="font-mono text-[8px] uppercase tracking-tight text-muted">
-                      {sku.brand} {sku.model}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+            ))}
           </div>
         </Section>
 
