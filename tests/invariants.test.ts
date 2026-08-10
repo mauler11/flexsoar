@@ -9,8 +9,9 @@
  * Each assertion names the SQL function it mirrors. When a .sql file changes,
  * the failure here should point straight at what to update.
  *
- * Imports are relative, not `@/`: vitest does not read tsconfig `paths`, and
- * adding a vite config was outside the scope this was authorised under.
+ * Imports are relative, not `@/`. A `vitest.config.ts` now supplies that alias,
+ * so either form resolves; the relative one is kept for consistency across the
+ * file rather than because it is still required.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -26,6 +27,12 @@ import {
   users,
 } from '../lib/mock/fixtures';
 import { TIER_BANDS, tierForPrice } from '../lib/domain/rarity';
+import {
+  TRANSPARENT,
+  paletteFromJson,
+  spriteMapForKey,
+  type SpriteMap,
+} from '../lib/sprites';
 import type { Card, Sku, User } from '../lib/db/types';
 
 // ------------------------------------------------------------
@@ -432,4 +439,62 @@ describe('fixture shape', () => {
       );
     }
   });
+});
+
+// ------------------------------------------------------------
+// SPRITES
+// ------------------------------------------------------------
+//
+// Source of truth here is lib/sprites/maps.ts, not the .sql files: `sprite_key`
+// and `palette` are opaque to Postgres, so nothing upstream can catch a fixture
+// that has drifted from the sprite format.
+//
+// These go through spriteMapForKey and paletteFromJson rather than reading
+// `sku.palette` directly, because those are the functions the UI uses and they
+// are stricter than a key check. paletteFromJson drops any value that is not a
+// '#'-prefixed string, so a palette of `{ C: 'red' }` resolves to nothing —
+// a raw `'C' in palette` test would pass it and the sprite would still render
+// transparent.
+
+/**
+ * Every glyph a map actually draws. renderSprite decides transparency purely by
+ * palette lookup, so '.' is only transparent because no palette defines it;
+ * whitespace is excluded for the same documented reason (lib/sprites/types.ts).
+ */
+const glyphsDrawnBy = (map: SpriteMap): string[] =>
+  [...new Set(map.join(''))]
+    .filter((glyph) => glyph !== TRANSPARENT && glyph.trim() !== '')
+    .sort();
+
+describe('skus.sprite_key / skus.palette', () => {
+  it.each(skus.map((s) => [`${s.brand} ${s.model}`, s] as const))(
+    '%s names a base map that exists in SPRITE_MAPS',
+    (label, sku) => {
+      expect(
+        spriteMapForKey(sku.sprite_key),
+        `${label}: sprite_key ${JSON.stringify(sku.sprite_key)} is not a base map`,
+      ).not.toBeNull();
+    },
+  );
+
+  it.each(skus.map((s) => [`${s.brand} ${s.model}`, s] as const))(
+    '%s resolves every glyph its base map draws',
+    (label, sku) => {
+      const map = spriteMapForKey(sku.sprite_key);
+      expect(map, `${label}: no base map to check against`).not.toBeNull();
+
+      const palette = paletteFromJson(sku.palette);
+      expect(palette, `${label}: palette is unusable or empty`).not.toBeNull();
+
+      // A glyph the palette misses is not a slightly wrong colour — that whole
+      // region of the shoe disappears.
+      const unresolved = glyphsDrawnBy(map!).filter(
+        (glyph) => palette![glyph] === undefined,
+      );
+      expect(
+        unresolved,
+        `${label}: these glyphs would render transparent`,
+      ).toEqual([]);
+    },
+  );
 });

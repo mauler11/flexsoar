@@ -290,10 +290,20 @@ Verified: both base maps use all nine glyphs, and all six palettes now resolve
 100% of painted cells. Before the change each palette covered 1 of the 9 keys
 in use, so roughly 96% of every fixture sprite was transparent.
 
-**The gap that let this drift:** `tests/invariants.test.ts` pins the fixtures
-hard against the SQL functions but asserts nothing about `palette` or
-`sprite_key`, so the format change landed green. `tests/**` is not my path, but
-it is about eight lines to close — for each SKU, every non-`.` glyph in
-`SPRITE_MAPS[sku.sprite_key]` must have a palette entry, and `sprite_key` must
-name a real map. Worth adding before another track re-keys anything.
+**The gap that let this drift is now closed.** `tests/invariants.test.ts` had
+no assertion about `palette` or `sprite_key`, so the format change landed
+green. On a further extension of my lane to `tests/**`, it now has a `SPRITES`
+section: per SKU, `sprite_key` must name a real map, and every glyph that map
+draws must resolve in the palette. 65 tests -> 77.
+
+Those assertions go through `spriteMapForKey()` and `paletteFromJson()` rather
+than reading `sku.palette` directly, because those are the functions the UI
+uses and they are stricter than a key check — `paletteFromJson` drops any value
+that is not a `#`-prefixed string, so `{ D: 'red' }` resolves to nothing. A
+raw `'D' in palette` test would pass it and the sprite would still be missing
+its outline.
+
+Verified by breaking the fixtures three ways and confirming each is caught:
+the old `A/B/C` palette (7 glyphs unresolved), an unknown `sprite_key`, and a
+non-hex palette value. All three restored afterwards.
 
