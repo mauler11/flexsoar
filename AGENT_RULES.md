@@ -57,6 +57,8 @@ breaking one, stop and write it to `HANDOFF.md`.
 - Server Components by default; `"use client"` only where interaction
   requires it.
 - Money is always integer cents. Never floats for currency.
+- All `*_cents` columns are USD cents. 1 FSC = 1 USD. Ringgit is
+  display only.
 - Condition floats are `numeric(4,3)` — 3 decimal places, always.
 - Never `select *`. Project the columns you need.
 - Surface server errors verbatim on failure. Never swallow one.

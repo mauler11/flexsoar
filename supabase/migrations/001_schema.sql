@@ -95,6 +95,7 @@ create table sku_float_curve (
 
 -- Rarity ladder. Tier comes from the SKU's BASE market price,
 -- never from float. Float is condition; tier is value.
+-- Bounds are USD cents, like every other *_cents column.
 create table tier_bands (
   tier          smallint primary key check (tier between 1 and 5),
   name          text not null,
@@ -104,11 +105,11 @@ create table tier_bands (
 );
 
 insert into tier_bands values
-  (1,'Common',     '#7A7A7A',      0,   28000),
-  (2,'Uncommon',   '#35F07A',  28000,   45000),
-  (3,'Rare',       '#3B9EFF',  45000,   85000),
-  (4,'Epic',       '#A855F7',  85000,  160000),
-  (5,'Legendary',  '#E8B33A', 160000,    null);
+  (1,'Common',     '#7A7A7A',     0,   6000),
+  (2,'Uncommon',   '#35F07A',  6000,  12000),
+  (3,'Rare',       '#3B9EFF', 12000,  25000),
+  (4,'Epic',       '#A855F7', 25000,  50000),
+  (5,'Legendary',  '#E8B33A', 50000,   null);
 
 -- ------------------------------------------------------------
 -- CONSIGNMENT
