@@ -3,20 +3,25 @@
 /**
  * app/(auth)/actions.ts
  *
- * Server Actions behind the auth forms. Magic link only — there is no
- * password anywhere in this app, so there is no password to leak.
+ * Server Actions behind the auth forms. Magic link is the product flow — there
+ * is deliberately no password anywhere in the shipped app, so there is nothing
+ * to leak. Email+password sign-in exists as a DEVELOPMENT-ONLY affordance,
+ * compiled out unless NEXT_PUBLIC_ENABLE_PASSWORD_AUTH=true is set at build
+ * time (see signInWithPassword below).
  *
- * Both sign-in and sign-up call the same Supabase endpoint. The only
- * difference is `shouldCreateUser`: sign-up may mint a new auth identity,
+ * Both sign-in and sign-up call the same Supabase magic-link endpoint. The
+ * only difference is `shouldCreateUser`: sign-up may mint a new auth identity,
  * sign-in may not. The `users` row itself is created later, in
  * app/(auth)/callback, once the link is actually clicked — an unclicked link
- * must not leave a half-real account behind.
+ * must not leave a half-real account behind. signInWithPassword provisions the
+ * same row itself, because there is no callback hop for a password session.
  */
 
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 import { safeNextPath } from '@/app/(auth)/paths';
+import { ensureUserRow } from '@/lib/db/provision';
 import { createServerSupabase } from '@/lib/supabase/server';
 
 type AuthMode = 'sign-in' | 'sign-up';
@@ -85,6 +90,70 @@ export async function requestMagicLink(formData: FormData): Promise<void> {
   }
 
   redirect(backTo(mode, { sent: email, next }));
+}
+
+/**
+ * Whether password sign-in is compiled in. NEXT_PUBLIC_ vars are inlined at
+ * BUILD time, which is exactly the gate we want: a deployment built without
+ * NEXT_PUBLIC_ENABLE_PASSWORD_AUTH=true cannot have a password path no matter
+ * what the runtime environment says. Keep it off for anything the outside
+ * world can reach — there is no password reset and no rate limiting beyond
+ * what Supabase's own auth surface applies.
+ */
+const passwordAuthEnabled = (): boolean =>
+  process.env.NEXT_PUBLIC_ENABLE_PASSWORD_AUTH === 'true';
+
+/**
+ * DEVELOPMENT-ONLY email+password sign-in, shown on /sign-in only when
+ * passwordAuthEnabled(). Same session handling as the magic link: the session
+ * cookies are written by the server client, and the `users` row is provisioned
+ * with ensureUserRow() on the session that was just established — so 006's
+ * users_self_insert policy vets it, exactly as it does in the callback.
+ *
+ * The gate is checked here as well as in the page, because a Server Action can
+ * be POSTed to without ever rendering the form.
+ */
+export async function signInWithPassword(formData: FormData): Promise<void> {
+  const email = String(formData.get('email') ?? '').trim();
+  const password = String(formData.get('password') ?? '');
+  const next = safeNextPath(String(formData.get('next') ?? ''));
+
+  if (!passwordAuthEnabled()) {
+    redirect(backTo('sign-in', { error: 'Password sign-in is disabled.', next }));
+  }
+
+  if (!email || !password) {
+    redirect(backTo('sign-in', { error: 'Enter your email and password.', next }));
+  }
+
+  const supabase = await createServerSupabase();
+  const { error, data } = await supabase.auth.signInWithPassword({ email, password });
+
+  // Verbatim, per AGENT_RULES.md.
+  if (error) {
+    redirect(backTo('sign-in', { error: error.message, next }));
+  }
+
+  const user = data?.user;
+  if (!user) {
+    redirect(backTo('sign-in', { error: 'Password sign-in returned no user.', next }));
+  }
+
+  // First password sign-in creates the users row, exactly as the magic-link
+  // callback does; later sign-ins no-op. If provisioning fails, drop the
+  // session again rather than landing someone in a half-signed-in app.
+  try {
+    await ensureUserRow(
+      { id: user.id, email: user.email, user_metadata: user.user_metadata },
+      supabase,
+    );
+  } catch (thrown) {
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    await supabase.auth.signOut();
+    redirect(backTo('sign-in', { error: message, next }));
+  }
+
+  redirect(next);
 }
 
 /**

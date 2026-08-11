@@ -166,6 +166,28 @@ export interface UserSummary {
   created_at: Timestamptz;
 }
 
+/**
+ * One profile for app/(market)/u/[handle]. Reads the `public_profiles` view —
+ * NEVER the `users` table — and joins `levels` for the rank name.
+ * 006_users_rls.sql locked `users` down to self-read (or admin) and
+ * 007_profile_updates.sql widened the view to carry portfolio_value_cents;
+ * both make the "read the view, not the table" distinction load-bearing.
+ *
+ * Deliberately carries no email, auth_id, kyc_status, is_admin or is_consignor
+ * — the view is the line 006 draws, and this is a read anyone, anonymous
+ * visitor included, may make.
+ */
+export interface PublicProfile {
+  id: UUID;
+  handle: string;
+  level: number;
+  /** levels.name for the profile's level — "Runner" .. "Mob Boss". */
+  rank_name: string;
+  xp_total: number;
+  portfolio_value_cents: Cents;
+  created_at: Timestamptz;
+}
+
 /** The catalog columns a card needs to render. */
 export interface SkuRef {
   id: UUID;
@@ -503,7 +525,14 @@ export interface SkusQuery {
  *
  * NEVER add `email` here. The view does not expose it, and that is the point.
  */
-const PUBLIC_PROFILE_COLUMNS = 'id, handle, level, xp_total, created_at';
+/**
+ * 007_profile_updates.sql widened the view to carry portfolio_value_cents.
+ * Everything else the embeds consume — id, handle, level, xp_total, created_at
+ * — has been there since 006. See the toUserSummary() note for which
+ * UserSummary fields still cannot come from here.
+ */
+const PUBLIC_PROFILE_COLUMNS =
+  'id, handle, level, xp_total, portfolio_value_cents, created_at';
 
 const USER_COLUMNS =
   'id, auth_id, handle, email, country_code, kyc_status, is_consignor, is_admin, ' +
@@ -647,6 +676,7 @@ interface PublicProfileRow {
   handle: string;
   level: number;
   xp_total: number;
+  portfolio_value_cents: Cents;
   created_at: Timestamptz;
 }
 
@@ -742,22 +772,22 @@ interface ProvenanceRow {
 /**
  * A `public_profiles` row widened to the frozen `UserSummary` shape.
  *
- * ---- READ THIS BEFORE USING is_admin / is_consignor / portfolio_value_cents
- * ON AN EMBEDDED USER ----
+ * ---- READ THIS BEFORE TRUSTING is_admin / is_consignor ON AN EMBEDDED USER ----
  *
- * `UserSummary` declares eight fields. The view exposes five. The three below
- * are therefore NOT the values in the database — they are fixed placeholders,
- * because the contract is frozen and the type cannot be narrowed to say so.
+ * `UserSummary` declares eight fields and the view exposes six. Two of them are
+ * therefore NOT the values in the database — they are fixed placeholders,
+ * because the view deliberately does not carry them and the contract is frozen
+ * so the type cannot be narrowed to say so.
  *
- *   portfolio_value_cents  always 0
+ *   portfolio_value_cents  real since 007 widened the view (item 14 of the
+ *                          handoff said this was defensible; 007 did it)
  *   is_admin               always false
  *   is_consignor           always false
  *
- * They are safe to render only where a wrong answer is invisible. Do not
- * branch on them, do not show a portfolio total from an embedded user, and do
- * not use `is_admin` here for anything resembling a permission check — an
- * actual admin reads as false. `getUser()` still returns the real row, for
- * yourself or if you are an admin.
+ * The first is now safe to render from an embedded user. The other two are not:
+ * do not branch on them, and never use `is_admin` here for anything resembling
+ * a permission check — an actual admin reads as false. `getUser()` still
+ * returns the real row, for yourself or if you are an admin.
  *
  * Centralised in one function on purpose: the substitution is a real
  * compromise and should be visible in one place rather than smeared across six
@@ -770,7 +800,7 @@ function toUserSummary(row: PublicProfileRow): UserSummary {
     level: row.level,
     xp_total: row.xp_total,
     created_at: row.created_at,
-    portfolio_value_cents: 0,
+    portfolio_value_cents: row.portfolio_value_cents,
     is_admin: false,
     is_consignor: false,
   };
@@ -1048,6 +1078,22 @@ export async function purchaseCard(
     'fn_purchase_card',
   ) as UUID;
 }
+
+/**
+ * The redemption handling fee charged by fn_redeem_card, in USD cents.
+ *
+ * fn_redeem_card takes the fee as an argument (p_fee_cents) and the schema
+ * records it on the redemption and in the ledger, but nothing in the schema
+ * tells a UI what the fee IS. This is the single server-side source of truth —
+ * pass it to redeemCard(), and never take the fee from client input.
+ *
+ * BELONGS IN CONFIGURATION, NOT CODE. The right long-term home for this is a
+ * platform_config row read by fn_redeem_card (or a levels.perks value), so the
+ * platform can adjust the fee without shipping a code change and without
+ * trusting every client to send the right number. That needs a migration,
+ * which is the human's job — filed in docs/handoff/data.md.
+ */
+export const REDEMPTION_HANDLING_FEE_CENTS: Cents = 1500;
 
 /**
  * fn_redeem_card(p_card_id, p_user_id, p_address, p_fee_cents) -> uuid
@@ -1991,6 +2037,47 @@ export async function getUser(lookup: UserLookup): Promise<User | null> {
   if (result.error && !isNoRows(result.error)) fail(result.error, 'users');
 
   return (result.data as User | null) ?? null;
+}
+
+/**
+ * A public profile by handle, from the `public_profiles` view joined to the
+ * level's rank name. Returns null when there is no such user.
+ *
+ * READS NEVER THE `users` TABLE. Since 006 put RLS on `users`, a session can
+ * read its own row and an admin any row, and any other lookup silently comes
+ * back empty. The view is the public read path, and it is granted to `anon` as
+ * well as `authenticated`, so an anonymous visitor can look a profile up too.
+ *
+ * Handles are citext, so lookup is case-insensitive; the returned handle is
+ * the stored casing.
+ */
+export async function getPublicProfile(handle: string): Promise<PublicProfile | null> {
+  const supabase = await createServerSupabase();
+
+  const result = await supabase
+    .from('public_profiles')
+    .select('id, handle, level, xp_total, portfolio_value_cents, created_at')
+    .eq('handle', handle)
+    .maybeSingle();
+
+  if (result.error && !isNoRows(result.error)) fail(result.error, 'public_profiles');
+
+  const row = result.data as PublicProfileRow | null;
+  if (!row) return null;
+
+  // levels_read (009) is `for select using (true)`, so this works for anon too.
+  const rank = await supabase
+    .from('levels')
+    .select('name')
+    .eq('level', row.level)
+    .maybeSingle();
+
+  if (rank.error && !isNoRows(rank.error)) fail(rank.error, 'levels');
+
+  return {
+    ...row,
+    rank_name: (rank.data as { name: string } | null)?.name ?? `Level ${row.level}`,
+  };
 }
 
 /** Catalog search for the browse filters and the admin SKU screens. */
