@@ -14,55 +14,6 @@ is the human's call — AGENT_RULES forbids this agent from merging or rebasing.
 
 ## Open
 
-### 1. Fulfilment has no contract surface at all — blocks `app/admin/fulfilment`
-
-`redemptions` is written once, by `fn_redeem_card`, and never read or updated
-again. The table already carries everything the screen needs:
-
-```
-id, card_id, item_id, user_id, handling_fee_cents, shipping_address jsonb,
-status text default 'requested', carrier, tracking_number,
-requested_at, shipped_at
-```
-
-Nothing exposes it. `getRedemptions()` and a `fn_mark_shipped` are both
-missing, so the admin screen cannot list a single request, let alone ship one.
-
-Needed:
-
-- **`getRedemptions({ status? })`** → id, status, handling fee, shipping
-  address, requested_at, carrier, tracking, plus the card's sku and mint number
-  and the requesting user's handle. There is no admin read policy on
-  `redemptions` either (004 was written before this screen existed), so this
-  needs an `redemptions_admin_read` policy alongside it.
-- **`fn_mark_shipped(p_redemption_id, p_carrier, p_tracking)`** setting
-  `carrier`, `tracking_number`, `shipped_at = now()`, `status = 'shipped'`, and
-  moving `items.status` from `redemption_hold` to `shipped`. Session client
-  with `fn_require_admin()` inside, like 005 and 008 — same reasoning.
-
-Note `redemptions.status` is a bare `text` with no check constraint and no
-enum, unlike every other status column in the schema. Worth constraining to
-`('requested','shipped','cancelled')` — whatever the real set is — in the same
-migration, before the first row goes in with a typo.
-
-### 2. No write path for the catalog — blocks `app/admin/skus`
-
-`getSkus()` reads; nothing creates or updates. The screen is specified as CRUD
-over oracle price, float curve, `sprite_key` and `palette` JSON, and none of
-those can be written.
-
-Needed: `createSku()` / `updateSku()` over an `fn_upsert_sku`, admin-guarded
-the same way. Two things the RPC should own rather than the UI:
-
-- **`market_price_cents` drives tier**, so an edit re-tiers every future mint
-  from that SKU. 003_retier.sql exists because this already had to be fixed
-  once. The function should say plainly what it does to existing cards
-  (nothing — tier is copied at mint) and what it does to future ones.
-- **`palette` JSON is validated against the sprite maps**, or a typo'd key
-  renders a transparent sprite in the marketplace with no error anywhere. See
-  the design→data note in `docs/HANDOFF-shared.md`; the 9-key format is the
-  reference.
-
 ### 3. Two small design-system notes
 
 - **`components/ui` has no textarea.** Grading notes and the reject reason both
@@ -81,6 +32,48 @@ the same way. Two things the RPC should own rather than the UI:
 ## Resolved
 
 Kept as a record, since 008's header cites the old numbers.
+
+### ~~1. Fulfilment has no contract surface~~ — landed in 009 + contract
+
+`fn_mark_shipped` and `redemptions_admin_read`/`redemptions_own_read` are in
+009_rls_sweep.sql. The contract now exposes, verified live against the project
+(positive and negative):
+
+- **`getRedemptions({ status?, userId? })`** → every redemption column plus
+  `card` (with its SKU), `item` (id, status, custody_location) and `user` (the
+  requester's public profile). Admin sees all, the requester their own, anyone
+  else nothing — an empty array means "none you may see". Oldest first.
+- **`markShipped(redemptionId, carrier, tracking)`** → session client,
+  `fn_require_admin()` inside. Service-role is refused too (no `auth.uid()`).
+  A second ship on the same redemption raises `redemption % is already
+  shipped`, surfaced as `WRONG_STATUS`; branch on the code.
+
+`redemptions.status` is still unconstrained text — 'requested' and 'shipped'
+are the two values that exist in practice. The check constraint suggested
+below remains worth a future migration.
+
+### ~~2. No write path for the catalog~~ — landed as RLS policies + contract
+
+009 chose admin **RLS policies** (`skus_admin_write`, `curve_admin_write`)
+rather than the `fn_upsert_sku` RPC this item asked for — the policy is the
+entire guard, there is no function. The contract wraps them:
+
+- **`upsertSku(input)`** → insert when `id` is absent, update when present;
+  returns the full row. On update, a non-admin session writes nothing
+  *silently* (RLS filters the row set — no error), so the contract reads back
+  and raises `FORBIDDEN` when the row exists but nothing was written. Verified
+  live: non-admin insert → 42501, non-admin update → no-op, price unchanged.
+- **`setFloatCurve(skuId, bands)`** → replace-all semantics, `[]` clears back
+  to the linear fallback. NOT atomic (PostgREST has no transactions): a failed
+  insert after the delete leaves the SKU on the linear fallback — a defined
+  state — until re-saved. Bands validated client-side (0 ≤ min < max ≤ 1,
+  no overlaps) because the table has no constraints.
+
+The two cautions in the original item stand and are now in the contract docs:
+`market_price_cents` re-tiers **future mints only**, and `palette` should be
+validated against the 9 sprite glyphs before saving (`tests/invariants.test.ts`
+shows the check).
+
 
 ### ~~13. No write path for a grade~~ — landed in 008
 

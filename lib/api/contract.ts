@@ -10,18 +10,19 @@
  * HANDOFF.md and work around it locally. Do not add a function here.
  *
  * ------------------------------------------------------------------
- * ONE SANCTIONED EXTENSION, 008_grading.sql.
+ * TWO SANCTIONED EXTENSIONS: 008_grading.sql and 009_rls_sweep.sql.
  *
  * The freeze still holds for the original 16 functions: none of their
  * signatures, parameters or return types have changed. On explicit
- * instruction, four functions were ADDED for the grading pipeline —
- * gradeItem, authenticateItem, rejectItem, getItems — along with the
- * ItemsQuery type and two ContractErrorCode members. Additive only: nothing
- * that existed before behaves differently.
+ * instruction, functions were ADDED —
+ *   008: gradeItem, authenticateItem, rejectItem, getItems
+ *   009: markShipped, getRedemptions, upsertSku, setFloatCurve
+ * along with their query/input types and two ContractErrorCode members.
+ * Additive only: nothing that existed before behaves differently.
  *
- * That grant was for 008. It is not standing permission — the rule above still
- * applies to everything else, so file a HANDOFF request rather than appending
- * a fifth.
+ * Each grant was for its migration. It is not standing permission — the rule
+ * above still applies to everything else, so file a handoff request rather
+ * than appending a ninth.
  * ------------------------------------------------------------------
  *
  * Rules this contract encodes:
@@ -73,6 +74,7 @@ import type {
   ListingStatus,
   Order,
   OrderStatus,
+  RedemptionStatus,
   Sku,
   Tier,
   Timestamptz,
@@ -300,6 +302,31 @@ export interface ItemSummary {
   grade: GradeComponents | null;
 }
 
+/**
+ * One fulfilment queue row: the redemption plus everything the packing bench
+ * needs to act on it. Added for 009 alongside redemptions_admin_read.
+ */
+export interface RedemptionSummary {
+  id: UUID;
+  card_id: UUID;
+  item_id: UUID;
+  user_id: UUID;
+  handling_fee_cents: Cents;
+  /** ShippingAddress as written by redeemCard. Typed Json because jsonb. */
+  shipping_address: Json;
+  status: RedemptionStatus;
+  carrier: string | null;
+  tracking_number: string | null;
+  requested_at: Timestamptz;
+  shipped_at: Timestamptz | null;
+  /** The burned claim, with its SKU — brand, model, size, sprite. */
+  card: CardSummary;
+  /** The physical side being pulled from custody. */
+  item: Pick<Item, 'id' | 'status' | 'custody_location'>;
+  /** Who redeemed. Embedded profile — placeholder caveats from item 14 apply. */
+  user: UserSummary;
+}
+
 export interface ConsignmentSummary extends Consignment {
   consignor: UserSummary;
 }
@@ -398,6 +425,53 @@ export interface ItemsQuery {
   authenticated?: boolean;
   limit?: number;
   offset?: number;
+}
+
+/**
+ * The fulfilment queue. What a session sees is what 009's policies allow:
+ * admins everything, users their own redemptions, everyone else nothing.
+ */
+export interface RedemptionsQuery {
+  status?: RedemptionStatus[];
+  userId?: UUID;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * upsertSku() input. `id` present = update that row; absent = insert. The
+ * four natural-key columns are required either way because the unique index
+ * on (brand, model, colorway, size_us) is what a duplicate collides on, and
+ * an insert missing any of them is rejected by NOT NULL regardless.
+ */
+export interface UpsertSkuInput {
+  id?: UUID;
+  brand: string;
+  model: string;
+  colorway: string;
+  size_us: number;
+  retail_price_cents?: Cents | null;
+  /**
+   * Drives tier via tier_bands — for FUTURE mints only. Existing cards keep
+   * the tier copied at mint; 003_retier.sql exists because this was once
+   * misunderstood. Changing it re-tiers nothing retroactively.
+   */
+  market_price_cents?: Cents | null;
+  price_confidence?: number | null;
+  priced_at?: Timestamptz | null;
+  demand_score?: number;
+  sprite_key?: string | null;
+  /** Char -> hex map. Validate against the 9 sprite glyphs before saving. */
+  palette?: Json | null;
+  mint_cap?: number | null;
+}
+
+/** One band of a SKU's value curve. Lower bound inclusive, upper exclusive. */
+export interface FloatCurveBand {
+  float_min: FloatValue;
+  float_max: FloatValue;
+  /** numeric(4,3). 1.000 = full oracle price at this condition. */
+  value_multiplier: number;
 }
 
 export interface SkusQuery {
@@ -639,6 +713,25 @@ interface ItemRow {
 
 interface ConsignmentRow extends Consignment {
   consignor: PublicProfileRow | PublicProfileRow[];
+}
+
+interface RedemptionRow {
+  id: UUID;
+  card_id: UUID;
+  item_id: UUID;
+  user_id: UUID;
+  handling_fee_cents: Cents;
+  shipping_address: Json;
+  status: RedemptionStatus;
+  carrier: string | null;
+  tracking_number: string | null;
+  requested_at: Timestamptz;
+  shipped_at: Timestamptz | null;
+  card: CardRow | CardRow[];
+  item:
+    | Pick<Item, 'id' | 'status' | 'custody_location'>
+    | Pick<Item, 'id' | 'status' | 'custody_location'>[];
+  user: PublicProfileRow | PublicProfileRow[];
 }
 
 interface ProvenanceRow {
@@ -1207,6 +1300,188 @@ export async function rejectItem(itemId: UUID, reason: string): Promise<void> {
 }
 
 // ============================================================
+// FULFILMENT & CATALOG — added by 009_rls_sweep.sql
+// ============================================================
+//
+// markShipped follows the 005/008 pattern: granted to `authenticated`,
+// fn_require_admin() inside, so it runs on the SESSION client and refuses
+// service-role. upsertSku and setFloatCurve are different in kind: they are
+// direct table writes with NO RPC — 009's skus_admin_write / curve_admin_write
+// RLS policies are the entire guard. That only works on the session client;
+// on service-role the policies are bypassed and anything would be written.
+
+/**
+ * fn_mark_shipped(p_redemption_id, p_carrier, p_tracking) -> void
+ *
+ * Ships a redemption: stamps carrier, tracking and shipped_at, sets the
+ * redemption to 'shipped', and moves the physical item redemption_hold ->
+ * shipped. Refuses a redemption that has already shipped — fulfilment is not
+ * repeatable, the box left the building.
+ *
+ * @throws FORBIDDEN ("admin privileges required"), NOT_FOUND, WRONG_STATUS.
+ */
+export async function markShipped(
+  redemptionId: UUID,
+  carrier: string,
+  tracking: string,
+): Promise<void> {
+  const supabase = await createServerSupabase();
+  unwrap(
+    await supabase.rpc('fn_mark_shipped', {
+      p_redemption_id: redemptionId,
+      p_carrier: carrier,
+      p_tracking: tracking,
+    }),
+    'fn_mark_shipped',
+  );
+}
+
+/**
+ * Create or update a catalog SKU. Direct table write under skus_admin_write —
+ * there is no RPC, the RLS policy is the guard, and a non-admin session is
+ * refused by Postgres with 42501 (surfaced as FORBIDDEN).
+ *
+ * `market_price_cents` affects future mints only; tier is copied at mint and
+ * existing cards keep theirs. See UpsertSkuInput.
+ *
+ * @returns the full row as written, id included — the caller needs it for
+ *          setFloatCurve() after a create.
+ * @throws FORBIDDEN, WRONG_STATUS (duplicate of brand/model/colorway/size),
+ *         NOT_FOUND (update of an id that does not exist).
+ */
+export async function upsertSku(sku: UpsertSkuInput): Promise<Sku> {
+  const supabase = await createServerSupabase();
+  const { id, ...columns } = sku;
+
+  if (id) {
+    const result = await supabase
+      .from('skus')
+      .update(columns)
+      .eq('id', id)
+      .select(SKU_COLUMNS)
+      .maybeSingle();
+
+    if (result.error) fail(result.error, 'skus');
+    if (!result.data) {
+      // RLS makes "no such row" and "not yours to update" the same silence.
+      // For skus the read policy is public, so absence really is absence —
+      // unless the session is non-admin, in which case the UPDATE matched
+      // nothing it was allowed to touch. Read it back to tell the two apart.
+      const exists = await supabase
+        .from('skus')
+        .select('id')
+        .eq('id', id)
+        .maybeSingle();
+      if (exists.data) {
+        throw new ContractError(
+          'FORBIDDEN',
+          `sku ${id} exists but the update wrote nothing — the session is not an admin`,
+          { id },
+        );
+      }
+      throw new ContractError('NOT_FOUND', `sku ${id} not found`, { id });
+    }
+    return result.data as Sku;
+  }
+
+  return unwrap(
+    await supabase.from('skus').insert(columns).select(SKU_COLUMNS).single(),
+    'skus',
+  ) as Sku;
+}
+
+/**
+ * Replace a SKU's entire float curve. Direct table writes under
+ * curve_admin_write; the RLS policy is the guard, exactly as upsertSku.
+ *
+ * Replace, not merge: the curve is one object that happens to be stored as
+ * rows, and fn_float_multiplier takes the first band that matches, so stale
+ * leftovers from a previous curve would silently change valuations.
+ *
+ * NOT ATOMIC. PostgREST has no transactions, so this is a delete followed by
+ * an insert. If the insert fails, the SKU is left with no curve — which is a
+ * DEFINED state, not a broken one: fn_float_multiplier falls back to the
+ * linear formula until the curve is re-saved. The failure is thrown either
+ * way; retry the whole call.
+ *
+ * Bands are validated here because the table has no constraints on them: each
+ * band needs 0 <= float_min < float_max <= 1 and bands must not overlap.
+ * Passing an empty array clears the curve back to the linear fallback.
+ *
+ * @throws FORBIDDEN, UNKNOWN (malformed bands, message says which).
+ */
+export async function setFloatCurve(
+  skuId: UUID,
+  bands: readonly FloatCurveBand[],
+): Promise<void> {
+  const sorted = [...bands].sort((a, b) => a.float_min - b.float_min);
+  for (let i = 0; i < sorted.length; i++) {
+    const band = sorted[i];
+    if (
+      !Number.isFinite(band.value_multiplier) ||
+      band.value_multiplier < 0 ||
+      !(band.float_min >= 0 && band.float_min < band.float_max && band.float_max <= 1)
+    ) {
+      throw new ContractError(
+        'UNKNOWN',
+        `invalid float curve band [${band.float_min}, ${band.float_max}) x ${band.value_multiplier}: ` +
+          'need 0 <= min < max <= 1 and a non-negative multiplier',
+        { band },
+      );
+    }
+    if (i > 0 && band.float_min < sorted[i - 1].float_max) {
+      throw new ContractError(
+        'UNKNOWN',
+        `float curve bands overlap at ${band.float_min}: ` +
+          `[${sorted[i - 1].float_min}, ${sorted[i - 1].float_max}) then ` +
+          `[${band.float_min}, ${band.float_max})`,
+        { bands: sorted },
+      );
+    }
+  }
+
+  const supabase = await createServerSupabase();
+
+  // Deleting zero rows is success, so a non-admin session sails through the
+  // delete (RLS silently matches nothing) and only trips on the insert —
+  // unless the new curve is empty. Check admin-ness via the write policy
+  // first: an insert-then-delete order would fix empty-curve but break
+  // replace. Probe with the delete's returned rows instead.
+  const del = await supabase
+    .from('sku_float_curve')
+    .delete()
+    .eq('sku_id', skuId)
+    .select('sku_id');
+  if (del.error) fail(del.error, 'sku_float_curve');
+
+  if (sorted.length === 0) {
+    // Nothing to insert, so the RLS refusal above never had a chance to fire
+    // for a non-admin — but their delete also matched nothing, so the curve
+    // is untouched either way. Verify intent was honoured for admins: if rows
+    // remain, the session was not allowed to delete them.
+    const left = await supabase
+      .from('sku_float_curve')
+      .select('sku_id')
+      .eq('sku_id', skuId)
+      .limit(1);
+    if (left.error) fail(left.error, 'sku_float_curve');
+    if ((left.data ?? []).length > 0) {
+      throw new ContractError(
+        'FORBIDDEN',
+        `the curve for sku ${skuId} was not cleared — the session is not an admin`,
+        { skuId },
+      );
+    }
+    return;
+  }
+
+  const inserted = await supabase
+    .from('sku_float_curve')
+    .insert(sorted.map((band) => ({ sku_id: skuId, ...band })));
+  if (inserted.error) fail(inserted.error, 'sku_float_curve');
+}
+
+// ============================================================
 // READS
 // ============================================================
 
@@ -1596,6 +1871,68 @@ export async function getItems(query: ItemsQuery = {}): Promise<ItemSummary[]> {
   for (const card of cards ?? []) cardByItem.set(card.item_id, card.id);
 
   return items.map((item) => toItemSummary(item, cardByItem.get(item.id) ?? null));
+}
+
+/**
+ * The fulfilment queue: redemption requests with the card, the physical item,
+ * and who is waiting on the box. Added for 009.
+ *
+ * Visibility is 009's policies verbatim — redemptions_admin_read for admins,
+ * redemptions_own_read for the requesting user, nothing for anyone else. An
+ * empty array means "none you may see", not "none exist". Oldest first,
+ * because fulfilment is a queue.
+ *
+ * `redemptions.status` is bare text with no constraint (flagged in
+ * docs/handoff/admin.md); fn_redeem_card writes 'requested' and
+ * fn_mark_shipped writes 'shipped', so those two are the values that exist
+ * in practice.
+ */
+export async function getRedemptions(
+  query: RedemptionsQuery = {},
+): Promise<RedemptionSummary[]> {
+  const supabase = await createServerSupabase();
+  const page = pageBounds(query.limit, query.offset);
+
+  let builder = supabase
+    .from('redemptions')
+    .select(
+      'id, card_id, item_id, user_id, handling_fee_cents, shipping_address, ' +
+        'status, carrier, tracking_number, requested_at, shipped_at, ' +
+        `card:cards!inner(${CARD_SUMMARY_COLUMNS}, sku:skus!inner(${SKU_REF_COLUMNS})), ` +
+        'item:items!inner(id, status, custody_location), ' +
+        `user:public_profiles!inner(${PUBLIC_PROFILE_COLUMNS})`,
+    );
+
+  if (query.status?.length) {
+    builder = builder.in('status', query.status as RedemptionStatus[]);
+  }
+  if (query.userId) builder = builder.eq('user_id', query.userId);
+
+  const rows = unwrap(
+    await builder
+      .order('requested_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(page.from, page.to),
+    'redemptions',
+  ) as RedemptionRow[] | null;
+
+  return (rows ?? []).map((row) => ({
+    id: row.id,
+    card_id: row.card_id,
+    item_id: row.item_id,
+    user_id: row.user_id,
+    handling_fee_cents: row.handling_fee_cents,
+    shipping_address: row.shipping_address,
+    status: row.status,
+    carrier: row.carrier,
+    tracking_number: row.tracking_number,
+    requested_at: row.requested_at,
+    shipped_at: row.shipped_at,
+    // A redeemed card has no live listing by definition — it is burned.
+    card: toCardSummary(requireEmbed(row.card, 'redemptions.card'), null),
+    item: requireEmbed(row.item, 'redemptions.item'),
+    user: toUserSummary(requireEmbed(row.user, 'redemptions.user')),
+  }));
 }
 
 /** Consignment queues, filterable by status for the admin board. */

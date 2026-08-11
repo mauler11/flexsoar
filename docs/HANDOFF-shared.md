@@ -391,14 +391,12 @@ migration before any profile-editing UI is possible.
 
 #### 15. 008 grading — new contract surface, and a numbering correction
 
-**First, the correction.** I was asked to mark "item 15 and the two grading
-blockers" resolved. **No such items exist.** HANDOFF.md has never had an item
-15 on any branch — `main`, `track/admin`, `track/design` and `track/market` all
-stop at 12, and 13/14 exist only here. There are no grading blockers filed
-either. The 008 header says it "takes HANDOFF item 15 now rather than later",
-so the intent was clearly recorded somewhere, but not in this file. Rather
-than invent a resolution for items I cannot find, this entry records what 008
-actually delivered. If item 15 lives in another doc, point me at it.
+**Numbering note, corrected.** When 008 landed, this track reported that "item
+15" did not exist on any branch — true of the branches visible at the time, but
+wrong: items 13–15 were the **admin track's** numbering, filed in what is now
+`docs/handoff/admin.md`, which had not yet reached this branch. That file
+records them resolved by 008. The entry below stands as the data-track record
+of the same work.
 
 **What 008 closed, whether or not it was written down:** the grading queue had
 no write path at all. `scripts/seed.ts` wrote `items` directly under

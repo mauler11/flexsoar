@@ -53,6 +53,10 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   { pattern: /items_grade_components_sum/i, code: 'GRADE_COMPONENTS_MISMATCH' },
   { pattern: /items_grade_components_complete/i, code: 'GRADE_COMPONENTS_INCOMPLETE' },
 
+  // 009_rls_sweep.sql — fn_mark_shipped. 'redemption % not found' rides the
+  // generic not-found rule below.
+  { pattern: /is already shipped/i, code: 'WRONG_STATUS' },
+
   // 008_grading.sql — fn_grade_item, fn_reject_item. Checked before the
   // generic status rules below, which would otherwise not match at all.
   { pattern: /is already minted; its float is immutable/i, code: 'WRONG_STATUS' },
