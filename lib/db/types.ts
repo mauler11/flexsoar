@@ -277,6 +277,25 @@ export interface Item {
   graded_by: UUID | null;
   graded_at: Timestamptz | null;
   grading_notes: string | null;
+  /**
+   * The six rubric components behind `float_value`, added by 008_grading.sql.
+   * Each is numeric(3,2), 0.00 .. 1.00, per docs/GRADING_RUBRIC.md.
+   *
+   * Two check constraints tie them to the float:
+   *   items_grade_components_complete  all six, or none
+   *   items_grade_components_sum       when present, float_value must equal
+   *                                    the weighted sum, rounded to 3dp
+   *
+   * Weights: outsole 25%, midsole 20%, creasing 20%, upper 20%, heel 10%,
+   * accessories 5%. The grader scores components and the float falls out —
+   * never the reverse. Null on rows graded before 008.
+   */
+  grade_outsole: number | null;
+  grade_midsole: number | null;
+  grade_creasing: number | null;
+  grade_upper: number | null;
+  grade_heel: number | null;
+  grade_accessories: number | null;
   /** jsonb, default '[]'. Intake photos. */
   photos: Json;
   authenticated_at: Timestamptz | null;

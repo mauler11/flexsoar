@@ -157,6 +157,21 @@ export const users: User[] = [
 // ------------------------------------------------------------
 // SKUS — market_price_cents (USD) places each one in a tier band
 // ------------------------------------------------------------
+//
+// `palette` is the char -> hex map lib/sprites consumes, and it must carry
+// all nine keys PALETTES in lib/sprites/maps.ts defines:
+//
+//   D  outline       C  body           c  body shadow
+//   B  overlay panel b  overlay shadow G  lace accent
+//   W  midsole       I  outsole        i  outsole shadow
+//
+// Both base maps (low-top and high-top) use all nine. A key the palette omits
+// renders transparent, so a partial palette does not degrade gracefully — it
+// punches holes in the silhouette. Keys are grouped below in that same order.
+//
+// Roles are not interchangeable across colourways: `C` is whatever the upper
+// is made of, which is the black canvas on the Vans and the cream leather on
+// the Chicago. Do not assume the lightest colour is `C`.
 
 export const skus: Sku[] = [
   {
@@ -172,7 +187,12 @@ export const skus: Sku[] = [
     priced_at: '2026-08-01T00:00:00.000Z',
     demand_score: 22.4,
     sprite_key: 'low-top',
-    palette: { A: '#1B1B1B', B: '#3A3A3A', C: '#F2F2F2' },
+    // Black canvas upper, white sidestripe, white foxing, gum-tinted outsole.
+    palette: {
+      D: '#0A0A0A', C: '#1B1B1B', c: '#101010',
+      B: '#F2F2F2', b: '#D2D2D2', G: '#E8E8E8',
+      W: '#F7F5EF', I: '#C9C4B8', i: '#A8A296',
+    },
     mint_cap: null,
     created_at: '2026-01-21T05:55:00.000Z',
   },
@@ -189,7 +209,13 @@ export const skus: Sku[] = [
     priced_at: '2026-08-01T00:00:00.000Z',
     demand_score: 41.5,
     sprite_key: 'low-top',
-    palette: { A: '#FFFFFF', B: '#E4E4E4', C: '#9A9A9A' },
+    // Tonal white on white. D is a warm grey rather than near-black: on an
+    // all-white shoe a black outline reads as a drawn border, not as an edge.
+    palette: {
+      D: '#8E8A80', C: '#FFFFFF', c: '#E4E4E4',
+      B: '#F4F2ED', b: '#DAD6CC', G: '#FFFFFF',
+      W: '#FFFFFF', I: '#E8E4DA', i: '#9A9A9A',
+    },
     mint_cap: null,
     created_at: '2026-01-21T06:00:00.000Z',
   },
@@ -206,7 +232,12 @@ export const skus: Sku[] = [
     priced_at: '2026-08-01T00:00:00.000Z',
     demand_score: 55.8,
     sprite_key: 'low-top',
-    palette: { A: '#8E9295', B: '#5C6063', C: '#D8D8D8' },
+    // Grey suede body, darker grey overlays, light grey midsole.
+    palette: {
+      D: '#3A3E41', C: '#8E9295', c: '#757A7D',
+      B: '#5C6063', b: '#494D50', G: '#C0C4C7',
+      W: '#D8D8D8', I: '#6E7275', i: '#55595C',
+    },
     mint_cap: null,
     created_at: '2026-02-08T04:30:00.000Z',
   },
@@ -223,7 +254,14 @@ export const skus: Sku[] = [
     priced_at: '2026-08-01T00:00:00.000Z',
     demand_score: 88.9,
     sprite_key: 'high-top',
-    palette: { A: '#C8102E', B: '#F2EFE6', C: '#1B1B1B' },
+    // Exactly PALETTE_CHICAGO from lib/sprites/maps.ts — same colourway, so
+    // the fixture and the styleguide render this shoe identically. Cream
+    // leather body, red overlays, black collar and outsole.
+    palette: {
+      D: '#1A1214', C: '#F4F1EA', c: '#DAD5CB',
+      B: '#C8202E', b: '#9A1622', G: '#1A1417',
+      W: '#FAF7F0', I: '#2B2226', i: '#1A1417',
+    },
     mint_cap: 250,
     created_at: '2026-02-14T08:10:00.000Z',
   },
@@ -240,7 +278,12 @@ export const skus: Sku[] = [
     priced_at: '2026-08-01T00:00:00.000Z',
     demand_score: 95.4,
     sprite_key: 'low-top',
-    palette: { A: '#6E4B2A', B: '#B7202E', C: '#EDE6D6' },
+    // Cream body, brown overlays, gum outsole, red as the lace accent.
+    palette: {
+      D: '#2A1C10', C: '#EDE6D6', c: '#D4CCB9',
+      B: '#6E4B2A', b: '#543722', G: '#B7202E',
+      W: '#F2EDE1', I: '#8C5F2E', i: '#6E4A24',
+    },
     mint_cap: 60,
     created_at: '2026-03-02T11:45:00.000Z',
   },
@@ -257,7 +300,13 @@ export const skus: Sku[] = [
     priced_at: '2026-08-01T00:00:00.000Z',
     demand_score: 99.1,
     sprite_key: 'high-top',
-    palette: { A: '#C6202C', B: '#8E1620', C: '#3A0C10' },
+    // Tonal red throughout, darkening into the outsole. G is lifted rather
+    // than darkened so the lace detail stays visible against the upper.
+    palette: {
+      D: '#2A080C', C: '#C6202C', c: '#A61922',
+      B: '#8E1620', b: '#6E101A', G: '#E04B54',
+      W: '#B01C26', I: '#3A0C10', i: '#260609',
+    },
     mint_cap: 5,
     created_at: '2026-03-02T11:50:00.000Z',
   },
@@ -346,6 +395,21 @@ export const items: Item[] = itemSeeds.map((seed) => ({
   authenticated_by: USER_IDS.aiman,
   custody_location: 'KL-VAULT-A',
   reserve_price_cents: seed.reserve,
+  // Rubric components, added to `items` by 008_grading.sql. Null across the
+  // board because these fixtures were graded before it, which is exactly the
+  // case items_grade_components_sum exempts (`grade_outsole is null or ...`)
+  // and a state that will exist in production for every pre-008 row.
+  //
+  // Populating them means picking six scores whose weighted sum is each
+  // seed.float to 3dp, or the fixtures would describe rows the database would
+  // reject. Worth doing if track/admin wants the populated path to render —
+  // see HANDOFF.md.
+  grade_outsole: null,
+  grade_midsole: null,
+  grade_creasing: null,
+  grade_upper: null,
+  grade_heel: null,
+  grade_accessories: null,
   created_at:
     seed.consignment === CONSIGNMENT_IDS.first
       ? '2026-05-06T07:20:00.000Z'
