@@ -128,8 +128,50 @@ const SKU = {
   sprite_key: 'lowtop',
 };
 
-/** Human-graded at intake. 0.062 = Factory New. Copied to the card, then immutable. */
-const GRADED_FLOAT: FloatValue = 0.062;
+/**
+ * The six rubric scores a human would enter, per docs/GRADING_RUBRIC.md.
+ * A near-deadstock pair: clean tread, no yellowing, faint flex crease, box and
+ * original laces slightly off.
+ *
+ * The float is NOT written here — it is derived below, the way the rubric
+ * requires and the way items_grade_components_sum enforces. Scoring the
+ * components first is the whole point; picking the float and back-filling
+ * components to justify it is exactly what 008 made impossible.
+ */
+const GRADE_COMPONENTS = {
+  outsole: 0.08,
+  midsole: 0.05,
+  creasing: 0.06,
+  upper: 0.05,
+  heel: 0.05,
+  accessories: 0.1,
+};
+
+/** Weights from 008_grading.sql / docs/GRADING_RUBRIC.md. */
+const GRADE_WEIGHTS = {
+  outsole: 0.25,
+  midsole: 0.2,
+  creasing: 0.2,
+  upper: 0.2,
+  heel: 0.1,
+  accessories: 0.05,
+};
+
+/**
+ * Mirrors `round(sum(component * weight), 3)` in the constraint. If this and
+ * Postgres ever disagree the grade is rejected outright rather than stored
+ * wrong, which is the right way round.
+ */
+const GRADED_FLOAT: FloatValue =
+  Math.round(
+    (GRADE_COMPONENTS.outsole * GRADE_WEIGHTS.outsole +
+      GRADE_COMPONENTS.midsole * GRADE_WEIGHTS.midsole +
+      GRADE_COMPONENTS.creasing * GRADE_WEIGHTS.creasing +
+      GRADE_COMPONENTS.upper * GRADE_WEIGHTS.upper +
+      GRADE_COMPONENTS.heel * GRADE_WEIGHTS.heel +
+      GRADE_COMPONENTS.accessories * GRADE_WEIGHTS.accessories) *
+      1000,
+  ) / 1000;
 
 /** What the consignor asks for the card. */
 const LIST_PRICE_CENTS: Cents = 21_500;
@@ -511,27 +553,57 @@ async function main(): Promise<void> {
   }
 
   // ---- grading ------------------------------------------------------
-  step('Grading and authenticating the item');
-  detail('float is typed by a human at intake — never computed, never random');
-  ok(
+  step('Grading the item via fn_grade_item');
+  detail('scores are typed by a human against the rubric — never computed, never random');
+  detail('the float is derived from them, not chosen: the DB constraint checks it');
+
+  const graded = await admin.client.rpc('fn_grade_item', {
+    p_item_id: item.id,
+    p_float: GRADED_FLOAT,
+    p_notes: 'seed: faint flex crease on the toebox, clean midsole, box slightly shelfworn',
+    p_outsole: GRADE_COMPONENTS.outsole,
+    p_midsole: GRADE_COMPONENTS.midsole,
+    p_creasing: GRADE_COMPONENTS.creasing,
+    p_upper: GRADE_COMPONENTS.upper,
+    p_heel: GRADE_COMPONENTS.heel,
+    p_accessories: GRADE_COMPONENTS.accessories,
+  });
+  if (graded.error) throw new Error(`fn_grade_item: ${graded.error.message}`);
+
+  for (const [name, weight] of Object.entries(GRADE_WEIGHTS)) {
+    const score = GRADE_COMPONENTS[name as keyof typeof GRADE_COMPONENTS];
+    detail(
+      `  ${name.padEnd(11)} ${score.toFixed(2)} x ${String(weight).padEnd(4)} = ` +
+        (score * weight).toFixed(4),
+    );
+  }
+  detail(`  ${'float'.padEnd(11)} ${GRADED_FLOAT.toFixed(3)} (Factory New)`);
+
+  step('Authenticating the item via fn_authenticate_item');
+  detail('graded and authenticated are independent; both done moves it to in_custody');
+  const authed = await admin.client.rpc('fn_authenticate_item', {
+    p_item_id: item.id,
+    p_location: 'KL-WAREHOUSE-01',
+  });
+  if (authed.error) throw new Error(`fn_authenticate_item: ${authed.error.message}`);
+
+  const afterGrading = ok(
     await supabase
       .from('items')
-      .update({
-        float_value: GRADED_FLOAT,
-        graded_by: consignor.id,
-        graded_at: new Date().toISOString(),
-        grading_notes: 'seed: light creasing on the toebox, clean midsole',
-        authenticated_at: new Date().toISOString(),
-        authenticated_by: consignor.id,
-        custody_location: 'KL-WAREHOUSE-01',
-        status: 'in_custody',
-      })
+      .select(
+        'status, float_value, grade_outsole, grade_midsole, grade_creasing, ' +
+          'grade_upper, grade_heel, grade_accessories, graded_by, custody_location',
+      )
       .eq('id', item.id)
-      .select('id, float_value, status')
       .single(),
-    'grade item',
+    'read graded item',
+  ) as { status: string; float_value: number; graded_by: UUID };
+
+  detail(`status ${afterGrading.status}, float ${Number(afterGrading.float_value).toFixed(3)}`);
+  // fn_grade_item stamps graded_by from the session, like 005 does for actors.
+  detail(
+    `graded_by recorded as ${afterGrading.graded_by === admin.userId ? ADMIN.handle : afterGrading.graded_by}`,
   );
-  detail(`float ${GRADED_FLOAT.toFixed(3)} (Factory New), status in_custody`);
 
   // ---- mint ---------------------------------------------------------
   step('Minting the card via fn_mint_card');

@@ -45,6 +45,21 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   // made service-role: auth.uid() is null there, so no users row resolves.
   { pattern: /admin privileges required/i, code: 'FORBIDDEN' },
 
+  // 008_grading.sql — the two check constraints on items. Matched by
+  // constraint name, which Postgres puts in the message verbatim:
+  // 'new row for relation "items" violates check constraint "<name>"'.
+  // These come back as SQLSTATE 23514, which on its own says only "a check
+  // failed" — the name is the only thing that says which.
+  { pattern: /items_grade_components_sum/i, code: 'GRADE_COMPONENTS_MISMATCH' },
+  { pattern: /items_grade_components_complete/i, code: 'GRADE_COMPONENTS_INCOMPLETE' },
+
+  // 008_grading.sql — fn_grade_item, fn_reject_item. Checked before the
+  // generic status rules below, which would otherwise not match at all.
+  { pattern: /is already minted; its float is immutable/i, code: 'WRONG_STATUS' },
+  { pattern: /is minted and cannot be rejected/i, code: 'WRONG_STATUS' },
+  // 'item % is %, cannot be graded' / 'cannot be authenticated'
+  { pattern: /,\s*cannot be (graded|authenticated)/i, code: 'WRONG_STATUS' },
+
   // fn_purchase_card — 'listing % is in early access until %'
   { pattern: /is in early access until/i, code: 'EARLY_ACCESS_LOCKED' },
 

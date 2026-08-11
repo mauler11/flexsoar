@@ -9,6 +9,21 @@
  * If you need something this file does not expose, append the request to
  * HANDOFF.md and work around it locally. Do not add a function here.
  *
+ * ------------------------------------------------------------------
+ * ONE SANCTIONED EXTENSION, 008_grading.sql.
+ *
+ * The freeze still holds for the original 16 functions: none of their
+ * signatures, parameters or return types have changed. On explicit
+ * instruction, four functions were ADDED for the grading pipeline —
+ * gradeItem, authenticateItem, rejectItem, getItems — along with the
+ * ItemsQuery type and two ContractErrorCode members. Additive only: nothing
+ * that existed before behaves differently.
+ *
+ * That grant was for 008. It is not standing permission — the rule above still
+ * applies to everything else, so file a HANDOFF request rather than appending
+ * a fifth.
+ * ------------------------------------------------------------------
+ *
  * Rules this contract encodes:
  *   - Mutations map 1:1 onto the SECURITY DEFINER functions. No table has an
  *     INSERT or UPDATE policy, so there is no second write path.
@@ -86,6 +101,18 @@ export type ContractErrorCode =
   | 'SELF_PURCHASE'
   | 'UNAUTHENTICATED'
   | 'FORBIDDEN'
+  /**
+   * items_grade_components_sum: the six component scores were supplied, but
+   * `float` is not their weighted sum. The grader scores components and the
+   * float falls out — this fires when someone picked the float first. Show the
+   * computed value and let them accept it.
+   */
+  | 'GRADE_COMPONENTS_MISMATCH'
+  /**
+   * items_grade_components_complete: some but not all six components. It is
+   * all six or none; there is no partial grade.
+   */
+  | 'GRADE_COMPONENTS_INCOMPLETE'
   | 'UNKNOWN';
 
 export class ContractError extends Error {
@@ -236,6 +263,22 @@ export interface ListingDetail extends ListingSummary {
   order: OrderSummary | null;
 }
 
+/**
+ * The six rubric components, 0.00 .. 1.00 each. All six or none —
+ * items_grade_components_complete rejects a partial set.
+ *
+ * The float is their weighted sum and the database checks it, so compute it
+ * with gradeFloatFromComponents() rather than asking the grader for a total.
+ */
+export interface GradeComponents {
+  outsole: number;
+  midsole: number;
+  creasing: number;
+  upper: number;
+  heel: number;
+  accessories: number;
+}
+
 export interface ItemSummary {
   id: UUID;
   sku_id: UUID;
@@ -250,6 +293,11 @@ export interface ItemSummary {
   sku: SkuRef;
   /** Null until the item is minted. */
   card_id: UUID | null;
+  /**
+   * Added by 008. Null on rows graded before it, and null together — never a
+   * partial set. Additive: existing readers that ignore this still compile.
+   */
+  grade: GradeComponents | null;
 }
 
 export interface ConsignmentSummary extends Consignment {
@@ -331,6 +379,27 @@ export interface ConsignmentsQuery {
   offset?: number;
 }
 
+/**
+ * The grading queue. Added by 008 — nothing else exposes items across
+ * consignments, and the admin queue is inherently a cross-consignment view.
+ *
+ * `graded` and `authenticated` filter on presence of the timestamp, not on
+ * status, because the two are independent: an item can be authenticated before
+ * it is graded or the other way round, and only when both have happened does
+ * fn_grade_item / fn_authenticate_item move it to `in_custody`. The queue that
+ * matters most is `{ graded: false }`.
+ */
+export interface ItemsQuery {
+  status?: ItemStatus[];
+  consignmentId?: UUID;
+  /** true = graded_at is set; false = still ungraded. Omit for either. */
+  graded?: boolean;
+  /** true = authenticated_at is set; false = not yet. Omit for either. */
+  authenticated?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
 export interface SkusQuery {
   brand?: string;
   model?: string;
@@ -397,7 +466,9 @@ const ORDER_COLUMNS =
 
 const ITEM_SUMMARY_COLUMNS =
   'id, sku_id, status, float_value, graded_at, grading_notes, photos, ' +
-  'authenticated_at, custody_location, reserve_price_cents';
+  'authenticated_at, custody_location, reserve_price_cents, ' +
+  'grade_outsole, grade_midsole, grade_creasing, grade_upper, grade_heel, ' +
+  'grade_accessories';
 
 const CONSIGNMENT_COLUMNS =
   'id, consignor_id, status, item_count, intake_fee_cents, submitted_at, ' +
@@ -557,6 +628,12 @@ interface ItemRow {
   authenticated_at: Timestamptz | null;
   custody_location: string | null;
   reserve_price_cents: Cents | null;
+  grade_outsole: number | null;
+  grade_midsole: number | null;
+  grade_creasing: number | null;
+  grade_upper: number | null;
+  grade_heel: number | null;
+  grade_accessories: number | null;
   sku: SkuRefRow | SkuRefRow[];
 }
 
@@ -640,6 +717,37 @@ function toListingRef(row: ListingRefRow | ListingRow): ListingRef {
   };
 }
 
+/**
+ * The six columns collapse to one object or to null. items_grade_components_complete
+ * guarantees all-or-nothing at the database, so testing one column is enough —
+ * but the others are checked anyway, because a null slipping into
+ * GradeComponents would be a silently wrong 0.00 on a rubric row.
+ */
+function toGradeComponents(row: ItemRow): GradeComponents | null {
+  const { grade_outsole, grade_midsole, grade_creasing } = row;
+  const { grade_upper, grade_heel, grade_accessories } = row;
+
+  if (
+    grade_outsole === null ||
+    grade_midsole === null ||
+    grade_creasing === null ||
+    grade_upper === null ||
+    grade_heel === null ||
+    grade_accessories === null
+  ) {
+    return null;
+  }
+
+  return {
+    outsole: grade_outsole,
+    midsole: grade_midsole,
+    creasing: grade_creasing,
+    upper: grade_upper,
+    heel: grade_heel,
+    accessories: grade_accessories,
+  };
+}
+
 function toItemSummary(row: ItemRow, cardId: UUID | null): ItemSummary {
   return {
     id: row.id,
@@ -654,6 +762,7 @@ function toItemSummary(row: ItemRow, cardId: UUID | null): ItemSummary {
     reserve_price_cents: row.reserve_price_cents,
     sku: requireEmbed(row.sku, 'items.sku'),
     card_id: cardId,
+    grade: toGradeComponents(row),
   };
 }
 
@@ -962,6 +1071,139 @@ export async function awardXp(
 export async function refreshLevels(): Promise<number> {
   const supabase = createServiceSupabase();
   return unwrap(await supabase.rpc('fn_refresh_levels'), 'fn_refresh_levels') as number;
+}
+
+// ============================================================
+// GRADING — added by 008_grading.sql
+// ============================================================
+//
+// All three are admin-guarded the way 005 established: execute is granted to
+// `authenticated` and fn_require_admin() checks auth.uid() inside the function.
+// So they run on the SESSION client — service-role has no auth.uid() and is
+// refused. Callers should still check is_admin in the page (HANDOFF item 7).
+
+/**
+ * The rubric weights from 008_grading.sql, which are the ones in
+ * docs/GRADING_RUBRIC.md. Kept here so a UI can show the arithmetic live as
+ * the grader scores each component.
+ */
+export const GRADE_WEIGHTS: Readonly<Record<keyof GradeComponents, number>> = {
+  outsole: 0.25,
+  midsole: 0.2,
+  creasing: 0.2,
+  upper: 0.2,
+  heel: 0.1,
+  accessories: 0.05,
+};
+
+/**
+ * The float implied by a set of component scores, to 3dp.
+ *
+ * Mirrors the items_grade_components_sum constraint exactly. Use it to fill the
+ * float field rather than asking the grader for a total: the rubric is explicit
+ * that scoring the components comes first and the float falls out, and the
+ * database rejects any other combination with GRADE_COMPONENTS_MISMATCH.
+ */
+export function gradeFloatFromComponents(components: GradeComponents): FloatValue {
+  const total =
+    components.outsole * GRADE_WEIGHTS.outsole +
+    components.midsole * GRADE_WEIGHTS.midsole +
+    components.creasing * GRADE_WEIGHTS.creasing +
+    components.upper * GRADE_WEIGHTS.upper +
+    components.heel * GRADE_WEIGHTS.heel +
+    components.accessories * GRADE_WEIGHTS.accessories;
+
+  // numeric(4,3) in the column, round(..., 3) in the constraint. Doing this in
+  // binary floating point and rounding at the end matches, because every input
+  // has at most 2dp and the weights at most 2dp.
+  return Math.round(total * 1000) / 1000;
+}
+
+/**
+ * fn_grade_item(p_item_id, p_float, p_notes, p_outsole .. p_accessories) -> void
+ *
+ * Records a human grade. The item must be pending_intake or in_custody and
+ * must not already be minted — a minted card holds an immutable copy of the
+ * float, so re-grading would desync the two.
+ *
+ * `components` is optional at the database level, but pass it. When present
+ * the constraint enforces that `float` really is their weighted sum, which is
+ * what stops a grader picking a number and reverse-engineering the rubric to
+ * justify it. Derive the float with gradeFloatFromComponents().
+ *
+ * The float is typed by a human. Never compute it from anything but the
+ * rubric, and never randomise it — there is no RNG in this codebase.
+ *
+ * Sets status to in_custody once the item is also authenticated.
+ *
+ * @throws FORBIDDEN ("admin privileges required"), NOT_FOUND, WRONG_STATUS,
+ *         GRADE_COMPONENTS_MISMATCH, GRADE_COMPONENTS_INCOMPLETE.
+ */
+export async function gradeItem(
+  itemId: UUID,
+  float: FloatValue,
+  notes?: string | null,
+  components?: GradeComponents | null,
+): Promise<void> {
+  const supabase = await createServerSupabase();
+  unwrap(
+    await supabase.rpc('fn_grade_item', {
+      p_item_id: itemId,
+      p_float: float,
+      p_notes: notes ?? null,
+      p_outsole: components?.outsole ?? null,
+      p_midsole: components?.midsole ?? null,
+      p_creasing: components?.creasing ?? null,
+      p_upper: components?.upper ?? null,
+      p_heel: components?.heel ?? null,
+      p_accessories: components?.accessories ?? null,
+    }),
+    'fn_grade_item',
+  );
+}
+
+/**
+ * fn_authenticate_item(p_item_id, p_location) -> void
+ *
+ * Marks the item authentic and records where it is being held. Independent of
+ * grading and may happen either side of it; the item reaches in_custody, and
+ * so becomes mintable, once both have happened.
+ *
+ * @param location custody_location. Left unchanged when omitted.
+ * @throws FORBIDDEN ("admin privileges required"), NOT_FOUND, WRONG_STATUS.
+ */
+export async function authenticateItem(
+  itemId: UUID,
+  location?: string | null,
+): Promise<void> {
+  const supabase = await createServerSupabase();
+  unwrap(
+    await supabase.rpc('fn_authenticate_item', {
+      p_item_id: itemId,
+      p_location: location ?? null,
+    }),
+    'fn_authenticate_item',
+  );
+}
+
+/**
+ * fn_reject_item(p_item_id, p_reason) -> void
+ *
+ * Failed authentication. Moves the item to returned_to_consignor and appends
+ * 'REJECTED: <reason>' to grading_notes.
+ *
+ * The reason is appended to a permanent record the consignor can be shown, so
+ * write it for them, not as an internal shorthand. A minted item cannot be
+ * rejected.
+ *
+ * @throws FORBIDDEN ("admin privileges required"), NOT_FOUND, WRONG_STATUS.
+ */
+export async function rejectItem(itemId: UUID, reason: string): Promise<void> {
+  const supabase = await createServerSupabase();
+  unwrap(
+    await supabase.rpc('fn_reject_item', { p_item_id: itemId, p_reason: reason }),
+    'fn_reject_item',
+  );
 }
 
 // ============================================================
@@ -1288,6 +1530,72 @@ export async function getConsignment(
     items: items.map((item) => toItemSummary(item, cardByItem.get(item.id) ?? null)),
     events,
   };
+}
+
+/**
+ * The grading queue: items across every consignment. Added by 008.
+ *
+ * Visibility is whatever the caller's session allows, and the three policies
+ * differ sharply. An admin sees everything (items_admin_read). A consignor
+ * sees their own (items_consignor_read). Anyone else sees only minted,
+ * redemption_hold and shipped items (items_public_read) — so an anonymous
+ * caller asking for `{ status: ['pending_intake'] }` gets an empty array
+ * rather than an error. Empty here means "none you may see", not "none exist".
+ *
+ * Oldest first: a queue is worked front to back.
+ */
+export async function getItems(query: ItemsQuery = {}): Promise<ItemSummary[]> {
+  const supabase = await createServerSupabase();
+  const page = pageBounds(query.limit, query.offset);
+
+  let builder = supabase
+    .from('items')
+    .select(`${ITEM_SUMMARY_COLUMNS}, sku:skus(${SKU_REF_COLUMNS})`);
+
+  if (query.status?.length) builder = builder.in('status', query.status as ItemStatus[]);
+  if (query.consignmentId) builder = builder.eq('consignment_id', query.consignmentId);
+  // Presence of the timestamp, not of the status — the two are independent.
+  //
+  // `.not(col, 'is', null)` for the positive case, not `.is(col, null)` with a
+  // negate flag: PostgREST's is-null test has no negating parameter in
+  // supabase-js, and passing a third argument is accepted by the types and
+  // then ignored, which silently inverts the filter.
+  if (query.graded !== undefined) {
+    builder = query.graded
+      ? builder.not('graded_at', 'is', null)
+      : builder.is('graded_at', null);
+  }
+  if (query.authenticated !== undefined) {
+    builder = query.authenticated
+      ? builder.not('authenticated_at', 'is', null)
+      : builder.is('authenticated_at', null);
+  }
+
+  const rows = unwrap(
+    await builder
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(page.from, page.to),
+    'items',
+  ) as ItemRow[] | null;
+
+  const items = rows ?? [];
+  if (items.length === 0) return [];
+
+  // items -> card is 1:1 and the card may not exist yet, so it is a lookup
+  // rather than an embed. Same shape as getConsignment().
+  const cards = unwrap(
+    await supabase
+      .from('cards')
+      .select('id, item_id')
+      .in('item_id', items.map((item) => item.id)),
+    'cards',
+  ) as { id: UUID; item_id: UUID }[] | null;
+
+  const cardByItem = new Map<UUID, UUID>();
+  for (const card of cards ?? []) cardByItem.set(card.item_id, card.id);
+
+  return items.map((item) => toItemSummary(item, cardByItem.get(item.id) ?? null));
 }
 
 /** Consignment queues, filterable by status for the admin board. */

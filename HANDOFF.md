@@ -168,6 +168,9 @@ recommendation:
 | `listCard`             | session       | checks ownership itself                 |
 | `cancelListing`        | session       | checks ownership itself                 |
 | `redeemCard`           | session       | checks ownership itself                 |
+| `gradeItem`            | **session**   | `fn_require_admin()` inside the SQL (008)|
+| `authenticateItem`     | **session**   | `fn_require_admin()` inside the SQL (008)|
+| `rejectItem`           | **session**   | `fn_require_admin()` inside the SQL (008)|
 
 **For track/admin, this is now much better news than item 7 suggested.**
 `fn_mint_card` and `fn_advance_consignment` enforce `is_admin` themselves,
@@ -241,13 +244,18 @@ invariants restated.
   `scripts/seed.mts` — both are outside my paths, and the file name was
   specified.
 
-Current state after five completed runs: 5 cards (mints #1–#5), 5 settled
-orders (`seed_pi_001`–`005`), 6 consignments, and the `seed_admin` auth user.
+Since 008 the seed grades through `fn_grade_item` and `fn_authenticate_item`
+on the admin session, with six real rubric scores, instead of writing `items`
+directly under service-role. It prints the weighting arithmetic per component.
 
-An earlier run was killed mid-flight and left an orphan — a `completed`
-consignment whose item was still `pending_intake`, ungraded, with no card.
-Those two rows have since been deleted from the live project. Not a shape the
-pipeline can otherwise produce; if it reappears, a run was interrupted.
+Current state after seven completed runs: 7 cards (mints #1–#7), 7 settled
+orders (`seed_pi_001`–`007`), 7 consignments, 7 items all minted, and the
+`seed_admin` auth user. No strays.
+
+The orphan an interrupted run once left behind is gone, and I confirmed the
+project is clean: every item is minted and every consignment completed. If a
+`completed` consignment with a `pending_intake` item reappears, a run was
+interrupted — the pipeline cannot otherwise produce that shape.
 
 ---
 
@@ -378,3 +386,69 @@ message surface from three frames down.
 **Still no UPDATE policy on `users`.** Nobody can change their own handle. 006
 calls this out deliberately; it needs a column-scoped policy in a later
 migration before any profile-editing UI is possible.
+
+---
+
+#### 15. 008 grading — new contract surface, and a numbering correction
+
+**First, the correction.** I was asked to mark "item 15 and the two grading
+blockers" resolved. **No such items exist.** HANDOFF.md has never had an item
+15 on any branch — `main`, `track/admin`, `track/design` and `track/market` all
+stop at 12, and 13/14 exist only here. There are no grading blockers filed
+either. The 008 header says it "takes HANDOFF item 15 now rather than later",
+so the intent was clearly recorded somewhere, but not in this file. Rather
+than invent a resolution for items I cannot find, this entry records what 008
+actually delivered. If item 15 lives in another doc, point me at it.
+
+**What 008 closed, whether or not it was written down:** the grading queue had
+no write path at all. `scripts/seed.ts` wrote `items` directly under
+service-role, which is not something an admin UI can or should do, and the six
+rubric components had nowhere to live but JSON inside `grading_notes`.
+
+**New contract surface (additive — the original 16 are untouched):**
+
+| function | notes |
+| --- | --- |
+| `gradeItem(itemId, float, notes?, components?)` | session client, admin-guarded |
+| `authenticateItem(itemId, location?)` | session client, admin-guarded |
+| `rejectItem(itemId, reason)` | session client, admin-guarded |
+| `getItems(query)` | items across all consignments — the grading queue |
+
+Plus `ItemsQuery`, `GradeComponents`, `GRADE_WEIGHTS`,
+`gradeFloatFromComponents()`, and two `ContractErrorCode` members. The
+extension was explicitly authorised for 008 and is not standing permission to
+add a fifth; the file header says so.
+
+**For track/admin, the three things that will save you time:**
+
+1. **Do not ask the grader for a float.** Score the six components, then call
+   `gradeFloatFromComponents()` and send the result. `items_grade_components_sum`
+   rejects any other combination, and the rubric is explicit that deciding the
+   total first is the failure mode it exists to prevent. Verified live: a float
+   of 0.500 with components summing to 0.062 is refused.
+2. **The two new error codes tell you which constraint failed.**
+   `GRADE_COMPONENTS_MISMATCH` — float is not the weighted sum; show the
+   computed value and let them accept it. `GRADE_COMPONENTS_INCOMPLETE` — some
+   but not all six; it is all or none. Both arrive as SQLSTATE 23514, which on
+   its own says only "a check failed", so the mapping is by constraint name.
+   Both verified firing against the live project.
+3. **`ItemSummary.grade` is null for anything graded before 008**, and null as
+   a set rather than field by field. Your UI needs that path regardless — and
+   the fixtures are all in it (see below).
+
+**`graded` / `authenticated` on `ItemsQuery` filter on the timestamp, not the
+status,** because the two are independent: an item can be authenticated before
+it is graded or after, and only when both have happened does it reach
+`in_custody` and become mintable. The queue you most likely want is
+`getItems({ graded: false })`.
+
+**`getItems` returns what your session may see.** An admin sees everything, a
+consignor their own, anyone else only minted/redemption_hold/shipped. An empty
+array means "none you may see", not "none exist".
+
+**The fixtures carry null components.** Extending `Item` with the six columns
+forced a change to `lib/mock/fixtures.ts` (not my path — it would not compile
+otherwise), and I kept it minimal: six nulls in the one `.map()`. Populating
+them means choosing six scores whose weighted sum is each seed float to 3dp, or
+the fixtures would describe rows the database would reject. Say the word if you
+want the populated path to render and I will do the arithmetic.

@@ -395,6 +395,21 @@ export const items: Item[] = itemSeeds.map((seed) => ({
   authenticated_by: USER_IDS.aiman,
   custody_location: 'KL-VAULT-A',
   reserve_price_cents: seed.reserve,
+  // Rubric components, added to `items` by 008_grading.sql. Null across the
+  // board because these fixtures were graded before it, which is exactly the
+  // case items_grade_components_sum exempts (`grade_outsole is null or ...`)
+  // and a state that will exist in production for every pre-008 row.
+  //
+  // Populating them means picking six scores whose weighted sum is each
+  // seed.float to 3dp, or the fixtures would describe rows the database would
+  // reject. Worth doing if track/admin wants the populated path to render —
+  // see HANDOFF.md.
+  grade_outsole: null,
+  grade_midsole: null,
+  grade_creasing: null,
+  grade_upper: null,
+  grade_heel: null,
+  grade_accessories: null,
   created_at:
     seed.consignment === CONSIGNMENT_IDS.first
       ? '2026-05-06T07:20:00.000Z'
