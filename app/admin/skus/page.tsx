@@ -1,21 +1,19 @@
 /**
  * app/admin/skus/page.tsx
  *
- * The catalog. READ-ONLY for now, deliberately: 009 gave skus and
- * sku_float_curve admin write policies, but AGENT_RULES routes every write
- * through the contract and the contract has no SKU write functions — the
- * create/edit forms arrive with createSku()/updateSku(), filed in
- * docs/handoff/admin.md. Building the forms against a direct table write
- * would work today and be the exact second write path the contract exists
- * to prevent.
+ * The catalog. Rows open the edit screen; creation is its own page. Writes
+ * go through upsertSku()/setFloatCurve() on the edit screens — the read-only
+ * era ended when the contract grew them.
  *
  * Tier is shown from the oracle price via tierForPrice — display of the same
  * derivation fn_mint_card runs, never a stored value.
  */
 
 import type { Metadata } from "next";
+import Link from "next/link";
 import { requireAdminPage } from "@/components/admin/auth";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Table, TBody, THead, Td, Th, Tr } from "@/components/ui/Table";
 import { getSkus } from "@/lib/api/contract";
@@ -36,22 +34,25 @@ export default async function SkusPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-6">
-      <header className="flex flex-col gap-1">
-        <h1 className="font-mono text-lg uppercase tracking-tight">SKUs</h1>
-        <p className="font-mono text-[11px] leading-snug tracking-tight text-muted">
-          {skus.length} in the catalog. Tier derives from the oracle price —
-          the float never changes it.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <h1 className="font-mono text-lg uppercase tracking-tight">SKUs</h1>
+          <p className="font-mono text-[11px] leading-snug tracking-tight text-muted">
+            {skus.length} in the catalog. Tier derives from the oracle price —
+            the float never changes it.
+          </p>
+        </div>
+        <Button size="sm" href="/admin/skus/new">
+          New SKU
+        </Button>
       </header>
 
-      <p className="border border-[#E8B33A] bg-overlay p-2 font-mono text-[10px] leading-snug tracking-tight text-[#E8B33A]">
-        Read-only. 009 unblocked SKU writes at the database, but all writes go
-        through the contract and it has no createSku()/updateSku() yet — the
-        CRUD forms arrive with them. Filed in docs/handoff/admin.md.
-      </p>
-
       {skus.length === 0 ? (
-        <EmptyState title="Empty catalog" description="No SKUs exist yet." />
+        <EmptyState
+          title="Empty catalog"
+          description="No SKUs exist yet."
+          action={<Button size="sm" href="/admin/skus/new">Create the first</Button>}
+        />
       ) : (
         <Table>
           <THead>
@@ -63,6 +64,9 @@ export default async function SkusPage() {
               <Th className="text-right">Confidence</Th>
               <Th className="text-right">Mint cap</Th>
               <Th>Sprite</Th>
+              <Th>
+                <span className="sr-only">Edit</span>
+              </Th>
             </Tr>
           </THead>
           <TBody>
@@ -112,6 +116,14 @@ export default async function SkusPage() {
                   <Td className="text-muted">
                     {sku.sprite_key ?? "—"}
                     {sku.palette != null ? " · palette" : " · no palette"}
+                  </Td>
+                  <Td>
+                    <Link
+                      href={`/admin/skus/${sku.id}`}
+                      className="text-accent underline-offset-2 hover:underline"
+                    >
+                      Edit
+                    </Link>
                   </Td>
                 </Tr>
               );

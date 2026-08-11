@@ -3,19 +3,23 @@
  *
  * LOCAL READ ADAPTERS — TEMPORARY, AND READS ONLY.
  *
- * Three reads the admin screens need that `lib/api/contract.ts` does not
- * expose yet, each filed in docs/handoff/admin.md. The parallel-build rules
- * allow a local adapter for a contract gap; every one of these dies the day
+ * Reads the admin screens need that `lib/api/contract.ts` does not expose
+ * yet, each filed in docs/handoff/admin.md. The parallel-build rules allow a
+ * local adapter for a contract gap; every one of these dies the day
  * track/data ships the real function:
  *
  *   - getAdminItem(id)        -> wants getItem(id) or ItemsQuery.id
  *   - getItemOwners(ids)      -> wants consignor_id on ItemSummary
- *   - getAdminRedemptions()   -> wants getRedemptions()
+ *   - getSkuFloatCurve(skuId) -> wants getFloatCurve(skuId)
+ *   - getAdminSku(id)         -> wants getSku(id) or SkusQuery.id
+ *
+ * (getAdminRedemptions lived here until getRedemptions() landed on the
+ * contract, and was deleted the same day — the promised lifecycle.)
  *
  * They are READS on the session client, relying on RLS the same way the
- * contract's own reads do: items_admin_read (004), redemptions_admin_read
- * (009), cards_public_read (001), public_profiles (007). No write lives here
- * and none may be added — AGENT_RULES: all writes go through the contract.
+ * contract's own reads do: items_admin_read (004), cards_public_read (001),
+ * curve_read (009). No write lives here and none may be added — AGENT_RULES:
+ * all writes go through the contract.
  *
  * Column projections mirror the contract's style. Never select *.
  *
@@ -25,8 +29,10 @@
  */
 
 import type {
+  FloatCurveBand,
   GradeComponents,
   ItemSummary,
+  Sku,
   SkuRef,
 } from "@/lib/api/contract";
 import type { ItemStatus, Json, Timestamptz, UUID } from "@/lib/db/types";
@@ -168,72 +174,50 @@ export async function getItemOwners(itemIds: UUID[]): Promise<Map<UUID, UUID | n
 }
 
 // ------------------------------------------------------------
-// Redemptions, for the fulfilment screen
+// A SKU's float curve, for the curve editor
 // ------------------------------------------------------------
 
-export interface AdminRedemption {
-  id: UUID;
-  status: string;
-  handling_fee_cents: number;
-  shipping_address: Json;
-  carrier: string | null;
-  tracking_number: string | null;
-  requested_at: Timestamptz;
-  shipped_at: Timestamptz | null;
-  card: {
-    id: UUID;
-    mint_number: number;
-    float_value: number;
-    sku: { brand: string; model: string; colorway: string; size_us: number };
-  };
-  requester: { handle: string; level: number };
-}
-
-interface AdminRedemptionRow {
-  id: UUID;
-  status: string;
-  handling_fee_cents: number;
-  shipping_address: Json;
-  carrier: string | null;
-  tracking_number: string | null;
-  requested_at: Timestamptz;
-  shipped_at: Timestamptz | null;
-  card: AdminRedemption["card"] | null;
-  requester: AdminRedemption["requester"] | null;
-}
-
 /**
- * Oldest unshipped first — fulfilment is a queue, and the request that has
- * waited longest is the one to pick up next.
- *
- * The requester embeds from `public_profiles`, never `users` — since 006 an
- * embed on `users` silently yields null for anyone but the caller.
+ * The current bands, ordered by float_min — what setFloatCurve() will replace.
+ * `curve_read` (009) is public, so no admin nuance here. An empty array is a
+ * SKU on the linear fallback, which is a real state, not a failure.
  */
-export async function getAdminRedemptions(): Promise<AdminRedemption[]> {
+export async function getSkuFloatCurve(skuId: UUID): Promise<FloatCurveBand[]> {
   const supabase = await createServerSupabase();
 
   const result = await supabase
-    .from("redemptions")
-    .select(
-      "id, status, handling_fee_cents, shipping_address, carrier, tracking_number, " +
-        "requested_at, shipped_at, " +
-        "card:cards(id, mint_number, float_value, " +
-        "sku:skus(brand, model, colorway, size_us)), " +
-        "requester:public_profiles(handle, level)",
-    )
-    .order("requested_at", { ascending: true });
+    .from("sku_float_curve")
+    .select("float_min, float_max, value_multiplier")
+    .eq("sku_id", skuId)
+    .order("float_min", { ascending: true });
   if (result.error) {
-    throw new Error(`redemptions: ${result.error.message}`, { cause: result.error });
+    throw new Error(`sku_float_curve: ${result.error.message}`, {
+      cause: result.error,
+    });
   }
 
-  return ((result.data ?? []) as unknown as AdminRedemptionRow[]).map((row) => {
-    if (!row.card) throw new Error(`redemptions.card embed missing for ${row.id}`);
-    return {
-      ...row,
-      card: row.card,
-      // fn_redeem_card writes user_id from a real users row, so a missing
-      // profile embed should be impossible; degrade readably if it happens.
-      requester: row.requester ?? { handle: "(unknown)", level: 0 },
-    };
-  });
+  return (result.data ?? []) as FloatCurveBand[];
+}
+
+// ------------------------------------------------------------
+// One SKU, by id, for the edit form
+// ------------------------------------------------------------
+
+/** Same projection the contract's SKU reads use. skus_read is public. */
+export async function getAdminSku(skuId: UUID): Promise<Sku | null> {
+  const supabase = await createServerSupabase();
+
+  const result = await supabase
+    .from("skus")
+    .select(
+      "id, brand, model, colorway, size_us, retail_price_cents, market_price_cents, " +
+        "price_confidence, priced_at, demand_score, sprite_key, palette, mint_cap, created_at",
+    )
+    .eq("id", skuId)
+    .maybeSingle();
+  if (result.error) {
+    throw new Error(`skus: ${result.error.message}`, { cause: result.error });
+  }
+
+  return (result.data as Sku | null) ?? null;
 }
