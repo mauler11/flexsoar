@@ -158,20 +158,24 @@ const GRADE_WEIGHTS = {
 };
 
 /**
- * Mirrors `round(sum(component * weight), 3)` in the constraint. If this and
- * Postgres ever disagree the grade is rejected outright rather than stored
- * wrong, which is the right way round.
+ * Mirrors the constraint in INTEGER arithmetic, the same way
+ * lib/db/grading.ts does (this script cannot import it — the contract's
+ * module graph reaches next/headers). Binary FP rounds exact half-milli ties
+ * down while Postgres numeric rounds them half away from zero, so an FP
+ * version of this line produced floats the constraint rejects — see
+ * docs/handoff/admin.md item 5. Hundredths x whole percents land exactly in
+ * ten-thousandths; one half-up rounding at the end matches numeric.
  */
-const GRADED_FLOAT: FloatValue =
-  Math.round(
-    (GRADE_COMPONENTS.outsole * GRADE_WEIGHTS.outsole +
-      GRADE_COMPONENTS.midsole * GRADE_WEIGHTS.midsole +
-      GRADE_COMPONENTS.creasing * GRADE_WEIGHTS.creasing +
-      GRADE_COMPONENTS.upper * GRADE_WEIGHTS.upper +
-      GRADE_COMPONENTS.heel * GRADE_WEIGHTS.heel +
-      GRADE_COMPONENTS.accessories * GRADE_WEIGHTS.accessories) *
-      1000,
-  ) / 1000;
+const GRADED_FLOAT: FloatValue = (() => {
+  const tenThousandths =
+    Math.round(GRADE_COMPONENTS.outsole * 100) * Math.round(GRADE_WEIGHTS.outsole * 100) +
+    Math.round(GRADE_COMPONENTS.midsole * 100) * Math.round(GRADE_WEIGHTS.midsole * 100) +
+    Math.round(GRADE_COMPONENTS.creasing * 100) * Math.round(GRADE_WEIGHTS.creasing * 100) +
+    Math.round(GRADE_COMPONENTS.upper * 100) * Math.round(GRADE_WEIGHTS.upper * 100) +
+    Math.round(GRADE_COMPONENTS.heel * 100) * Math.round(GRADE_WEIGHTS.heel * 100) +
+    Math.round(GRADE_COMPONENTS.accessories * 100) * Math.round(GRADE_WEIGHTS.accessories * 100);
+  return (Math.floor(tenThousandths / 10) + (tenThousandths % 10 >= 5 ? 1 : 0)) / 1000;
+})();
 
 /** What the consignor asks for the card. */
 const LIST_PRICE_CENTS: Cents = 21_500;

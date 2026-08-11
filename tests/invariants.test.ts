@@ -33,6 +33,11 @@ import {
   spriteMapForKey,
   type SpriteMap,
 } from '../lib/sprites';
+import {
+  GRADE_WEIGHTS,
+  gradeFloatFromComponents,
+  type GradeComponents,
+} from '../lib/db/grading';
 import type { Card, Sku, User } from '../lib/db/types';
 
 // ------------------------------------------------------------
@@ -497,4 +502,116 @@ describe('skus.sprite_key / skus.palette', () => {
       ).toEqual([]);
     },
   );
+});
+
+// ------------------------------------------------------------
+// GRADING ARITHMETIC
+// ------------------------------------------------------------
+//
+// items_grade_components_sum recomputes the weighted sum in Postgres `numeric`
+// and rejects any float that disagrees, so gradeFloatFromComponents() must
+// match numeric EXACTLY — off by one milli is a rejected grade, not a display
+// nit. The binary-FP version of this helper survived 77 tests while rounding
+// ~3% of valid 2dp grades the wrong way (every exact half-milli tie landed
+// just under .5 in FP and went down; numeric rounds half away from zero).
+// These tests exist so that class of bug cannot pass again.
+
+/**
+ * The constraint's arithmetic with no floating point anywhere: components in
+ * exact hundredths, weights in exact percents, product in ten-thousandths,
+ * final rounding half-up (== numeric's half away from zero, since scores are
+ * never negative).
+ */
+const integerExactFloat = (c: GradeComponents): number => {
+  const tenThousandths =
+    Math.round(c.outsole * 100) * 25 +
+    Math.round(c.midsole * 100) * 20 +
+    Math.round(c.creasing * 100) * 20 +
+    Math.round(c.upper * 100) * 20 +
+    Math.round(c.heel * 100) * 10 +
+    Math.round(c.accessories * 100) * 5;
+  const millis = Math.floor(tenThousandths / 10) + (tenThousandths % 10 >= 5 ? 1 : 0);
+  return millis / 1000;
+};
+
+const zeroGrade: GradeComponents = {
+  outsole: 0,
+  midsole: 0,
+  creasing: 0,
+  upper: 0,
+  heel: 0,
+  accessories: 0,
+};
+
+const COMPONENT_NAMES = Object.keys(GRADE_WEIGHTS) as (keyof GradeComponents)[];
+
+describe('gradeFloatFromComponents', () => {
+  it('carries the 008 weights', () => {
+    expect(GRADE_WEIGHTS).toEqual({
+      outsole: 0.25,
+      midsole: 0.2,
+      creasing: 0.2,
+      upper: 0.2,
+      heel: 0.1,
+      accessories: 0.05,
+    });
+  });
+
+  it('rounds the documented counterexample up, like numeric', () => {
+    // accessories 0.29: 29 x 5 = 145 ten-thousandths = 0.0145 -> 0.015.
+    // The FP version returned 0.014 and the constraint rejected the grade.
+    expect(gradeFloatFromComponents({ ...zeroGrade, accessories: 0.29 })).toBe(0.015);
+  });
+
+  it.each(COMPONENT_NAMES)(
+    'agrees with integer-exact arithmetic for every 2dp value of %s',
+    (name) => {
+      const failures: string[] = [];
+      for (let hundredths = 0; hundredths <= 100; hundredths++) {
+        const value = hundredths / 100;
+        const grade = { ...zeroGrade, [name]: value };
+        const got = gradeFloatFromComponents(grade);
+        const expected = integerExactFloat(grade);
+        if (got !== expected) {
+          failures.push(`${name}=${value.toFixed(2)}: got ${got}, numeric says ${expected}`);
+        }
+      }
+      expect(failures).toEqual([]);
+    },
+  );
+
+  it('agrees with integer-exact arithmetic when all six move together', () => {
+    // Weights sum to 100%, so six equal scores v must produce exactly v — and
+    // every 2dp v is already a 3dp float, no rounding involved.
+    for (let hundredths = 0; hundredths <= 100; hundredths++) {
+      const value = hundredths / 100;
+      const grade: GradeComponents = {
+        outsole: value,
+        midsole: value,
+        creasing: value,
+        upper: value,
+        heel: value,
+        accessories: value,
+      };
+      expect(gradeFloatFromComponents(grade)).toBe(value);
+      expect(integerExactFloat(grade)).toBe(value);
+    }
+  });
+
+  it('agrees on a deterministic two-component sweep that is dense in ties', () => {
+    // heel (10%) x accessories (5%): products in ten-thousandths end in 0 or 5
+    // constantly, so this plane is where half-milli ties live. 101x101 cases.
+    const failures: string[] = [];
+    for (let h = 0; h <= 100; h++) {
+      for (let a = 0; a <= 100; a++) {
+        const grade = { ...zeroGrade, heel: h / 100, accessories: a / 100 };
+        const got = gradeFloatFromComponents(grade);
+        const expected = integerExactFloat(grade);
+        if (got !== expected) {
+          failures.push(`heel=${h / 100} accessories=${a / 100}: got ${got}, expected ${expected}`);
+        }
+      }
+    }
+    expect(failures).toEqual([]);
+  });
 });

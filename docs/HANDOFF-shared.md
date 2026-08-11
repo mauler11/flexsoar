@@ -450,3 +450,38 @@ otherwise), and I kept it minimal: six nulls in the one `.map()`. Populating
 them means choosing six scores whose weighted sum is each seed float to 3dp, or
 the fixtures would describe rows the database would reject. Say the word if you
 want the populated path to render and I will do the arithmetic.
+
+---
+
+#### 16. admin.md items 3, 4, 5 — landed (getItem, link columns, tie-rounding fix)
+
+Filed on `track/admin` (`docs/handoff/admin.md` there; that branch renumbered
+the file, so this note lives here to avoid a manufactured merge conflict).
+
+- **Item 5, the real bug: `gradeFloatFromComponents()` rewritten in integer
+  arithmetic.** The FP version rounded every exact half-milli tie down while
+  `items_grade_components_sum` recomputes in `numeric` and rounds half away
+  from zero — ~3% of valid 2dp grades produced a float the constraint then
+  rejected. Now: components to exact hundredths, weights as whole percents,
+  products summed in ten-thousandths, one half-up rounding at the end. The
+  helper moved to `lib/db/grading.ts` (pure, testable — the contract module
+  graph reaches `next/headers`); `lib/api/contract.ts` re-exports it, so no
+  import changes anywhere. Verified against the live database on the
+  counterexample: accessories 0.29 alone — 0.014 (old answer) rejected 23514,
+  0.015 (new answer) accepted. `scripts/seed.ts` had the same formula inlined
+  and got the same rewrite. **`floatForSave()` in
+  `app/admin/grading/actions.ts` is now a no-op and can be deleted.**
+- **Tests: 77 -> 87.** A sweep of every component at 0.00–1.00 in 0.01 steps,
+  all six moving together, and a 101×101 heel×accessories plane (where the
+  ties are dense — 240 failing cases under the old code), all asserted against
+  integer-exact arithmetic. The suite was run against the buggy implementation
+  first to prove it fails.
+- **Item 3: `getItem(itemId)`** — one item with SKU embed and card_id lookup,
+  RLS-scoped like `getItems()`. Retires `getAdminItem()`.
+- **Item 4: `consignment_id` and `consignor_id` on `ItemSummary`** (and in the
+  projection). Retires `getItemOwners()` — the mint action can take the owner
+  straight off the item.
+- `getAdminRedemptions()` was already covered by 009's `getRedemptions()`.
+  **All three local adapters in `components/admin/db-reads.ts` can be
+  deleted.** One rename to note: the contract calls the requester embed
+  `user`, the adapter called it `requester`.

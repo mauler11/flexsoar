@@ -10,19 +10,20 @@
  * HANDOFF.md and work around it locally. Do not add a function here.
  *
  * ------------------------------------------------------------------
- * TWO SANCTIONED EXTENSIONS: 008_grading.sql and 009_rls_sweep.sql.
+ * THREE SANCTIONED EXTENSIONS.
  *
  * The freeze still holds for the original 16 functions: none of their
  * signatures, parameters or return types have changed. On explicit
- * instruction, functions were ADDED —
+ * instruction, surface was ADDED —
  *   008: gradeItem, authenticateItem, rejectItem, getItems
  *   009: markShipped, getRedemptions, upsertSku, setFloatCurve
+ *   admin.md 3+4: getItem; consignment_id + consignor_id on ItemSummary
  * along with their query/input types and two ContractErrorCode members.
  * Additive only: nothing that existed before behaves differently.
  *
- * Each grant was for its migration. It is not standing permission — the rule
+ * Each grant was for its request. It is not standing permission — the rule
  * above still applies to everything else, so file a handoff request rather
- * than appending a ninth.
+ * than appending more.
  * ------------------------------------------------------------------
  *
  * Rules this contract encodes:
@@ -58,6 +59,7 @@ import {
   type FloatCurveRow,
 } from '@/lib/db/valuation';
 import { TIER_BANDS } from '@/lib/domain/rarity';
+import type { GradeComponents } from '@/lib/db/grading';
 
 import type {
   Card,
@@ -265,25 +267,16 @@ export interface ListingDetail extends ListingSummary {
   order: OrderSummary | null;
 }
 
-/**
- * The six rubric components, 0.00 .. 1.00 each. All six or none —
- * items_grade_components_complete rejects a partial set.
- *
- * The float is their weighted sum and the database checks it, so compute it
- * with gradeFloatFromComponents() rather than asking the grader for a total.
- */
-export interface GradeComponents {
-  outsole: number;
-  midsole: number;
-  creasing: number;
-  upper: number;
-  heel: number;
-  accessories: number;
-}
-
 export interface ItemSummary {
   id: UUID;
   sku_id: UUID;
+  /**
+   * Link columns, added for docs/handoff/admin.md item 4: the mint action
+   * resolves each item's consignor as the mint owner, and the grading bench
+   * links back to the consignment. Null for house-owned or orphaned stock.
+   */
+  consignment_id: UUID | null;
+  consignor_id: UUID | null;
   status: ItemStatus;
   float_value: FloatValue | null;
   graded_at: Timestamptz | null;
@@ -539,7 +532,7 @@ const ORDER_COLUMNS =
   'net_cents, settlement_ref, status, created_at';
 
 const ITEM_SUMMARY_COLUMNS =
-  'id, sku_id, status, float_value, graded_at, grading_notes, photos, ' +
+  'id, sku_id, consignment_id, consignor_id, status, float_value, graded_at, grading_notes, photos, ' +
   'authenticated_at, custody_location, reserve_price_cents, ' +
   'grade_outsole, grade_midsole, grade_creasing, grade_upper, grade_heel, ' +
   'grade_accessories';
@@ -694,6 +687,8 @@ interface ListingRow {
 interface ItemRow {
   id: UUID;
   sku_id: UUID;
+  consignment_id: UUID | null;
+  consignor_id: UUID | null;
   status: ItemStatus;
   float_value: FloatValue | null;
   graded_at: Timestamptz | null;
@@ -845,6 +840,8 @@ function toItemSummary(row: ItemRow, cardId: UUID | null): ItemSummary {
   return {
     id: row.id,
     sku_id: row.sku_id,
+    consignment_id: row.consignment_id,
+    consignor_id: row.consignor_id,
     status: row.status,
     float_value: row.float_value,
     graded_at: row.graded_at,
@@ -1175,42 +1172,11 @@ export async function refreshLevels(): Promise<number> {
 // So they run on the SESSION client — service-role has no auth.uid() and is
 // refused. Callers should still check is_admin in the page (HANDOFF item 7).
 
-/**
- * The rubric weights from 008_grading.sql, which are the ones in
- * docs/GRADING_RUBRIC.md. Kept here so a UI can show the arithmetic live as
- * the grader scores each component.
- */
-export const GRADE_WEIGHTS: Readonly<Record<keyof GradeComponents, number>> = {
-  outsole: 0.25,
-  midsole: 0.2,
-  creasing: 0.2,
-  upper: 0.2,
-  heel: 0.1,
-  accessories: 0.05,
-};
-
-/**
- * The float implied by a set of component scores, to 3dp.
- *
- * Mirrors the items_grade_components_sum constraint exactly. Use it to fill the
- * float field rather than asking the grader for a total: the rubric is explicit
- * that scoring the components comes first and the float falls out, and the
- * database rejects any other combination with GRADE_COMPONENTS_MISMATCH.
- */
-export function gradeFloatFromComponents(components: GradeComponents): FloatValue {
-  const total =
-    components.outsole * GRADE_WEIGHTS.outsole +
-    components.midsole * GRADE_WEIGHTS.midsole +
-    components.creasing * GRADE_WEIGHTS.creasing +
-    components.upper * GRADE_WEIGHTS.upper +
-    components.heel * GRADE_WEIGHTS.heel +
-    components.accessories * GRADE_WEIGHTS.accessories;
-
-  // numeric(4,3) in the column, round(..., 3) in the constraint. Doing this in
-  // binary floating point and rounding at the end matches, because every input
-  // has at most 2dp and the weights at most 2dp.
-  return Math.round(total * 1000) / 1000;
-}
+// The rubric arithmetic lives in lib/db/grading.ts so it is testable without
+// dragging next/headers into the test runner — this module reaches it through
+// lib/supabase/server.ts. Re-exported here so consumers keep one import path.
+export { GRADE_WEIGHTS, gradeFloatFromComponents } from '@/lib/db/grading';
+export type { GradeComponents } from '@/lib/db/grading';
 
 /**
  * fn_grade_item(p_item_id, p_float, p_notes, p_outsole .. p_accessories) -> void
@@ -1819,6 +1785,40 @@ export async function getConsignment(
  *
  * Oldest first: a queue is worked front to back.
  */
+/**
+ * One item by id — the grading bench view. Added for docs/handoff/admin.md
+ * item 3, retiring the getAdminItem() local adapter.
+ *
+ * Null means "no such item or none you may see": items_admin_read,
+ * items_consignor_read and items_public_read decide, exactly as getItems().
+ */
+export async function getItem(itemId: UUID): Promise<ItemSummary | null> {
+  const supabase = await createServerSupabase();
+
+  const result = await supabase
+    .from('items')
+    .select(`${ITEM_SUMMARY_COLUMNS}, sku:skus(${SKU_REF_COLUMNS})`)
+    .eq('id', itemId)
+    .maybeSingle();
+
+  if (result.error && !isNoRows(result.error)) fail(result.error, 'items');
+
+  const row = result.data as ItemRow | null;
+  if (!row) return null;
+
+  // items -> card is 1:1 and the card may not exist yet — a lookup, not an
+  // embed, same as getItems() and getConsignment().
+  const card = await supabase
+    .from('cards')
+    .select('id')
+    .eq('item_id', itemId)
+    .maybeSingle();
+
+  if (card.error && !isNoRows(card.error)) fail(card.error, 'cards');
+
+  return toItemSummary(row, (card.data as { id: UUID } | null)?.id ?? null);
+}
+
 export async function getItems(query: ItemsQuery = {}): Promise<ItemSummary[]> {
   const supabase = await createServerSupabase();
   const page = pageBounds(query.limit, query.offset);
