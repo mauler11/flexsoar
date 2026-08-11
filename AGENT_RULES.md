@@ -14,14 +14,16 @@ Source of truth: `supabase/migrations/`. Read `001_schema.sql` and
 `002_operations.sql` before writing data code, and check the later
 numbered migrations for what has changed since.
 
+Grading is specified in `docs/GRADING_RUBRIC.md`. Six weighted components
+sum to the float; the database enforces the arithmetic.
+
 ## Hard rules
 
 - **Stay in your lane.** You own only the paths given in your task prompt.
   Do not create, edit, or delete any file outside them, for any reason.
 - **`lib/api/contract.ts`: the original 16 signatures are frozen.** They
   never change. Additive exports ARE allowed, and only track/data writes
-  this file. If you need something it doesn't expose, append the request
-  to `HANDOFF.md`.
+  this file. If you need something it doesn't expose, file a handoff item.
 - **Never edit `package.json`.** Append needed dependencies to `DEPS.md`
   as `- package@version — why`. A human installs them. Parallel edits to
   package.json and the lockfile are the fastest way to deadlock this build.
@@ -30,18 +32,31 @@ numbered migrations for what has changed since.
   globals.css. There is no tailwind.config.ts and none should be created.)
 - **Never edit the `.sql` files.** They are the source of truth. Schema
   changes are made by the human as a new numbered migration, never by a
-  track agent. If you need one, write the request to `HANDOFF.md`.
+  track agent. If you need one, file a handoff item.
 - **`lib/mock/**` and `tests/**` are unowned.** Phase 0 artifacts. Edit
   them only when a prompt names them explicitly and says your lane is
   extended for that task.
 - **Your branch only.** Do not merge, rebase, or switch branches.
-- **Blocked? Write it to `HANDOFF.md` and move on.** Do not invent a
-  workaround that touches another track's files.
+
+## Handoff
+
+One file per track, so four agents never conflict on one document and
+every agent can read every other agent's items after a rebase.
+
+- **File your items in `docs/handoff/<your-track>.md`** — `data.md`,
+  `design.md`, `admin.md`, or `market.md`. Create it if it doesn't exist.
+- **Never edit another track's handoff file**, and never edit
+  `docs/HANDOFF-shared.md`. The human promotes items into shared.
+- **Read all of them before starting.** Something you need may already be
+  filed, or already answered, by another track. Do not assume an item you
+  cannot find was never written — check every file in `docs/handoff/`.
+- **Blocked? File it and move on.** Do not invent a workaround that
+  touches another track's files.
 
 ## Domain invariants
 
 Assume these. Never work around them. If a task appears to require
-breaking one, stop and write it to `HANDOFF.md`.
+breaking one, stop and file a handoff item.
 
 - **Tier is value. Float is condition.** Tier comes from the SKU's base
   oracle price via `tier_bands`. A pristine float on a cheap shoe is a
@@ -62,32 +77,40 @@ breaking one, stop and write it to `HANDOFF.md`.
 
 ## Authorisation
 
-Set by migrations 004-007. Full detail in `HANDOFF.md` item 11.
+Set by migrations 004-008. Detail in `docs/handoff/data.md`.
 
-- `mintCard` and `advanceConsignment` run on the **session** client.
-  `fn_require_admin()` enforces `is_admin` inside the transaction and
-  returns `FORBIDDEN` otherwise. Calling them service-role fails —
-  `auth.uid()` is null under the service key.
-- `purchaseCard` and `refreshLevels` run **service-role**. Neither has a
-  session by definition (webhook, cron).
-- `listCard`, `cancelListing` and `redeemCard` run on the session client
-  and check ownership themselves.
+- **Session client, guarded by `fn_require_admin()` inside the SQL:**
+  `mintCard`, `advanceConsignment`, `gradeItem`, `authenticateItem`,
+  `rejectItem`. Calling any of these service-role fails — `auth.uid()`
+  is null under the service key and the guard refuses with `FORBIDDEN`.
+- **Session client, ownership checked inside the SQL:** `listCard`,
+  `cancelListing`, `redeemCard`.
+- **Service-role:** `purchaseCard` (Stripe webhook) and `refreshLevels`
+  (cron). Neither has a session by definition.
 - Admin pages and Server Actions re-check `is_admin` server-side anyway,
   for a decent error rather than a raw Postgres refusal.
 - `users` has RLS: self-read, admin-read, self-insert (never with
-  `is_admin = true`), and handle-only self-update. Reading another
-  user's handle or level goes through the `public_profiles` view, never
-  the `users` table.
+  `is_admin = true`), handle-only self-update. Reading another user's
+  handle or level goes through the `public_profiles` view, never the
+  `users` table.
 
 ## Conventions
 
 - All `*_cents` columns are USD cents. 1 FSC = 1 USD. Ringgit is display
   only.
 - Money is always integer cents. Never floats for currency.
-- Condition floats are `numeric(4,3)` — 3 decimal places, always.
+- Condition floats are `numeric(4,3)` — 3 decimal places, always. Rubric
+  components are `numeric(3,2)`.
 - Server Components by default; `"use client"` only where interaction
   requires it. `lib/api/contract.ts` is server-only and importing it from
   a client component is a build error by design.
 - Never `select *`. Project the columns you need.
 - Surface server errors verbatim on failure. Never swallow one.
 - Run `npm test` and `tsc --noEmit` before every commit.
+
+## Verify, don't assume
+
+A passing typecheck is not evidence that a query does what you meant.
+Where a filter, a policy, or a constraint is the point of the task, probe
+it live against the project and paste the result — including the negative
+case. Several real bugs in this repo passed `tsc` cleanly.
