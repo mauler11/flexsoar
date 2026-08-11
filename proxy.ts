@@ -1,5 +1,9 @@
 /**
- * middleware.ts
+ * proxy.ts
+ *
+ * Next.js 16 renamed the `middleware.ts` file convention to `proxy.ts` and the
+ * export to `proxy`. This file was migrated by `npx @next/codemod middleware-to-proxy .`
+ * (track/data, per docs/handoff/data.md).
  *
  * Two jobs, in this order:
  *   1. Refresh the Supabase session on every matched request and write the
@@ -14,14 +18,8 @@
  *
  * Session refresh needs its own Supabase client rather than
  * createServerSupabase(): that one reads `next/headers`, which is not
- * available here. Middleware reads and writes cookies through the request and
+ * available here. Proxy reads and writes cookies through the request and
  * response objects instead.
- *
- * DEPRECATION: Next.js 16 renamed this file convention to `proxy.ts` (see
- * node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md).
- * `middleware.ts` still works and is what this track was scoped to own, so the
- * rename is left for the human running `npx @next/codemod middleware-to-proxy .`
- * — logged in HANDOFF.md.
  *
  * THE /admin GATE IS A FIRST PASS, NOT THE AUTHORISATION BOUNDARY. The Next
  * docs are explicit that proxy/middleware is for optimistic checks, not full
@@ -47,7 +45,7 @@ function withCookiesFrom(source: NextResponse, target: NextResponse): NextRespon
   return target;
 }
 
-export async function middleware(request: NextRequest): Promise<NextResponse> {
+export async function proxy(request: NextRequest): Promise<NextResponse> {
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(

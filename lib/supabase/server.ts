@@ -73,7 +73,7 @@ export async function createServerSupabase(): Promise<ServerSupabaseClient> {
             }
           } catch {
             // Server Components cannot set cookies. Swallowing here is safe
-            // *only* because middleware.ts refreshes the session on every
+            // *only* because proxy.ts refreshes the session on every visited
             // matched request and writes the rotated cookies there. If that
             // matcher stops covering a route, sessions on it stop refreshing.
           }
