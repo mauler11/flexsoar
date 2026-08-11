@@ -1,21 +1,19 @@
 /**
  * app/admin/fulfilment/page.tsx
  *
- * Redemption requests, oldest first. READ-ONLY for now, deliberately:
- * fn_mark_shipped exists (009) but has no contract wrapper, and AGENT_RULES
- * routes every write through the contract — so the carrier/tracking entry and
- * the "mark shipped" step are blocked on a markShipped() export, filed in
- * docs/handoff/admin.md. The list itself reads through the local adapter
- * under redemptions_admin_read (009), also filed for promotion to
- * getRedemptions().
+ * Redemption requests on getRedemptions(), oldest first — the request that
+ * has waited longest is the one to pick up next. Unshipped rows get the
+ * carrier/tracking entry via markShipped(); shipped rows are the immutable
+ * record of what went out.
  */
 
 import type { Metadata } from "next";
 import { requireAdminPage } from "@/components/admin/auth";
-import { getAdminRedemptions } from "@/components/admin/db-reads";
+import { MarkShippedControl } from "@/components/admin/fulfilment/MarkShippedControl";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Table, TBody, THead, Td, Th, Tr } from "@/components/ui/Table";
+import { getRedemptions, type RedemptionSummary } from "@/lib/api/contract";
 import type { Json } from "@/lib/db/types";
 
 export const metadata: Metadata = {
@@ -46,7 +44,7 @@ function formatAddress(address: Json): string {
 export default async function FulfilmentPage() {
   await requireAdminPage("/admin/fulfilment");
 
-  const redemptions = await getAdminRedemptions();
+  const redemptions = await getRedemptions({ limit: 200 });
   const open = redemptions.filter((r) => r.status !== "shipped");
   const shipped = redemptions.filter((r) => r.status === "shipped");
 
@@ -60,12 +58,6 @@ export default async function FulfilmentPage() {
         </p>
       </header>
 
-      <p className="border border-[#E8B33A] bg-overlay p-2 font-mono text-[10px] leading-snug tracking-tight text-[#E8B33A]">
-        Read-only. fn_mark_shipped landed in 009 but has no contract wrapper
-        yet, and all writes go through the contract — carrier and tracking
-        entry arrive with markShipped(). Filed in docs/handoff/admin.md.
-      </p>
-
       <section className="flex flex-col gap-2">
         <h2 className="font-mono text-[13px] uppercase tracking-tight">
           Awaiting shipment ({open.length})
@@ -76,7 +68,7 @@ export default async function FulfilmentPage() {
             description="Every requested redemption has shipped."
           />
         ) : (
-          <RedemptionTable rows={open} />
+          <RedemptionTable rows={open} withShipControl />
         )}
       </section>
 
@@ -94,9 +86,13 @@ export default async function FulfilmentPage() {
   );
 }
 
-type Rows = Awaited<ReturnType<typeof getAdminRedemptions>>;
-
-function RedemptionTable({ rows }: { rows: Rows }) {
+function RedemptionTable({
+  rows,
+  withShipControl = false,
+}: {
+  rows: RedemptionSummary[];
+  withShipControl?: boolean;
+}) {
   return (
     <Table>
       <THead>
@@ -107,50 +103,65 @@ function RedemptionTable({ rows }: { rows: Rows }) {
           <Th>Requested</Th>
           <Th className="text-right">Fee</Th>
           <Th>Ship to</Th>
-          <Th>Carrier / tracking</Th>
+          <Th>{withShipControl ? "Ship" : "Carrier / tracking"}</Th>
         </Tr>
       </THead>
       <TBody>
-        {rows.map((redemption) => (
-          <Tr key={redemption.id}>
-            <Td>
-              <span className="text-foreground">
-                {redemption.card.sku.brand} {redemption.card.sku.model}
-              </span>
-              <span className="text-muted">
-                {" "}
-                · US {redemption.card.sku.size_us} · #{redemption.card.mint_number} ·{" "}
-                {Number(redemption.card.float_value).toFixed(3)}
-              </span>
-            </Td>
-            <Td>
-              {redemption.requester.handle}
-              <span className="text-muted"> · L{redemption.requester.level}</span>
-            </Td>
-            <Td>
-              <Badge tone={redemption.status === "shipped" ? "accent" : "warn"}>
-                {redemption.status}
-              </Badge>
-            </Td>
-            <Td className="text-muted tabular-nums">
-              {formatTimestamp(redemption.requested_at)}
-            </Td>
-            <Td className="text-right tabular-nums">
-              {(redemption.handling_fee_cents / 100).toFixed(2)} FSC
-            </Td>
-            <Td className="max-w-56 text-muted">
-              {formatAddress(redemption.shipping_address)}
-            </Td>
-            <Td className="text-muted">
-              {redemption.carrier
-                ? `${redemption.carrier} · ${redemption.tracking_number ?? "no tracking"}`
-                : "—"}
-              {redemption.shipped_at
-                ? ` · ${formatTimestamp(redemption.shipped_at)}`
-                : ""}
-            </Td>
-          </Tr>
-        ))}
+        {rows.map((redemption) => {
+          const sku = redemption.card.sku;
+          return (
+            <Tr key={redemption.id}>
+              <Td>
+                <span className="text-foreground">
+                  {sku.brand} {sku.model}
+                </span>
+                <span className="text-muted">
+                  {" "}
+                  · US {sku.size_us} · #{redemption.card.mint_number} ·{" "}
+                  {Number(redemption.card.float_value).toFixed(3)}
+                </span>
+                <div className="text-muted">
+                  held at {redemption.item.custody_location ?? "(no location on record)"}
+                </div>
+              </Td>
+              <Td>
+                {redemption.user.handle}
+                <span className="text-muted"> · L{redemption.user.level}</span>
+              </Td>
+              <Td>
+                <Badge tone={redemption.status === "shipped" ? "accent" : "warn"}>
+                  {redemption.status}
+                </Badge>
+              </Td>
+              <Td className="text-muted tabular-nums">
+                {formatTimestamp(redemption.requested_at)}
+              </Td>
+              <Td className="text-right tabular-nums">
+                {(redemption.handling_fee_cents / 100).toFixed(2)} FSC
+              </Td>
+              <Td className="max-w-56 text-muted">
+                {formatAddress(redemption.shipping_address)}
+              </Td>
+              <Td>
+                {withShipControl ? (
+                  <MarkShippedControl
+                    redemptionId={redemption.id}
+                    cardLabel={`${sku.brand} ${sku.model} · US ${sku.size_us} · #${redemption.card.mint_number}`}
+                  />
+                ) : (
+                  <span className="text-muted">
+                    {redemption.carrier
+                      ? `${redemption.carrier} · ${redemption.tracking_number ?? "no tracking"}`
+                      : "—"}
+                    {redemption.shipped_at
+                      ? ` · ${formatTimestamp(redemption.shipped_at)}`
+                      : ""}
+                  </span>
+                )}
+              </Td>
+            </Tr>
+          );
+        })}
       </TBody>
     </Table>
   );
