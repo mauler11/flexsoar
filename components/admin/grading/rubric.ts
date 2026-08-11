@@ -1,15 +1,23 @@
 /**
  * components/admin/grading/rubric.ts
  *
- * docs/GRADING_RUBRIC.md v1 as data, plus the arithmetic the panel runs on.
- * Pure — no React, no data access — so the float can be computed the same way
- * anywhere it is needed.
+ * docs/GRADING_RUBRIC.md v1 as data, plus the DISPLAY arithmetic the panel
+ * runs live as the grader types. Pure — no React, no data access — and safe
+ * to import from a client component, which the server-only contract is not.
  *
- * WHY INTEGERS EVERYWHERE: component scores are hundredths (0..100) and the
- * float is thousandths (0..1000), both held as integers. `items.float_value`
- * is `numeric(4,3)`, and 0.1 + 0.2 in binary floating point is not 0.3. Doing
- * the weighted sum in integer space means the number on screen is the number
- * that mints, with no rounding drift to argue about six months later.
+ * THE FLOAT THAT REACHES THE DATABASE DOES NOT COME FROM THIS FILE. The
+ * server action derives it with the contract's gradeFloatFromComponents(),
+ * the single authority that mirrors the items_grade_components_sum
+ * constraint. This file exists so the panel can show the same number while
+ * the grader is still typing; if the two ever disagreed, the database
+ * rejects the save with GRADE_COMPONENTS_MISMATCH rather than storing
+ * either one.
+ *
+ * WHY INTEGERS HERE: component scores are hundredths (0..100) and the float
+ * is thousandths (0..1000), both held as integers. `numeric` arithmetic in
+ * Postgres is exact and 0.1 + 0.2 in binary floating point is not 0.3;
+ * integer space reproduces the constraint's exact rounding, including the
+ * half-up ties.
  *
  * The float is COMPUTED from six human judgements. It is never typed directly
  * and never suggested: nothing here proposes a component score, and there is
@@ -265,102 +273,7 @@ export function parseComponentScore(raw: string): ParsedScore {
   return { ok: true, hundredths };
 }
 
-// ------------------------------------------------------------
-// 5. STORAGE — rubric §6, "enter the six component scores, not just the total"
-// ------------------------------------------------------------
-
-/**
- * What goes in `items.grading_notes`.
- *
- * INTERIM SHAPE. The six components belong in real columns; there is no
- * migration for them yet, so they ride along as JSON in the one text column
- * grading already owns. Logged in HANDOFF.md — when the columns land, read
- * these rows back with `parseGradingNotes` and backfill.
- *
- * Numbers are stored as strings at their graded precision. '0.10' round-trips
- * as '0.10'; 0.1 comes back as 0.1 and loses the fact that it was graded to
- * two decimals.
- */
-export interface GradingNotesPayload {
-  rubric: string;
-  /** The computed float, 3 decimals. Always equals the weighted sum below. */
-  float: string;
-  /** Each component at 2 decimals, keyed by ComponentId. */
-  components: Record<ComponentId, string>;
-  /** The band the grader picked off the anchors before seeing the total. */
-  expected_band: BandId | null;
-  /** The free-text note. Restorations, odd cases, anything a dispute needs. */
-  notes: string;
-}
-
-export interface BuildGradingNotesInput {
-  scores: ComponentScores;
-  expectedBand: BandId | null;
-  notes: string;
-}
-
-export function buildGradingNotesPayload({
-  scores,
-  expectedBand,
-  notes,
-}: BuildGradingNotesInput): GradingNotesPayload {
-  const components = {} as Record<ComponentId, string>;
-  for (const component of RUBRIC_COMPONENTS) {
-    components[component.id] = formatScore2(scores[component.id]);
-  }
-  return {
-    rubric: RUBRIC_VERSION,
-    float: formatFloat3(computeFloatMilli(scores)),
-    components,
-    expected_band: expectedBand,
-    notes,
-  };
-}
-
-/** The exact text written to `items.grading_notes`. Indented to stay readable. */
-export function buildGradingNotes(input: BuildGradingNotesInput): string {
-  return JSON.stringify(buildGradingNotesPayload(input), null, 2);
-}
-
-/**
- * Reads a stored payload back. Returns null for anything that is not one —
- * rows graded before this panel hold plain prose, and that is not a failure.
- */
-export function parseGradingNotes(text: string | null | undefined): GradingNotesPayload | null {
-  if (!text) return null;
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return null;
-  }
-  if (typeof parsed !== "object" || parsed === null) return null;
-
-  const candidate = parsed as Partial<GradingNotesPayload>;
-  if (candidate.rubric !== RUBRIC_VERSION) return null;
-  if (typeof candidate.components !== "object" || candidate.components === null) {
-    return null;
-  }
-
-  const components = {} as Record<ComponentId, string>;
-  for (const component of RUBRIC_COMPONENTS) {
-    const value = (candidate.components as Record<string, unknown>)[component.id];
-    if (typeof value !== "string") return null;
-    components[component.id] = value;
-  }
-
-  const expected = candidate.expected_band;
-  const expectedBand =
-    typeof expected === "string" && BAND_ANCHORS.some((b) => b.id === expected)
-      ? (expected as BandId)
-      : null;
-
-  return {
-    rubric: RUBRIC_VERSION,
-    float: typeof candidate.float === "string" ? candidate.float : "",
-    components,
-    expected_band: expectedBand,
-    notes: typeof candidate.notes === "string" ? candidate.notes : "",
-  };
-}
+// The JSON-in-grading_notes interim storage that used to live here is gone:
+// 008 gave the six components real columns (grade_outsole .. grade_accessories)
+// before anything was written in the old shape, so there is nothing to parse
+// back and no backfill to run.

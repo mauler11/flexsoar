@@ -10,6 +10,14 @@
  * components to justify it." The total stays blank until all six are scored,
  * for the same reason.
  *
+ * The preview uses rubric.ts (integer maths, client-safe). The float that is
+ * SAVED is derived server-side by the contract's gradeFloatFromComponents(),
+ * and 008's items_grade_components_sum constraint rejects anything that is
+ * not the weighted sum — so the number on screen either matches what mints or
+ * the save fails loudly. GRADE_COMPONENTS_MISMATCH and
+ * GRADE_COMPONENTS_INCOMPLETE get a sentence of context; the server's own
+ * message is always shown verbatim.
+ *
  * THE BAND CHECK WARNS, IT DOES NOT BLOCK. The grader picks the band the shoe
  * obviously belongs to off the anchors; if the computed float lands somewhere
  * else, that is a signal a component is wrong — rubric §2 says go back and find
@@ -21,66 +29,85 @@
  */
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState, useTransition } from "react";
+import { gradeItemAction } from "@/app/admin/grading/actions";
+import type { ActionResult } from "@/components/admin/action-result";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Table, TBody, THead, Td, Th, Tr } from "@/components/ui/Table";
+import type { GradeComponents } from "@/lib/api/contract";
+import type { UUID } from "@/lib/db/types";
 import {
   BAND_ANCHORS,
   RUBRIC_COMPONENTS,
   RUBRIC_VERSION,
   bandAnchor,
   bandForFloatMilli,
-  buildGradingNotes,
   computeFloatMilli,
   contributionTenThousandths,
   formatBandRange,
   formatContribution4,
   formatFloat3,
   parseComponentScore,
-  parseGradingNotes,
   type BandId,
   type ComponentId,
   type ComponentScores,
 } from "./rubric";
 
 export interface RubricPanelProps {
-  /**
-   * Existing `items.grading_notes`, when re-opening an item that has already
-   * been graded. A payload written by this panel repopulates every field;
-   * anything else (prose from before the rubric) is left alone.
-   */
-  initialGradingNotes?: string | null;
+  itemId: UUID;
+  /** The stored grade, when re-opening an already-graded item. */
+  initialGrade?: GradeComponents | null;
+  initialNotes?: string | null;
+  /** Blocks saving with the reason shown on the button (e.g. already minted). */
+  saveBlocked?: string | null;
 }
 
 type ScoreDraft = Record<ComponentId, string>;
 
-function emptyDraft(): ScoreDraft {
+function draftFrom(grade: GradeComponents | null | undefined): ScoreDraft {
   const draft = {} as ScoreDraft;
-  for (const component of RUBRIC_COMPONENTS) draft[component.id] = "";
+  for (const component of RUBRIC_COMPONENTS) {
+    const value = grade?.[component.id];
+    draft[component.id] = value == null ? "" : Number(value).toFixed(2);
+  }
   return draft;
 }
 
-export function RubricPanel({ initialGradingNotes }: RubricPanelProps) {
-  const restored = useMemo(
-    () => parseGradingNotes(initialGradingNotes),
-    [initialGradingNotes],
-  );
+/** A sentence of context per constraint, ADDED to the verbatim message. */
+function constraintContext(result: ActionResult & { ok: false }): string | null {
+  switch (result.code) {
+    case "GRADE_COMPONENTS_MISMATCH":
+      return (
+        "The database recomputed the weighted sum and got a different float " +
+        "than the one sent. The float here is derived from the components " +
+        "server-side (contract helper, tie-corrected to numeric rounding), so " +
+        "this points at drift between the contract and 008 — re-save once, " +
+        "and if it persists, file it."
+      );
+    case "GRADE_COMPONENTS_INCOMPLETE":
+      return (
+        "The database got a partial set of component scores. It is all six " +
+        "or none — there is no partial grade."
+      );
+    default:
+      return null;
+  }
+}
 
-  const [draft, setDraft] = useState<ScoreDraft>(() => {
-    if (!restored) return emptyDraft();
-    const seeded = emptyDraft();
-    for (const component of RUBRIC_COMPONENTS) {
-      seeded[component.id] = restored.components[component.id];
-    }
-    return seeded;
-  });
-  const [expectedBand, setExpectedBand] = useState<BandId | "">(
-    () => restored?.expected_band ?? "",
-  );
-  const [notes, setNotes] = useState(() => restored?.notes ?? "");
+export function RubricPanel({
+  itemId,
+  initialGrade,
+  initialNotes,
+  saveBlocked,
+}: RubricPanelProps) {
+  const [draft, setDraft] = useState<ScoreDraft>(() => draftFrom(initialGrade));
+  const [expectedBand, setExpectedBand] = useState<BandId | "">("");
+  const [notes, setNotes] = useState(initialNotes ?? "");
+  const [result, setResult] = useState<ActionResult | null>(null);
+  const [pending, startTransition] = useTransition();
 
   // ---- derived: parse, then compute. Never the other way round. ----
 
@@ -105,17 +132,21 @@ export function RubricPanel({ initialGradingNotes }: RubricPanelProps) {
   const mismatch =
     computedBand !== null && expected !== null && computedBand.id !== expected.id;
 
-  const gradingNotes =
-    scores === null
-      ? null
-      : buildGradingNotes({
-          scores,
-          expectedBand: expectedBand === "" ? null : expectedBand,
-          notes,
-        });
-
   function setScore(id: ComponentId, value: string) {
     setDraft((current) => ({ ...current, [id]: value }));
+    setResult(null);
+  }
+
+  function save() {
+    if (!scores || saveBlocked) return;
+    // Hundredths back to the 0.00–1.00 numbers the contract takes.
+    const components = Object.fromEntries(
+      RUBRIC_COMPONENTS.map((c) => [c.id, scores[c.id] / 100]),
+    ) as unknown as GradeComponents;
+
+    startTransition(async () => {
+      setResult(await gradeItemAction({ itemId, components, notes }));
+    });
   }
 
   return (
@@ -132,12 +163,12 @@ export function RubricPanel({ initialGradingNotes }: RubricPanelProps) {
         </header>
 
         <ul className="flex flex-col gap-2">
-          {parsed.map(({ component, raw, result }) => {
+          {parsed.map(({ component, raw, result: parse }) => {
             const inputId = `score-${component.id}`;
             const anchorsId = `${inputId}-anchors`;
-            const error = raw.trim() !== "" && !result.ok ? result.error : null;
-            const contribution = result.ok
-              ? contributionTenThousandths(result.hundredths, component.weightPercent)
+            const error = raw.trim() !== "" && !parse.ok ? parse.error : null;
+            const contribution = parse.ok
+              ? contributionTenThousandths(parse.hundredths, component.weightPercent)
               : null;
 
             return (
@@ -175,6 +206,7 @@ export function RubricPanel({ initialGradingNotes }: RubricPanelProps) {
                     inputMode="decimal"
                     autoComplete="off"
                     placeholder="0.00"
+                    disabled={pending}
                     aria-describedby={
                       error ? `${anchorsId} ${inputId}-error` : anchorsId
                     }
@@ -235,7 +267,7 @@ export function RubricPanel({ initialGradingNotes }: RubricPanelProps) {
           )}
           <p className="font-mono text-[10px] tracking-tight text-muted">
             Weighted sum, rounded to 3 decimals. Not typable — change a component
-            to change it.
+            to change it. The database rejects any float that is not this sum.
           </p>
         </div>
 
@@ -286,32 +318,52 @@ export function RubricPanel({ initialGradingNotes }: RubricPanelProps) {
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
             rows={3}
+            disabled={pending}
             placeholder="Restoration, odd wear, anything a dispute would need."
-            className="border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[13px] tracking-tight text-foreground placeholder:text-muted/50 pixel-shadow-sm hover:border-muted"
+            className="border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[13px] tracking-tight text-foreground placeholder:text-muted/50 pixel-shadow-sm hover:border-muted disabled:cursor-not-allowed disabled:opacity-40"
           />
         </div>
 
-        {/* ---------------- what gets stored ---------------- */}
-        <div className="flex flex-col gap-2 border border-line bg-raised p-2">
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="font-mono text-[10px] uppercase tracking-tight text-muted">
-              items.grading_notes
-            </span>
-            <span className="font-mono text-[10px] tracking-tight text-muted">
-              components ride in the JSON until they get columns
-            </span>
-          </div>
-          <pre className="max-h-64 overflow-auto border border-line bg-overlay p-2 font-mono text-[10px] leading-snug tracking-tight text-muted">
-            {gradingNotes ?? "// all six components required"}
-          </pre>
+        {/* ---------------- save ---------------- */}
+        <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <Button size="sm" disabled title="gradeItem() is not in this worktree yet">
-              Save grade
+            <Button
+              size="sm"
+              onClick={save}
+              disabled={pending || !scores || Boolean(saveBlocked)}
+              title={saveBlocked ?? undefined}
+            >
+              {pending ? "Saving…" : initialGrade ? "Re-save grade" : "Save grade"}
             </Button>
             <span className="font-mono text-[10px] tracking-tight text-muted">
-              gradeItem() landed on main in 008 but this branch has not been
-              rebased onto it — see docs/handoff/admin.md.
+              {saveBlocked ??
+                (scores
+                  ? "Writes the six components and their weighted sum."
+                  : "All six components required.")}
             </span>
+          </div>
+
+          <div aria-live="polite">
+            {result?.ok && (
+              <p className="border border-accent bg-overlay p-2 font-mono text-[11px] tracking-tight text-accent">
+                Grade saved.
+              </p>
+            )}
+            {result && !result.ok && (
+              <div className="flex flex-col gap-1 border border-[#FF4444] bg-overlay p-2">
+                <p className="font-mono text-[10px] uppercase tracking-tight text-[#FF4444]">
+                  Save failed{result.code ? ` — ${result.code}` : ""}
+                </p>
+                <p className="font-mono text-[11px] leading-snug tracking-tight text-foreground">
+                  {result.message}
+                </p>
+                {constraintContext(result) && (
+                  <p className="font-mono text-[10px] leading-snug tracking-tight text-muted">
+                    {constraintContext(result)}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

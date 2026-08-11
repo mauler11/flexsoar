@@ -4,77 +4,120 @@ Items filed by the admin track. Numbered within this file; where an item
 started life in the shared `HANDOFF.md` its old global number is noted, since
 008's header cites those numbers.
 
-**Track status: this worktree has not been rebased.** `track/admin` is at
-`d14970d`. `gradeItem`, `authenticateItem`, `rejectItem`, `getItems` and
-`008_grading.sql` are on `main` and are not here, so the grading Save path, the
-grading queue and the mint screen cannot be built or typechecked yet. Rebasing
-is the human's call — AGENT_RULES forbids this agent from merging or rebasing.
+**Local adapters in play.** `components/admin/db-reads.ts` holds three
+session-client READS for gaps itemised below (1, 3, 4). Reads only, RLS-backed,
+projected columns, and each dies the day the contract exports the real thing —
+they are the sanctioned local-adapter workaround, not a second data path.
+No writes bypass the contract anywhere in this track.
 
 ---
 
 ## Open
 
-### 1. Fulfilment has no contract surface at all — blocks `app/admin/fulfilment`
+### 1. Fulfilment: `fn_mark_shipped` landed (009) — now needs its contract wrappers
 
-`redemptions` is written once, by `fn_redeem_card`, and never read or updated
-again. The table already carries everything the screen needs:
+009 delivered the admin-read policy and `fn_mark_shipped(p_redemption_id,
+p_carrier, p_tracking)`, admin-guarded on the session client. What remains is
+contract surface:
+
+- **`markShipped(redemptionId, carrier, tracking)`** wrapping the RPC. Until it
+  exists `/admin/fulfilment` is read-only — carrier/tracking entry and the
+  "mark shipped" button are built-but-blocked, since writes only go through the
+  contract.
+- **`getRedemptions({ status? })`** to replace the `getAdminRedemptions()`
+  local adapter: id, status, handling_fee_cents, shipping_address, carrier,
+  tracking_number, requested_at, shipped_at, card (mint_number, float, sku
+  brand/model/size) and requester handle/level via `public_profiles`.
+
+Still worth doing while in there: `redemptions.status` is bare `text` with no
+check constraint, unlike every other status column. Constrain it before the
+first typo'd status goes in.
+
+### 2. Catalog: 009 unblocked SKU writes at the database — needs contract functions
+
+`skus_admin_write` and `curve_admin_write` exist now, so RLS would permit a
+direct table write. Not taking that path: it is exactly the second write path
+the contract exists to prevent. `/admin/skus` is read-only until the contract
+exports:
+
+- **`createSku(...)` / `updateSku(id, patch)`** — brand/model/colorway/size,
+  retail and oracle price cents, price_confidence, sprite_key, palette,
+  mint_cap.
+- **Float curve writes** — `sku_float_curve` rows per SKU
+  (float_min/float_max/value_multiplier).
+
+Two things that belong in the write function, not the UI:
+
+- **`market_price_cents` drives tier.** An edit re-tiers future mints from that
+  SKU and leaves existing cards alone (tier copies at mint). 003_retier.sql is
+  the record of this going wrong once already; the function should own the
+  semantics.
+- **`palette` should be validated against the sprite maps** (9-key format, see
+  `PALETTES` in `lib/sprites/maps.ts`), or a typo renders a transparent sprite
+  in the marketplace with no error anywhere.
+
+### 3. `getItems()` cannot fetch one item
+
+`ItemsQuery` has no `id` filter and there is no `getItem(id)`, so the grading
+bench (`/admin/grading/[itemId]`) reads through the `getAdminItem()` local
+adapter. Either an `id?: UUID` on `ItemsQuery` or a `getItem(itemId)` retires
+it.
+
+### 4. `ItemSummary` has no `consignor_id` or `consignment_id`
+
+Two screens need the links: the mint action must resolve each item's consignor
+to pass as `mintCard`'s owner (currently the `getItemOwners()` adapter), and
+the grading bench links back to the item's consignment. Both columns exist on
+`items` and are admin-readable; adding them to the projection and the type is
+additive.
+
+### 5. BUG: `gradeFloatFromComponents()` rounds half-milli ties the wrong way
+
+The helper computes the weighted sum in binary floating point. On exact
+half-milli ties the FP product lands just under the tie and `Math.round` goes
+DOWN, while `items_grade_components_sum` recomputes in `numeric` and rounds
+half AWAY FROM ZERO — so the helper returns a float its own constraint then
+rejects. Smallest counterexample:
 
 ```
-id, card_id, item_id, user_id, handling_fee_cents, shipping_address jsonb,
-status text default 'requested', carrier, tracking_number,
-requested_at, shipped_at
+accessories 0.29, everything else 0.00
+  numeric:  0.29 × 0.05 = 0.0145 → round(_, 3) = 0.015   ← what the DB demands
+  helper:   0.28999… × 0.05 = 0.014499… → ×1000 = 14.499… → 0.014
 ```
 
-Nothing exposes it. `getRedemptions()` and a `fn_mark_shipped` are both
-missing, so the admin screen cannot list a single request, let alone ship one.
+`gradeItem(id, gradeFloatFromComponents(c), …, c)` fails with
+GRADE_COMPONENTS_MISMATCH for every such set, deterministically — a sweep of
+84,280,662 2dp combinations found 2,522,964 affected (~3%), all ties, all
+rounded down.
 
-Needed:
+The comment inside the helper ("Doing this in binary floating point and
+rounding at the end matches") is what is wrong. Exact fix, staying in 2dp/
+weight space: work in integers —
 
-- **`getRedemptions({ status? })`** → id, status, handling fee, shipping
-  address, requested_at, carrier, tracking, plus the card's sku and mint number
-  and the requesting user's handle. There is no admin read policy on
-  `redemptions` either (004 was written before this screen existed), so this
-  needs an `redemptions_admin_read` policy alongside it.
-- **`fn_mark_shipped(p_redemption_id, p_carrier, p_tracking)`** setting
-  `carrier`, `tracking_number`, `shipped_at = now()`, `status = 'shipped'`, and
-  moving `items.status` from `redemption_hold` to `shipped`. Session client
-  with `fn_require_admin()` inside, like 005 and 008 — same reasoning.
+```ts
+// hundredths × integer-percent weights land exactly in ten-thousandths
+const tenThousandths =
+  Math.round(c.outsole * 100) * 25 + Math.round(c.midsole * 100) * 20 +
+  Math.round(c.creasing * 100) * 20 + Math.round(c.upper * 100) * 20 +
+  Math.round(c.heel * 100) * 10 + Math.round(c.accessories * 100) * 5;
+return Math.round(tenThousandths / 10) / 1000; // .5 rounds up, like numeric
+```
 
-Note `redemptions.status` is a bare `text` with no check constraint and no
-enum, unlike every other status column in the schema. Worth constraining to
-`('requested','shipped','cancelled')` — whatever the real set is — in the same
-migration, before the first row goes in with a typo.
+Until it lands, `floatForSave()` in `app/admin/grading/actions.ts` applies
+exactly this correction on top of the helper, only where the two differ. It is
+written to become a no-op and be deleted the day the helper is fixed.
 
-### 2. No write path for the catalog — blocks `app/admin/skus`
+### 6. Two small design-system notes
 
-`getSkus()` reads; nothing creates or updates. The screen is specified as CRUD
-over oracle price, float curve, `sprite_key` and `palette` JSON, and none of
-those can be written.
-
-Needed: `createSku()` / `updateSku()` over an `fn_upsert_sku`, admin-guarded
-the same way. Two things the RPC should own rather than the UI:
-
-- **`market_price_cents` drives tier**, so an edit re-tiers every future mint
-  from that SKU. 003_retier.sql exists because this already had to be fixed
-  once. The function should say plainly what it does to existing cards
-  (nothing — tier is copied at mint) and what it does to future ones.
-- **`palette` JSON is validated against the sprite maps**, or a typo'd key
-  renders a transparent sprite in the marketplace with no error anywhere. See
-  the design→data note in `docs/HANDOFF-shared.md`; the 9-key format is the
-  reference.
-
-### 3. Two small design-system notes
-
-- **`components/ui` has no textarea.** Grading notes and the reject reason both
-  need one, so `components/admin/grading` styles a raw `<textarea>` inline to
-  match `Input`. It is three utility classes copied; worth promoting to
-  `components/ui/Textarea.tsx` before a third screen wants one.
+- **`components/ui` has no textarea.** Grading notes, transition notes and both
+  rejection reasons all style a raw `<textarea>` inline to match `Input`. Four
+  copies now — promote to `components/ui/Textarea.tsx`.
 - **The rubric's band anchors are not `FLOAT_BANDS`.** `lib/domain/rarity.ts`
   has the five display bands; `docs/GRADING_RUBRIC.md` has six, splitting
   Factory New into Deadstock (0.000–0.020) and Factory New (0.021–0.070). The
-  boundaries otherwise agree. They are duplicated on purpose — one is a grading
-  tool, one is marketplace display, and `lib/domain` is not this track's lane —
-  but if a boundary ever moves it has to move in `BAND_ANCHORS` too.
+  boundaries otherwise agree. Duplicated on purpose — one is a grading tool,
+  one is marketplace display, and `lib/domain` is not this track's lane — but
+  if a boundary ever moves it has to move in `BAND_ANCHORS` too.
 
 ---
 
@@ -84,19 +127,26 @@ Kept as a record, since 008's header cites the old numbers.
 
 ### ~~13. No write path for a grade~~ — landed in 008
 
-`fn_grade_item`, `fn_authenticate_item` and `fn_reject_item` all exist, all
-session-client with `fn_require_admin()` inside, as requested.
+`fn_grade_item`, `fn_authenticate_item` and `fn_reject_item`, all session-client
+with `fn_require_admin()` inside, as requested. Wired up in
+`/admin/grading/[itemId]`; the float that reaches `gradeItem()` is derived by
+the contract's own `gradeFloatFromComponents()`, and the panel's live preview
+(`components/admin/grading/rubric.ts`) is display maths only.
 
 ### ~~14. No read path for the grading queue~~ — landed as `getItems()`
 
+The queue at `/admin/grading` runs on it. Single-item fetch is the remaining
+gap (open item 3).
+
 ### ~~15. The six component scores deserve real columns~~ — landed in 008
 
-Six `numeric(3,2)` columns on `items`, plus the constraint this track asked for
-but did not expect to get: `items_grade_components_sum` checks that
-`float_value` really is the weighted sum, and `items_grade_components_complete`
-that it is all six components or none.
+Six `numeric(3,2)` columns on `items`, plus `items_grade_components_sum`
+(float must equal the weighted sum) and `items_grade_components_complete`
+(all six or none). The grading screen branches on both:
+`GRADE_COMPONENTS_MISMATCH` and `GRADE_COMPONENTS_INCOMPLETE` each get a
+sentence of context on top of the verbatim server message.
 
-That constraint is the strongest possible version of the rubric rule — the
-grader cannot decide the total first and reverse-engineer components to justify
-it, because the database will not store it. The JSON-in-`grading_notes` interim
-shape described in the old item 15 is dead; nothing was written in it.
+### ~~(old item 1 here) Fulfilment had no surface at all~~ — reads landed in 009
+
+Superseded by open item 1: policies and `fn_mark_shipped` exist, wrappers do
+not.
