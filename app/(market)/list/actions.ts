@@ -4,25 +4,26 @@
  * app/(market)/list/actions.ts
  *
  * Server Actions for the self-serve listing wizard (/list) and its payout
- * gate. These return structured results the client wizard renders in place —
- * unlike the card-page actions, which redirect with ?error=, a wizard must
- * stay put and show the outcome inline.
+ * gate. Structured results the client wizard renders in place — a wizard must
+ * stay put and show the outcome inline, unlike the card-page actions which
+ * redirect.
  *
- * All three writes route through app/(market)/intake/rpc.ts (the local seam
- * that calls the handoff RPCs M1–M3 by name). Reads for the payout gate go
- * through the frozen contract.
+ * No RPC seam: the intake write goes straight through the contract's
+ * `submitListing` (013), and photo uploads are signed DIRECTLY here through
+ * the shared `lib/r2/sign.ts` — there is no `fn_get_upload_target` database
+ * function anywhere. The key is built server-side (`intake/<userId>/…`), so a
+ * client can choose neither its namespace nor its extension.
  */
 
-import { getRedemptions } from "@/lib/api/contract";
+import {
+  submitListing,
+  getUser,
+  ContractError,
+} from "@/lib/api/contract";
 import { gradeFloatFromComponents } from "@/lib/db/grading";
 import type { GradeComponents } from "@/lib/db/grading";
-import { currentUserId, CASH_FULFILMENT_THRESHOLD } from "@/app/(market)/queries";
-import {
-  fileSkuRequest,
-  getUploadTarget,
-  submitListingIntake,
-  IntakeUnavailableError,
-} from "@/app/(market)/intake/rpc";
+import { currentUserId, CASH_PAYOUT_MIN_FULFILMENTS } from "@/app/(market)/queries";
+import { signUploadUrl } from "@/lib/r2/sign";
 import {
   REQUIRED_PHOTO_COUNT,
   type IntakePhoto,
@@ -34,7 +35,7 @@ export type ActionResult<Ok extends object> =
   | { ok: false; code: string; message: string };
 
 // ------------------------------------------------------------
-// M3 — presigned upload target
+// Photo upload — presigned PUT signed right here in the action
 // ------------------------------------------------------------
 
 export interface UploadTargetResult {
@@ -43,8 +44,17 @@ export interface UploadTargetResult {
   publicUrl: string;
 }
 
+/** Intake accepts exactly these photo formats — no heic, no gif. */
+const ALLOWED_CONTENT_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
+/** Hard cap: 8MB. Server-side, so it cannot be bypassed with a client spoof. */
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+
 export async function getUploadTargetAction(input: {
-  fileName: string;
   contentType: string;
   sizeBytes: number;
 }): Promise<ActionResult<{ target: UploadTargetResult }>> {
@@ -53,24 +63,44 @@ export async function getUploadTargetAction(input: {
     return { ok: false, code: "SIGN_IN_REQUIRED", message: "Sign in to upload photos." };
   }
 
+  if (!ALLOWED_CONTENT_TYPES.has(input.contentType)) {
+    return {
+      ok: false,
+      code: "UNSUPPORTED_TYPE",
+      message: "Photos must be JPEG, PNG, or WebP.",
+    };
+  }
+  if (
+    !Number.isFinite(input.sizeBytes) ||
+    input.sizeBytes <= 0 ||
+    input.sizeBytes > MAX_UPLOAD_BYTES
+  ) {
+    return {
+      ok: false,
+      code: "FILE_TOO_LARGE",
+      message: "Photos must be 8MB or smaller.",
+    };
+  }
+
   try {
-    const target = await getUploadTarget(input);
+    // Key is `intake/<userId>/<uuid>.<ext>` — the caller's id and a uuid, all
+    // decided here; the client's filename never reaches the key. httpsOnly:
+    // intake photos must be https (010's fn_set_item_photos rule).
+    const upload = await signUploadUrl({
+      scope: "intake",
+      id: me,
+      contentType: input.contentType,
+      httpsOnly: true,
+    });
     return {
       ok: true,
       target: {
-        uploadUrl: target.uploadUrl,
-        objectKey: target.objectKey,
-        publicUrl: target.publicUrl,
+        uploadUrl: upload.uploadUrl,
+        objectKey: upload.key,
+        publicUrl: upload.publicUrl,
       },
     };
   } catch (thrown) {
-    if (thrown instanceof IntakeUnavailableError) {
-      return {
-        ok: false,
-        code: "SIGNER_NOT_SHARED",
-        message: thrown.message,
-      };
-    }
     return {
       ok: false,
       code: "UPLOAD_TARGET_FAILED",
@@ -80,26 +110,22 @@ export async function getUploadTargetAction(input: {
 }
 
 // ------------------------------------------------------------
-// M2 — the "not listed" request
+// The "not listed" path
 // ------------------------------------------------------------
 
+/**
+ * Pending handoff M2 (sku_requests). There is no backend table or function to
+ * record a request, and the RPC seam that used to fake it is gone, so this
+ * validates the form and then says exactly that — nothing is silently dropped.
+ */
 export async function fileSkuRequestAction(
   formData: FormData,
 ): Promise<ActionResult<{ requestId: string }>> {
-  const me = await currentUserId();
-  if (!me) {
-    return {
-      ok: false,
-      code: "SIGN_IN_REQUIRED",
-      message: "Sign in to request an unlisted shoe.",
-    };
-  }
-
   const brand = String(formData.get("brand") ?? "").trim();
   const model = String(formData.get("model") ?? "").trim();
   const colorway = String(formData.get("colorway") ?? "").trim() || null;
   const sizeRaw = String(formData.get("size") ?? "").trim();
-  const notes = String(formData.get("notes") ?? "").trim() || null;
+  const notes = String(formData.get("notes") ?? "").trim().slice(0, 1000);
 
   if (!brand || !model) {
     return { ok: false, code: "INVALID", message: "Brand and model are required." };
@@ -109,43 +135,20 @@ export async function fileSkuRequestAction(
     return { ok: false, code: "INVALID", message: "Size must be a number greater than zero." };
   }
 
-  try {
-    const requestId = await fileSkuRequest({
-      brand,
-      model,
-      colorway,
-      sizeUs,
-      notes,
-    });
-    return { ok: true, requestId };
-  } catch (thrown) {
-    if (thrown instanceof IntakeUnavailableError) {
-      return { ok: false, code: "REQUEST_NOT_WIRED", message: thrown.message };
-    }
-    return {
-      ok: false,
-      code: "REQUEST_FAILED",
-      message: thrown instanceof Error ? thrown.message : "request failed",
-    };
-  }
+  return {
+    ok: false,
+    code: "REQUEST_LEDGER_PENDING",
+    message:
+      "The SKU request ledger isn't wired yet (handoff M2) — nothing was recorded. " +
+      "Pick a listed shoe from the catalog, or contact support about pricing this one.",
+  };
 }
 
 // ------------------------------------------------------------
-// M1 — the submission
+// The intake submission — straight through the contract (013)
 // ------------------------------------------------------------
 
-export interface SubmitIntakePayload {
-  skuId: string;
-  photos: IntakePhoto[];
-  components: GradeComponents;
-  reservePriceCents: number;
-  payoutMethod: PayoutMethod;
-  notes: string;
-}
-
-function validateComponents(
-  raw: Record<string, unknown>,
-): GradeComponents | null {
+function validateComponents(raw: Record<string, unknown>): GradeComponents | null {
   const parsed: GradeComponents = {
     outsole: Number(raw.outsole),
     midsole: Number(raw.midsole),
@@ -164,9 +167,27 @@ function validateComponents(
   return parsed;
 }
 
+/** Friendly message for the contract codes submitListing can raise. */
+function submitErrorMessage(code: string, detail: string): string {
+  switch (code) {
+    case "RESTRICTED":
+      return "Your account is restricted from listing right now.";
+    case "UNPROVEN_SELLER":
+      return detail || "Cash payout needs more completed fulfilments — list for credit first.";
+    case "INVALID_AMOUNT":
+      return "Set a price in whole cents greater than zero.";
+    case "TOO_FEW_PHOTOS":
+      return "Upload at least 4 photos first (they must be uploaded, not just selected).";
+    case "INVALID_PHOTO_URL":
+      return "One photo has an invalid URL — remove and re-upload it.";
+    default:
+      return detail || "submission failed";
+  }
+}
+
 export async function submitListingIntakeAction(
   formData: FormData,
-): Promise<ActionResult<{ consignmentId: string; float: number }>> {
+): Promise<ActionResult<{ itemId: string; float: number }>> {
   const me = await currentUserId();
   if (!me) {
     return {
@@ -235,33 +256,23 @@ export async function submitListingIntakeAction(
   }
   const payoutMethod = payoutRaw as PayoutMethod;
 
-  // Cash is gated on completed fulfilments, re-checked here against the live
-  // session — the client-side lock is a convenience, this is the gate.
-  if (payoutMethod === "cash") {
-    const redemptions = await getRedemptions({ userId: me });
-    const fulfilled = redemptions.filter((r) => r.status === "shipped").length;
-    if (fulfilled < CASH_FULFILMENT_THRESHOLD) {
-      return {
-        ok: false,
-        code: "CASH_LOCKED",
-        message: `Cash payouts unlock after ${CASH_FULFILMENT_THRESHOLD} completed fulfilment(s) — you have ${fulfilled}. Pick credit, or ask support.`,
-      };
-    }
-  }
-
   try {
-    const consignmentId = await submitListingIntake({
+    const itemId = await submitListing({
       skuId,
-      photos: photoList,
-      components: grade,
-      reservePriceCents,
+      priceCents: reservePriceCents,
       payoutMethod,
+      photos: photoList.map((p) => p.url),
+      grade,
       notes,
     });
-    return { ok: true, consignmentId, float: declaredFloat };
+    return { ok: true, itemId, float: declaredFloat };
   } catch (thrown) {
-    if (thrown instanceof IntakeUnavailableError) {
-      return { ok: false, code: "INTAKE_NOT_WIRED", message: thrown.message };
+    if (thrown instanceof ContractError) {
+      return {
+        ok: false,
+        code: thrown.code === "UNPROVEN_SELLER" ? "CASH_LOCKED" : "SUBMIT_FAILED",
+        message: submitErrorMessage(thrown.code, thrown.message),
+      };
     }
     return {
       ok: false,
@@ -272,7 +283,7 @@ export async function submitListingIntakeAction(
 }
 
 // ------------------------------------------------------------
-// M4 — payout gate (cash unlocks after completed fulfilments)
+// Payout gate — mirrors what fn_submit_listing itself enforces (013)
 // ------------------------------------------------------------
 
 export interface PayoutEligibility {
@@ -285,12 +296,16 @@ export async function getPayoutEligibilityAction(): Promise<PayoutEligibility | 
   const me = await currentUserId();
   if (!me) return null;
 
-  const redemptions = await getRedemptions({ userId: me });
-  const fulfilledShipments = redemptions.filter((r) => r.status === "shipped").length;
+  // users.fulfilments_completed is the live count 013 increments on
+  // fn_confirm_shipment. The threshold mirrors the seeded platform_config row
+  // (cash_payout_min_fulfilments), which the contract doesn't expose yet —
+  // flagged as a partial M4. The authoritative gate is inside fn_submit_listing.
+  const user = await getUser({ id: me });
+  const fulfilledShipments = user?.fulfilments_completed ?? 0;
 
   return {
-    cashEligible: fulfilledShipments >= CASH_FULFILMENT_THRESHOLD,
+    cashEligible: fulfilledShipments >= CASH_PAYOUT_MIN_FULFILMENTS,
     fulfilledShipments,
-    threshold: CASH_FULFILMENT_THRESHOLD,
+    threshold: CASH_PAYOUT_MIN_FULFILMENTS,
   };
 }

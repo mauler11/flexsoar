@@ -18,10 +18,15 @@
  */
 
 import type { Metadata } from "next";
-import { getConsignment, getConsignments, getRedemptions } from "@/lib/api/contract";
+import {
+  getConsignment,
+  getConsignments,
+  getRedemptions,
+  getUser,
+} from "@/lib/api/contract";
 import type { RedemptionSummary } from "@/lib/api/contract";
 import type { ItemSummary } from "@/lib/api/contract";
-import { currentUserId, CASH_FULFILMENT_THRESHOLD } from "@/app/(market)/queries";
+import { currentUserId, CASH_PAYOUT_MIN_FULFILMENTS } from "@/app/(market)/queries";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatFsc } from "@/components/card/format";
@@ -78,6 +83,7 @@ export default async function DashboardPage() {
   }
 
   const consignments = await getConsignments({ consignorId: me });
+  const meUser = await getUser({ id: me });
   const details = await Promise.all(
     consignments.map(async (c) => ({
       consignment: c,
@@ -91,7 +97,10 @@ export default async function DashboardPage() {
 
   const redemptions = await getRedemptions({ userId: me });
   const owed = redemptions.filter((r) => OWED_STATUSES.includes(r.status as RedemptionSummary["status"]));
-  const fulfilled = redemptions.filter((r) => r.status === "shipped").length;
+
+  // The gate count is users.fulfilments_completed — the live field 013
+  // increments on fn_confirm_shipment — not a shipped-redemption tally.
+  const fulfilled = meUser?.fulfilments_completed ?? 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -117,16 +126,17 @@ export default async function DashboardPage() {
           </h2>
           <span
             className={"font-mono text-[10px] uppercase tracking-tight " +
-              (fulfilled >= CASH_FULFILMENT_THRESHOLD ? "text-accent" : "text-muted")}
+              (fulfilled >= CASH_PAYOUT_MIN_FULFILMENTS ? "text-accent" : "text-muted")}
           >
-            {fulfilled >= CASH_FULFILMENT_THRESHOLD
+            {fulfilled >= CASH_PAYOUT_MIN_FULFILMENTS
               ? "unlocked"
-              : `${fulfilled}/${CASH_FULFILMENT_THRESHOLD} fulfilments`}
+              : `${fulfilled}/${CASH_PAYOUT_MIN_FULFILMENTS} fulfilments`}
           </span>
         </div>
         <p className="font-mono text-[10px] tracking-tight text-muted">
-          Fulfilments are shipped redemptions on this account. Pending the
-          payout ledger (handoff M4), this gates the cash choice on /list.
+          Completed fulfilments on this account (013&apos;s
+          fulfilments_completed). fn_submit_listing enforces the real gate;
+          this meter mirrors it for the /list UI (partial M4).
         </p>
       </section>
 

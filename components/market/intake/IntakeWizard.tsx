@@ -61,9 +61,9 @@ export function IntakeWizard({
   const [notes, setNotes] = useState("");
   const [submit, setSubmit] = useState<{
     state: "idle" | "running" | "done";
-    consignmentId: string | null;
+    itemId: string | null;
     error: string | null;
-  }>({ state: "idle", consignmentId: null, error: null });
+  }>({ state: "idle", itemId: null, error: null });
   const [isPending, startTransition] = useTransition();
 
   const declaredFloat = useMemo(() => {
@@ -89,7 +89,7 @@ export function IntakeWizard({
 
   function next() {
     if (!canNext) return;
-    setSubmit({ state: "idle", consignmentId: null, error: null });
+    setSubmit({ state: "idle", itemId: null, error: null });
     setStep((s) => Math.min(s + 1, STEPS.length - 1));
   }
   function back() {
@@ -98,7 +98,7 @@ export function IntakeWizard({
 
   function doSubmit() {
     if (!selectedSku || payout == null || priceCents == null) return;
-    setSubmit({ state: "running", consignmentId: null, error: null });
+    setSubmit({ state: "running", itemId: null, error: null });
     const formData = new FormData();
     formData.set("sku_id", selectedSku.id);
     formData.set("photos", JSON.stringify(photos));
@@ -110,15 +110,15 @@ export function IntakeWizard({
     startTransition(async () => {
       const result = await submitListingIntakeAction(formData);
       if (!result.ok) {
-        setSubmit({ state: "idle", consignmentId: null, error: result.message });
+        setSubmit({ state: "idle", itemId: null, error: result.message });
         return;
       }
-      setSubmit({ state: "done", consignmentId: result.consignmentId, error: null });
+      setSubmit({ state: "done", itemId: result.itemId, error: null });
     });
   }
 
   if (submit.state === "done") {
-    return <DoneState sku={selectedSku} consignmentId={submit.consignmentId} />;
+    return <DoneState sku={selectedSku} itemId={submit.itemId} />;
   }
 
   return (
@@ -343,10 +343,10 @@ function Detail({ label, value }: { label: string; value: string }) {
 
 function DoneState({
   sku,
-  consignmentId,
+  itemId,
 }: {
   sku: Sku | null;
-  consignmentId: string | null;
+  itemId: string | null;
 }) {
   return (
     <div className="flex flex-col gap-3 border border-accent bg-accent/10 p-4">
@@ -355,7 +355,7 @@ function DoneState({
       </h3>
       <p className="font-mono text-[11px] tracking-tight text-muted">
         Your {sku ? `${sku.brand} ${sku.model}` : "listing"} is queued
-        for intake grading{consignmentId ? ` (ref ${consignmentId})` : ""}. A
+        for intake grading{itemId ? ` (ref ${itemId})` : ""}. A
         grader verifies condition against your photos, then the card goes live
         in your dashboard. You&apos;ll be notified either way.
       </p>
