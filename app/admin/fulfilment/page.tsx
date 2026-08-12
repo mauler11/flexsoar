@@ -406,8 +406,8 @@ function RedemptionTable({
                 </div>
               </Td>
               <Td>
-                {redemption.user.handle}
-                <span className="text-muted"> · L{redemption.user.level}</span>
+                {redemption.redeemer.handle}
+                <span className="text-muted"> · L{redemption.redeemer.level}</span>
               </Td>
               <Td>
                 <Badge tone={redemption.status === "shipped" ? "accent" : "warn"}>
