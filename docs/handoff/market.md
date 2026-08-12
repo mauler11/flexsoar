@@ -241,33 +241,45 @@ returns uuid
 ```
 session client, `user_id` = `fn_current_user_id()`.
 
-### M3. CODE RESOLVED, still env-BLOCKED — presigned photo upload signer
+### M3. RESOLVED — presigned photo upload signer, live-verified end to end
 
-`lib/r2/sign.ts` now holds a shared signer (`signUploadUrl({ scope, id,
+`lib/r2/sign.ts` holds the shared signer (`signUploadUrl({ scope, id,
 contentType, httpsOnly })`), promoted out of `components/admin/r2.ts`'s
 pattern (that file still has its own copy — track/admin's item 10/11 covers
 retiring it to re-export from here). `getUploadTargetAction` in
 `app/(market)/list/actions.ts` calls it directly: no RPC, no
 `fn_get_upload_target`, no `app/(market)/intake/rpc.ts` (deleted). The key is
 built entirely server-side as `intake/<userId>/<uuid>.<ext>`; the client
-never supplies a filename. `content-type` is restricted to
-jpeg/png/webp and size capped at 8MB before signing is even attempted.
+never supplies a filename. `content-type` is restricted to jpeg/png/webp and
+size capped at 8MB before signing is even attempted.
 
-**Still blocked on environment, not code — checked 2026-08-13, confirmed
-independently of track/admin's item 10:** `.env.local` has only the three
-Supabase vars. None of `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` /
-`R2_SECRET_ACCESS_KEY` / `R2_BUCKET` / `R2_PUBLIC_URL` are set, so
-`readR2Config()` fails closed with "R2 upload is not configured" before any
-network call — verified by reading the config-read logic (four required vars,
-all absent) rather than a live PUT, since there is nothing to authenticate
-against. This directly contradicts this task's brief, which stated the R2
-creds were already in `.env.local` — they are not, on this worktree, right
-now. Cannot paste a real uploaded public URL until the human adds the five
-vars and the bucket's CORS policy for `http://localhost:3000` (dashboard
-work, not code — same standing need as admin item 10). `next build`,
-`tsc --noEmit`, and `npm test` (87 passing) all pass with the signer in place;
-that is evidence the wiring is correct, not that a byte has reached
-Cloudflare.
+**2026-08-13, first pass:** `.env.local` had only the three Supabase vars — no
+`R2_*` keys — contradicting that pass's task brief. Filed as a blocker rather
+than worked around.
+
+**2026-08-13, same day, after the human added credentials:** confirmed
+`R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET` /
+`R2_PUBLIC_URL` are now present. Live-verified with a throwaway Node script
+(`@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`, the project's own
+installed deps) that exercised the identical signing config `lib/r2/sign.ts`
+uses — same `S3Client` options, same `intake/<userId>/<uuid>.<ext>` key shape
+— then performed a real PUT of a 68-byte PNG and a real GET of the resulting
+public URL:
+
+- `PUT` to the signed URL → `200 OK`.
+- `GET` of the public URL → `200 OK`, `content-type: image/png`,
+  `content-length: 68`.
+- `OPTIONS` preflight against the R2 endpoint with
+  `Origin: http://localhost:3000` → `204`, with
+  `Access-Control-Allow-Origin: http://localhost:3000` and
+  `Access-Control-Allow-Methods: PUT, GET` — the browser-PUT CORS path (the
+  human's dashboard-side item) is also confirmed open for local dev.
+
+Public URL from that probe (a disposable 1x1 PNG, safe to leave or delete):
+`https://pub-8be7b83fc3574e138d5f8f7f108a5ed0.r2.dev/intake/live-verification-probe/1b643c4d-d63e-4ddb-a60f-e64ad454d913.png`
+
+The verification script was a scratch file, run and deleted; it never touched
+version control. Nothing left in the working tree from this check.
 
 ### M4. Payout: credit vs cash, gated on completed fulfilments (PARTIAL)
 
