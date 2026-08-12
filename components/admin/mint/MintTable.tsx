@@ -43,9 +43,11 @@ export function MintTable({ items }: { items: ItemSummary[] }) {
   }
 
   function confirm() {
-    const ids = items.map((i) => i.id).filter((id) => selected.has(id));
+    const requests = items
+      .filter((item) => selected.has(item.id))
+      .map((item) => ({ itemId: item.id, consignorId: item.consignor_id }));
     startTransition(async () => {
-      const outcome = await batchMintAction(ids);
+      const outcome = await batchMintAction(requests);
       setResult(outcome);
       setConfirming(false);
       // Failed rows stay selected for the retry; minted ones leave the list.

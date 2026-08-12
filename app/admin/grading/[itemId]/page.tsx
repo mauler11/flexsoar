@@ -4,9 +4,9 @@
  * One item on the bench: the photo set, the rubric panel, and the
  * authenticate / reject controls.
  *
- * The item comes from the local adapter, not the contract — getItems() has no
- * id filter and there is no getItem(). Filed in docs/handoff/admin.md; the
- * adapter dies when the contract catches up.
+ * The item comes from getItem() on the contract, which since the 010-era
+ * sync carries consignment_id/consignor_id — the getAdminItem() local adapter
+ * it replaced is gone.
  *
  * A minted item is shown but everything is blocked: the card carries an
  * immutable copy of the float, and 008 refuses re-grading and rejection at
@@ -18,11 +18,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAdminPage } from "@/components/admin/auth";
-import { getAdminItem } from "@/components/admin/db-reads";
 import { ItemActions } from "@/components/admin/grading/ItemActions";
+import { PhotoUploader } from "@/components/admin/grading/PhotoUploader";
 import { PhotoViewer } from "@/components/admin/grading/PhotoViewer";
 import { RubricPanel } from "@/components/admin/grading/RubricPanel";
 import { toPhotoList } from "@/components/admin/grading/photos";
+import { getItem } from "@/lib/api/contract";
 import { Badge } from "@/components/ui/Badge";
 
 export const metadata: Metadata = {
@@ -37,7 +38,7 @@ export default async function GradeItemPage({
   const { itemId } = await params;
   await requireAdminPage(`/admin/grading/${itemId}`);
 
-  const item = await getAdminItem(itemId);
+  const item = await getItem(itemId);
   if (!item) notFound();
 
   const photos = toPhotoList(item.photos);
@@ -103,12 +104,15 @@ export default async function GradeItemPage({
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start">
         <PhotoViewer photos={photos} />
-        <ItemActions
-          itemId={item.id}
-          authenticatedAt={item.authenticated_at}
-          custodyLocation={item.custody_location}
-          blocked={saveBlocked}
-        />
+        <div className="flex flex-col gap-4">
+          <PhotoUploader itemId={item.id} blocked={saveBlocked} />
+          <ItemActions
+            itemId={item.id}
+            authenticatedAt={item.authenticated_at}
+            custodyLocation={item.custody_location}
+            blocked={saveBlocked}
+          />
+        </div>
       </div>
 
       {item.grading_notes && (

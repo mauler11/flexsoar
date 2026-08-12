@@ -1,12 +1,14 @@
 /**
  * app/admin/grading/actions.ts
  *
- * Server Actions for the grading screen: grade, authenticate, reject.
+ * Server Actions for the grading screen: grade, authenticate, reject, and
+ * sign presigned R2 uploads for intake photos.
  *
  * THE FLOAT IS DERIVED HERE, ONCE. The client sends only the six component
- * scores; gradeFloatFromComponents() is the authority for the number that
- * reaches the database, tie-corrected where its binary-FP rounding provably
- * disagrees with the constraint's `numeric` rounding — see floatForSave().
+ * scores; the contract's gradeFloatFromComponents() is the authority for the
+ * number that reaches the database. It computes in integer space, so it
+ * matches the items_grade_components_sum constraint's `numeric` rounding
+ * exactly (the half-milli tie class is pinned by tests/invariants.test.ts).
  * The panel's live preview (components/admin/grading/rubric.ts) is display
  * maths; if anything still disagreed, items_grade_components_sum rejects the
  * save rather than storing either value.
@@ -20,15 +22,14 @@
 import { revalidatePath } from "next/cache";
 import { failure, type ActionResult } from "@/components/admin/action-result";
 import { requireAdminAction } from "@/components/admin/auth";
-import {
-  computeFloatMilli,
-  type ComponentScores,
-} from "@/components/admin/grading/rubric";
+import { getItemPhotoUploadUrl } from "@/components/admin/r2";
 import {
   authenticateItem,
+  getItem,
   gradeFloatFromComponents,
   gradeItem,
   rejectItem,
+  type ContractErrorCode,
   type GradeComponents,
 } from "@/lib/api/contract";
 import type { UUID } from "@/lib/db/types";
@@ -53,35 +54,6 @@ function checkComponents(components: GradeComponents): string | null {
   return null;
 }
 
-/**
- * gradeFloatFromComponents(), tie-corrected.
- *
- * The contract's helper is the authority, but it computes in binary floating
- * point, and on exact half-milli ties (e.g. accessories 0.29 alone: sum
- * 0.0145) the FP product lands at 0.0144999…, rounds DOWN to 0.014 — while
- * the items_grade_components_sum constraint recomputes in Postgres `numeric`,
- * which rounds half away from zero to 0.015. Sending the helper's value for
- * any of those component sets is a guaranteed GRADE_COMPONENTS_MISMATCH: the
- * grade cannot be saved at all, and retrying cannot help. ~3% of the 2dp
- * component space hits this (2,522,964 of 84,280,662 swept combinations).
- *
- * So: take the helper's value, recompute exactly in integer space (which
- * reproduces `numeric` semantics including the half-up tie), and use the
- * exact value only where the two differ — the case where the helper's value
- * is provably unsaveable. Filed in docs/handoff/admin.md; when the contract
- * computes exactly, this correction becomes a no-op and dies.
- */
-function floatForSave(components: GradeComponents): number {
-  const authority = gradeFloatFromComponents(components);
-
-  const hundredths = Object.fromEntries(
-    Object.entries(components).map(([key, value]) => [key, Math.round(value * 100)]),
-  ) as unknown as ComponentScores;
-  const exact = computeFloatMilli(hundredths) / 1000;
-
-  return exact === authority ? authority : exact;
-}
-
 export async function gradeItemAction(input: GradeInput): Promise<ActionResult> {
   try {
     await requireAdminAction();
@@ -89,7 +61,7 @@ export async function gradeItemAction(input: GradeInput): Promise<ActionResult> 
     const invalid = checkComponents(input.components);
     if (invalid) return { ok: false, message: invalid };
 
-    const float = floatForSave(input.components);
+    const float = gradeFloatFromComponents(input.components);
     const notes = input.notes?.trim();
 
     await gradeItem(input.itemId, float, notes ? notes : null, input.components);
@@ -151,5 +123,74 @@ export async function rejectItemAction(input: RejectInput): Promise<ActionResult
     return { ok: true };
   } catch (thrown) {
     return failure(thrown);
+  }
+}
+
+export interface PhotoUploadInput {
+  itemId: UUID;
+  filename: string;
+  contentType: string;
+}
+
+export type PhotoUploadResult =
+  | { ok: true; uploadUrl: string; publicUrl: string; key: string }
+  | { ok: false; message: string; code?: ContractErrorCode };
+
+/**
+ * Sign a presigned PUT URL for one intake photo.
+ *
+ * Only the URL crosses the wire — the file itself is PUT by the browser
+ * straight to R2 (see components/admin/r2.ts), so the 1MB server-action body
+ * limit never sees it. The action still guards admin, an existing, gradable,
+ * unminted item, and a sane file name/type before signing anything.
+ *
+ * Persisting the returned public URL into items.photos is deliberately NOT
+ * done here: `items` has no UPDATE policy and the contract exposes no write
+ * for photos, so any write would have to bypass the contract. That gap is
+ * filed in docs/handoff/admin.md.
+ */
+export async function getItemPhotoUploadUrlAction(
+  input: PhotoUploadInput,
+): Promise<PhotoUploadResult> {
+  try {
+    await requireAdminAction();
+
+    const filename = input.filename.trim();
+    const contentType = input.contentType.trim();
+    if (!filename || !contentType) {
+      return { ok: false, message: "a file name and type are required" };
+    }
+    if (!contentType.startsWith("image/")) {
+      return { ok: false, message: `${contentType} is not an image` };
+    }
+
+    const item = await getItem(input.itemId);
+    if (!item) {
+      return { ok: false, message: "no such item" };
+    }
+    if (item.card_id) {
+      return { ok: false, message: "this item is minted — its float is immutable" };
+    }
+    if (item.status !== "pending_intake" && item.status !== "in_custody") {
+      return {
+        ok: false,
+        message: `this item is ${item.status.replace(/_/g, " ")} and cannot take intake photos`,
+      };
+    }
+
+    const upload = await getItemPhotoUploadUrl(
+      input.itemId,
+      filename,
+      contentType,
+    );
+
+    return { ok: true, ...upload };
+  } catch (thrown) {
+    // failure() is typed as ActionResult (ok:true carries no payload), but
+    // it is only ever reached with a thrown value, so the success arm is
+    // unreachable — kept as a guard so the mapping stays honest.
+    const failed = failure(thrown);
+    if (failed.ok) return { ok: false, message: "upload failed" };
+    return { ok: false, message: failed.message, code: failed.code };
   }
 }
