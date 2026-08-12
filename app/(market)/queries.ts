@@ -31,11 +31,13 @@ import type { Timestamptz, UUID } from "@/lib/db/types";
 export const REDEMPTION_HANDLING_FEE_CENTS = 1500;
 
 /**
- * Cash on /list unlocks after this many fulfilled shipments. The payout ledger
- * is pending (handoff M4); until it lands, "fulfilled" means a redemption on
- * this account with status 'shipped', re-checked server-side at submit.
+ * Cash on /list unlocks after this many completed fulfilments. Mirrors the
+ * seeded platform_config row `cash_payout_min_fulfilments` (013 seeds 2); the
+ * contract doesn't expose that config key, so this local constant powers the
+ * UI gate while fn_submit_listing remains the authoritative check (partial
+ * M4). The live count is users.fulfilments_completed.
  */
-export const CASH_FULFILMENT_THRESHOLD = 1;
+export const CASH_PAYOUT_MIN_FULFILMENTS = 2;
 
 /**
  * The signed-in caller's `users.id`, or null when anonymous. `users.id` equals

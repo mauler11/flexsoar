@@ -8,14 +8,14 @@
  * up to the wizard.
  *
  * Upload protocol (server action -> presigned URL -> direct PUT):
- *   1. getUploadTargetAction({ fileName, contentType, sizeBytes })
- *   2. PUT the bytes to target.uploadUrl (client-side, direct to R2)
+ *   1. getUploadTargetAction({ contentType, sizeBytes }) signs the URL
+ *      directly in the action (lib/r2/sign.ts, key `intake/<userId>/…`)
+ *   2. the browser PUTs the bytes to target.uploadUrl (client-side, direct to R2)
  *   3. the rendered URL is target.publicUrl, stored in the photos payload
  *
- * The signer is handoff M3. Until it ships, uploads fail with SIGNER_NOT_SHARED
- * and this component shows an honest "being wired" banner instead of pretending
- * the photo was stored. The submit action re-validates that every required
- * photo actually has a URL, so a local-only selection can never slip through.
+ * No database function is involved: the seam that called fn_get_upload_target
+ * is gone. The submit action re-validates that every required photo actually
+ * has an https URL, so a local-only selection can never slip through.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -39,12 +39,6 @@ interface StagedPhoto {
 
 let nextId = 0;
 
-function sanitizeFileName(name: string): string {
-  const base = name.replace(/[^A-Za-z0-9._-]/g, "_");
-  return base.length ? base : "photo.bin";
-}
-
-/** The { url, angle } payload the wizard wants: only stored photos, one per angle. */
 function toPayload(photos: Record<string, StagedPhoto>): IntakePhoto[] {
   return Object.values(photos)
     .filter((p): p is StagedPhoto & { url: string } => p.url != null)
@@ -57,7 +51,6 @@ export interface PhotoUploaderProps {
 
 export function PhotoUploader({ onChange }: PhotoUploaderProps) {
   const [photos, setPhotos] = useState<Record<string, StagedPhoto>>({});
-  const [signerPending, setSignerPending] = useState(false);
   const [uploading, setUploading] = useState(false);
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -79,10 +72,8 @@ export function PhotoUploader({ onChange }: PhotoUploaderProps) {
     const put: StagedPhoto = { id, angleKey, url: null, status: "local", error: null };
     setPhotos((prev) => ({ ...prev, [angleKey]: put }));
     setUploading(true);
-    setSignerPending(false);
 
     const target = await getUploadTargetAction({
-      fileName: sanitizeFileName(file.name),
       contentType: file.type || "application/octet-stream",
       sizeBytes: file.size,
     });
@@ -96,7 +87,6 @@ export function PhotoUploader({ onChange }: PhotoUploaderProps) {
           error: target.message,
         },
       }));
-      if (target.code === "SIGNER_NOT_SHARED") setSignerPending(true);
       setUploading(false);
       return;
     }
@@ -148,14 +138,6 @@ export function PhotoUploader({ onChange }: PhotoUploaderProps) {
 
   return (
     <div className="flex flex-col gap-3">
-      {signerPending && (
-        <div className="border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 font-mono text-[10px] tracking-tight text-muted">
-          Photo upload is being wired to storage (signer not shared yet). Your
-          picks are staged here so the flow is ready — nothing has been stored,
-          and you can&apos;t submit until uploads work.
-        </div>
-      )}
-
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {PHOTO_ANGLES.map((angle) => {
           const photo = photos[angle.key];

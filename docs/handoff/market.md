@@ -199,40 +199,17 @@ contract (`lib/api/contract.ts`); reads always go through it.
 Verified at 2026-08-12: `next build`, `tsc --noEmit`, `npx eslint`, `npm test`
 = 87 passing.
 
-### M1. Intake write path — `fn_submit_listing_intake` (BLOCKING)
+### M1. RESOLVED — intake write path goes through the frozen contract's `submitListing` (013)
 
-No contract function, RPC, or RLS path can create a real submission (an item
-cannot be inserted: `items` has no insert policy; a bare `consignments` draft
-is not a submission). This track calls, from a Server Action:
-
-```sql
-fn_submit_listing_intake(
-  p_sku_id             uuid,
-  p_photo_urls         jsonb,     -- [{ "url": "https://...", "angle": "toe" }]
-  p_components         jsonb,     -- { outsole, midsole, creasing, upper, heel, accessories } 0.00..1.00
-  p_reserve_price_cents integer,
-  p_payout_method      text,      -- 'credit' | 'cash'
-  p_notes              text default null)
-returns uuid  -- the new consignment id
-```
-
-Requirements flagged, please:
-
-- SESSION client (the seller is the consignor), SECURITY DEFINER. Creates one
-  consignment `status='submitted'` (not draft — the seller submitting is the
-  submission event) with `intake_fee_cents` from `levels.seller_fee_bps` or
-  0 today, plus one item `status='pending_intake'`, `sku_id`,
-  `consignor_id`, `photos`, `reserve_price_cents`.
-- **Self-declared condition is NOT a FlexSoar grade.** Do NOT write into the
-  008 `grade_*` columns (the UI must never look graded). Store it as a new
-  `items.self_declared jsonb` column — `{ components, float, payout_method,
-  submitted_at }` — where `float` is the weighted sum computed in JS by
-  `lib/db/grading.ts gradeFloatFromComponents()`. A migration adding
-  `items.self_declared jsonb` is the cleanest home (grading evidence columns
-  stay owned by the human grader).
-- Photos land AFTER upload: the client uploads to storage first and posts
-  https URLs (see M3). Phone the RPC only with URLs already served.
-- `grant execute … to authenticated`.
+Superseded by `docs/handoff/data.md` item 9: 013 already wraps a seller-custody
+submission path (`submitListing`, session client, derives the actor from
+`auth.uid()`) and it was live-verified there — positive submission lands a
+`pending_review` item with `custody=seller`, `grade_source=seller_declared`,
+the six component scores set, and `float` equal to the rubric weighted sum.
+There was never a need for a bespoke `fn_submit_listing_intake` RPC; the old
+`app/(market)/intake/rpc.ts` seam (which called a nonexistent function by
+name) is deleted, and `app/(market)/list/actions.ts` now calls `submitListing`
+directly. No action needed from track/data on this item.
 
 ### M2. "Not listed?" path — `sku_requests` table + `fn_file_sku_request` (BLOCKING)
 
@@ -264,35 +241,45 @@ returns uuid
 ```
 session client, `user_id` = `fn_current_user_id()`.
 
-### M3. Presigned photo upload signer — promote the R2 helper (BLOCKING)
+### M3. RESOLVED — presigned photo upload signer, live-verified end to end
 
-`components/admin/r2.ts` **does not exist on this branch** (checked the whole
-tree; there is no R2/S3 code anywhere and no R2 env vars). The seam
-`app/(market)/intake/rpc.ts` calls this RPC by name (a `getUploadTargetAction`
-wrapper returns a "signer not shared" code on 42883):
+`lib/r2/sign.ts` holds the shared signer (`signUploadUrl({ scope, id,
+contentType, httpsOnly })`), promoted out of `components/admin/r2.ts`'s
+pattern (that file still has its own copy — track/admin's item 10/11 covers
+retiring it to re-export from here). `getUploadTargetAction` in
+`app/(market)/list/actions.ts` calls it directly: no RPC, no
+`fn_get_upload_target`, no `app/(market)/intake/rpc.ts` (deleted). The key is
+built entirely server-side as `intake/<userId>/<uuid>.<ext>`; the client
+never supplies a filename. `content-type` is restricted to jpeg/png/webp and
+size capped at 8MB before signing is even attempted.
 
-1. Promote a shared signer (preferred): a server-only helper, e.g.
-   `lib/r2/sign.ts` exporting
-   `getUploadTarget({ prefix, fileName, contentType, sizeBytes }) ->
-   { uploadUrl, objectKey, publicUrl }` using a presigned PUT (Cloudflare R2
-   public bucket, or Supabase Storage `createSignedUploadUrl` — the latter
-   needs zero new dependencies, just a bucket + public-read policy created by
-   the human in the dashboard).
-2. The `NEXT_PUBLIC_*` note always. No keys in client code.
+**2026-08-13, first pass:** `.env.local` had only the three Supabase vars — no
+`R2_*` keys — contradicting that pass's task brief. Filed as a blocker rather
+than worked around.
 
-The client (`components/market/intake/PhotoUploader.tsx`) is already shaped to
-mirror the pattern: request target → `fetch(uploadUrl, { method:'PUT',
-body:file })` → keep `publicUrl` → submit posts URLs. Minimum four photos,
-angles guided (toe, left lateral, right lateral, heel required; outsole,
-insole, box label, accessories optional). Exact RPC the seam calls:
+**2026-08-13, same day, after the human added credentials:** confirmed
+`R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET` /
+`R2_PUBLIC_URL` are now present. Live-verified with a throwaway Node script
+(`@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`, the project's own
+installed deps) that exercised the identical signing config `lib/r2/sign.ts`
+uses — same `S3Client` options, same `intake/<userId>/<uuid>.<ext>` key shape
+— then performed a real PUT of a 68-byte PNG and a real GET of the resulting
+public URL:
 
-```sql
-fn_get_upload_target(
-  p_file_name     text,
-  p_content_type  text,
-  p_size_bytes    integer)
-returns jsonb  -- { uploadUrl, objectKey, publicUrl }
-```
+- `PUT` to the signed URL → `200 OK`.
+- `GET` of the public URL → `200 OK`, `content-type: image/png`,
+  `content-length: 68`.
+- `OPTIONS` preflight against the R2 endpoint with
+  `Origin: http://localhost:3000` → `204`, with
+  `Access-Control-Allow-Origin: http://localhost:3000` and
+  `Access-Control-Allow-Methods: PUT, GET` — the browser-PUT CORS path (the
+  human's dashboard-side item) is also confirmed open for local dev.
+
+Public URL from that probe (a disposable 1x1 PNG, safe to leave or delete):
+`https://pub-8be7b83fc3574e138d5f8f7f108a5ed0.r2.dev/intake/live-verification-probe/1b643c4d-d63e-4ddb-a60f-e64ad454d913.png`
+
+The verification script was a scratch file, run and deleted; it never touched
+version control. Nothing left in the working tree from this check.
 
 ### M4. Payout: credit vs cash, gated on completed fulfilments (PARTIAL)
 
