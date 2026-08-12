@@ -233,3 +233,30 @@ sessions and the actual `lib/db/errors.ts` code:**
 - non-fulfiller `confirmShipment` → `only the holder of this item can confirm
   shipment` → `NOT_FULFILLER`; the fulfiller then confirms cleanly;
 - `recordProof` seller refusal — filed as open item 8.
+
+#### `RedemptionSummary.user` is now `redeemer` (PGRST201 embed fix)
+
+013 added `redemptions.fulfiller_id`, so `redemptions` now has two FKs to
+`users`. PostgREST refused the un-hinted `public_profiles` embed with
+PGRST201 ("more than one relationship was found") — this was the `/list`
+and `/dashboard` 500s, reproduced live against the project. `getRedemptions()`
+now embeds explicitly, one FK per alias, and carries the new 013 data:
+
+- `redeemer:public_profiles!redemptions_user_id_fkey(…)` — replaces the old
+  `user` alias (renamed on `RedemptionSummary`, so consumers that read
+  `row.user.handle` must read `row.redeemer.handle`);
+- `fulfiller:public_profiles!redemptions_fulfiller_id_fkey(…)` —
+  `UserSummary | null`; null for warehouse-fulfilled redemptions.
+
+Swept the whole contract for the same class of bug: every profile embed now
+names its FK where ambiguous. The only ambiguous tables the contract embeds
+users/profiles from are `redemptions` (fixed above) and `items`
+(`getSubmissions()` already hints `!custody_holder_id`, the four-FK case);
+`orders` (`buyer_id`+`seller_id`) is two-FK but the contract selects plain
+`ORDER_COLUMNS` with no user embed, so there is nothing to disambiguate.
+`listings.seller_id`, `cards.owner_id`, `card_provenance.owner_id` and
+`consignments.consignor_id` each have a single FK and stay un-hinted. All
+verified live with isolated throwaway fixtures (see the sweep in this
+session's notes): the old embed reproduces PGRST201, the fixed `redeemer`/
+`fulfiller` embeds return both seller-held (fulfiller object) and warehouse
+(fulfiller null) rows, and the unchanged queries keep parsing.

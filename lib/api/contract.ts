@@ -439,8 +439,17 @@ export interface RedemptionSummary {
   card: CardSummary;
   /** The physical side being pulled from custody. */
   item: Pick<Item, 'id' | 'status' | 'custody_location'>;
-  /** Who redeemed. Embedded profile — placeholder caveats from item 14 apply. */
-  user: UserSummary;
+  /**
+   * Who redeemed. Embedded profile — placeholder caveats from item 14 apply.
+   * Embeds are disambiguated since 013 gave `redemptions` two FKs to `users`
+   * (re-deemer through redemptions_user_id_fkey).
+   */
+  redeemer: UserSummary;
+  /**
+   * 013 seller custody. The holder who must dispatch the parcel — null for a
+   * warehouse-fulfilled redemption (no fulfiller was ever assigned).
+   */
+  fulfiller: UserSummary | null;
 }
 
 export interface ConsignmentSummary extends Consignment {
@@ -905,7 +914,8 @@ interface RedemptionRow {
   item:
     | Pick<Item, 'id' | 'status' | 'custody_location'>
     | Pick<Item, 'id' | 'status' | 'custody_location'>[];
-  user: PublicProfileRow | PublicProfileRow[];
+  redeemer: PublicProfileRow | PublicProfileRow[];
+  fulfiller: PublicProfileRow | PublicProfileRow[] | null;
 }
 
 interface ProvenanceRow {
@@ -2521,7 +2531,12 @@ export async function getRedemptions(
         'status, carrier, tracking_number, requested_at, shipped_at, ' +
         `card:cards!inner(${CARD_SUMMARY_COLUMNS}, sku:skus!inner(${SKU_REF_COLUMNS})), ` +
         'item:items!inner(id, status, custody_location), ' +
-        `user:public_profiles!inner(${PUBLIC_PROFILE_COLUMNS})`,
+        // 013 added redemptions.fulfiller_id, so there are now two FKs from
+        // redemptions to users and PostgREST refuses an un-hinted public_profiles
+        // embed with PGRST201 (the /list & /dashboard 500s). Each embed names
+        // its own FK constraint.
+        `redeemer:public_profiles!redemptions_user_id_fkey(${PUBLIC_PROFILE_COLUMNS}), ` +
+        `fulfiller:public_profiles!redemptions_fulfiller_id_fkey(${PUBLIC_PROFILE_COLUMNS})`,
     );
 
   if (query.status?.length) {
@@ -2537,23 +2552,27 @@ export async function getRedemptions(
     'redemptions',
   ) as RedemptionRow[] | null;
 
-  return (rows ?? []).map((row) => ({
-    id: row.id,
-    card_id: row.card_id,
-    item_id: row.item_id,
-    user_id: row.user_id,
-    handling_fee_cents: row.handling_fee_cents,
-    shipping_address: row.shipping_address,
-    status: row.status,
-    carrier: row.carrier,
-    tracking_number: row.tracking_number,
-    requested_at: row.requested_at,
-    shipped_at: row.shipped_at,
-    // A redeemed card has no live listing by definition — it is burned.
-    card: toCardSummary(requireEmbed(row.card, 'redemptions.card'), null),
-    item: requireEmbed(row.item, 'redemptions.item'),
-    user: toUserSummary(requireEmbed(row.user, 'redemptions.user')),
-  }));
+  return (rows ?? []).map((row) => {
+    const fulfiller = one(row.fulfiller);
+    return {
+      id: row.id,
+      card_id: row.card_id,
+      item_id: row.item_id,
+      user_id: row.user_id,
+      handling_fee_cents: row.handling_fee_cents,
+      shipping_address: row.shipping_address,
+      status: row.status,
+      carrier: row.carrier,
+      tracking_number: row.tracking_number,
+      requested_at: row.requested_at,
+      shipped_at: row.shipped_at,
+      // A redeemed card has no live listing by definition — it is burned.
+      card: toCardSummary(requireEmbed(row.card, 'redemptions.card'), null),
+      item: requireEmbed(row.item, 'redemptions.item'),
+      redeemer: toUserSummary(requireEmbed(row.redeemer, 'redemptions.redeemer')),
+      fulfiller: fulfiller ? toUserSummary(fulfiller) : null,
+    };
+  });
 }
 
 /** Consignment queues, filterable by status for the admin board. */
