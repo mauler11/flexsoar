@@ -68,7 +68,9 @@ import type {
   Consignment,
   ConsignmentEvent,
   ConsignmentStatus,
+  CustodyModel,
   FloatValue,
+  GradeSource,
   Item,
   ItemStatus,
   Json,
@@ -76,6 +78,7 @@ import type {
   ListingStatus,
   Order,
   OrderStatus,
+  PayoutMethod,
   RedemptionStatus,
   Sku,
   Tier,
@@ -106,6 +109,30 @@ export type ContractErrorCode =
   | 'UNAUTHENTICATED'
   | 'FORBIDDEN'
   /**
+   * 011 fn_purchase_credit — a top-up amount that is zero or negative.
+   */
+  | 'INVALID_AMOUNT'
+  /**
+   * 011 fn_purchase_credit — the top-up is smaller than
+   * platform_config.credit_purchase_min_cents.
+   */
+  | 'BELOW_MINIMUM_TOPUP'
+  /**
+   * 011 fn_purchase_card_with_credit — platform_config.credit_payout_enabled
+   * is false, so the seller-takes-credit leg is switched off.
+   */
+  | 'CREDIT_SETTLEMENT_DISABLED'
+  /**
+   * 011 fn_purchase_card_with_credit — the buyer's credit balance is below
+   * the listing price.
+   */
+  | 'INSUFFICIENT_CREDIT'
+  /**
+   * 011/012 — the payment method does not match the listing's payout_method:
+   * buying a cash listing with credit, or a credit-only listing with cash.
+   */
+  | 'PAYOUT_MISMATCH'
+  /**
    * items_grade_components_sum: the six component scores were supplied, but
    * `float` is not their weighted sum. The grader scores components and the
    * float falls out — this fires when someone picked the float first. Show the
@@ -117,6 +144,35 @@ export type ContractErrorCode =
    * all six or none; there is no partial grade.
    */
   | 'GRADE_COMPONENTS_INCOMPLETE'
+  /**
+   * 013 fn_submit_listing — users.is_restricted, so the account may not list
+   * items.
+   */
+  | 'RESTRICTED'
+  /**
+   * 013 fn_submit_listing — cash/either settlement gated behind a completed-
+   * fulfilment count (platform_config.cash_payout_min_fulfilments). The
+   * seller is not yet proven; list for credit first.
+   */
+  | 'UNPROVEN_SELLER'
+  /**
+   * 013 fn_submit_listing / fn_record_proof — fewer than four photos.
+   */
+  | 'TOO_FEW_PHOTOS'
+  /**
+   * 013 fn_submit_listing / fn_record_proof — a photo entry that is not an
+   * https URL.
+   */
+  | 'INVALID_PHOTO_URL'
+  /**
+   * 013 fn_confirm_shipment — the caller is neither the redemption's fulfiller
+   * nor an admin.
+   */
+  | 'NOT_FULFILLER'
+  /**
+   * 013 fn_confirm_shipment — carrier and tracking are required together.
+   */
+  | 'INVALID_SHIPMENT'
   | 'UNKNOWN';
 
 export class ContractError extends Error {
@@ -198,6 +254,8 @@ export interface SkuRef {
   market_price_cents: Cents | null;
   sprite_key: string | null;
   palette: Json | null;
+  /** Uploaded pixel-art PNG (012). null falls back to the sprite renderer. */
+  art_url: string | null;
 }
 
 /** The active listing on a card, if there is one. */
@@ -315,6 +373,49 @@ export interface ItemSummary {
    * partial set. Additive: existing readers that ignore this still compile.
    */
   grade: GradeComponents | null;
+  /**
+   * 013 custody. These are NOT NULL with defaults on every row (the migration
+   * backfilled them), so unlike the `Item` db type they are not optional here
+   * — a row from the database always carries them.
+   */
+  custody: CustodyModel;
+  custody_holder_id: UUID | null;
+  grade_source: GradeSource;
+  asking_price_cents: Cents | null;
+  submitted_payout: PayoutMethod;
+  last_proof_at: Timestamptz | null;
+}
+
+/**
+ * One review-queue row: a seller-held submission waiting for admin sign-off.
+ * Added for 013. It is the sell-side mirror of RedemptionSummary: the item a
+ * submitter declared, with the seller-declared condition and the admin's
+ * review inputs. `grade` is present on every submission uploaded after 013 —
+ * fn_submit_listing always writes all six scores.
+ */
+export interface SubmissionSummary {
+  id: UUID;
+  sku_id: UUID;
+  status: ItemStatus;
+  float_value: FloatValue | null;
+  /**
+   * The seller's own six condition scores, always present on a 013
+   * submission. NOT a FlexSoar grade — grade_source says which it is.
+   */
+  grade: GradeComponents;
+  /** jsonb. The seller's proof-of-possession photos, 4+. */
+  photos: Json;
+  asking_price_cents: Cents | null;
+  submitted_payout: PayoutMethod;
+  custody: CustodyModel;
+  custody_holder_id: UUID | null;
+  grade_source: GradeSource;
+  last_proof_at: Timestamptz | null;
+  authenticated_at: Timestamptz | null;
+  created_at: Timestamptz;
+  sku: SkuRef;
+  /** The seller who submitted — the custody holder, in the launch model. */
+  seller: UserSummary;
 }
 
 /**
@@ -443,12 +544,45 @@ export interface ItemsQuery {
 }
 
 /**
+ * submitListing() input (013). The six condition scores are the seller's
+ * self-declared rubric; fn_submit_listing computes the float from them the
+ * same way the grader does, and grade_source records they are seller-claimed.
+ */
+export interface SubmitListingInput {
+  skuId: UUID;
+  priceCents: Cents;
+  /** 'credit' is the default and the only unproven-seller-settable one. */
+  payoutMethod: PayoutMethod;
+  /**
+   * Proof of possession, 4+. Every entry must be a plain https URL —
+   * fn_submit_listing rejects anything else (INVALID_PHOTO_URL).
+   */
+  photos: string[];
+  /** Six self-declared condition scores, each 0.00..1.00. */
+  grade: GradeComponents;
+  notes?: string | null;
+}
+
+/**
  * The fulfilment queue. What a session sees is what 009's policies allow:
  * admins everything, users their own redemptions, everyone else nothing.
  */
 export interface RedemptionsQuery {
   status?: RedemptionStatus[];
   userId?: UUID;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * The review queue. Defaults to the admin's in-box — items sitting in
+ * 'pending_review'. Visibility is 013's policies, exactly like the other
+ * queues: admins see everything, a custody holder (or consignor) sees only
+ * their own, and an empty array means "none you may see".
+ */
+export interface SubmissionsQuery {
+  /** Defaults to ['pending_review']. Wildcard with the rest of ItemStatus. */
+  status?: ItemStatus[];
   limit?: number;
   offset?: number;
 }
@@ -478,6 +612,8 @@ export interface UpsertSkuInput {
   sprite_key?: string | null;
   /** Char -> hex map. Validate against the 9 sprite glyphs before saving. */
   palette?: Json | null;
+  /** Uploaded pixel-art PNG (012). https-only, enforced by the column check. */
+  art_url?: string | null;
   mint_cap?: number | null;
 }
 
@@ -536,14 +672,15 @@ const PUBLIC_PROFILE_COLUMNS =
 
 const USER_COLUMNS =
   'id, auth_id, handle, email, country_code, kyc_status, is_consignor, is_admin, ' +
-  'level, xp_total, portfolio_value_cents, created_at';
+  'level, xp_total, portfolio_value_cents, created_at, ' +
+  'fulfilments_completed, defaults_count, is_restricted';
 
 const SKU_REF_COLUMNS =
-  'id, brand, model, colorway, size_us, market_price_cents, sprite_key, palette';
+  'id, brand, model, colorway, size_us, market_price_cents, sprite_key, palette, art_url';
 
 const SKU_COLUMNS =
   'id, brand, model, colorway, size_us, retail_price_cents, market_price_cents, ' +
-  'price_confidence, priced_at, demand_score, sprite_key, palette, mint_cap, created_at';
+  'price_confidence, priced_at, demand_score, sprite_key, palette, art_url, mint_cap, created_at';
 
 const CARD_SUMMARY_COLUMNS =
   'id, sku_id, item_id, owner_id, float_value, float_percentile, tier, ' +
@@ -563,6 +700,7 @@ const ORDER_COLUMNS =
 const ITEM_SUMMARY_COLUMNS =
   'id, sku_id, consignment_id, consignor_id, status, float_value, graded_at, grading_notes, photos, ' +
   'authenticated_at, custody_location, reserve_price_cents, ' +
+  'custody, custody_holder_id, grade_source, asking_price_cents, submitted_payout, last_proof_at, ' +
   'grade_outsole, grade_midsole, grade_creasing, grade_upper, grade_heel, ' +
   'grade_accessories';
 
@@ -727,6 +865,12 @@ interface ItemRow {
   authenticated_at: Timestamptz | null;
   custody_location: string | null;
   reserve_price_cents: Cents | null;
+  custody: CustodyModel;
+  custody_holder_id: UUID | null;
+  grade_source: GradeSource;
+  asking_price_cents: Cents | null;
+  submitted_payout: PayoutMethod;
+  last_proof_at: Timestamptz | null;
   grade_outsole: number | null;
   grade_midsole: number | null;
   grade_creasing: number | null;
@@ -734,6 +878,11 @@ interface ItemRow {
   grade_heel: number | null;
   grade_accessories: number | null;
   sku: SkuRefRow | SkuRefRow[];
+}
+
+interface SubmissionRow extends ItemRow {
+  created_at: Timestamptz;
+  seller: PublicProfileRow | PublicProfileRow[];
 }
 
 interface ConsignmentRow extends Consignment {
@@ -880,6 +1029,12 @@ function toItemSummary(row: ItemRow, cardId: UUID | null): ItemSummary {
     authenticated_at: row.authenticated_at,
     custody_location: row.custody_location,
     reserve_price_cents: row.reserve_price_cents,
+    custody: row.custody,
+    custody_holder_id: row.custody_holder_id,
+    grade_source: row.grade_source,
+    asking_price_cents: row.asking_price_cents,
+    submitted_payout: row.submitted_payout,
+    last_proof_at: row.last_proof_at,
     sku: requireEmbed(row.sku, 'items.sku'),
     card_id: cardId,
     grade: toGradeComponents(row),
@@ -1010,14 +1165,31 @@ export async function mintCard(itemId: UUID, ownerId: UUID): Promise<UUID> {
  *
  * Locks the card and opens an early-access window sized by the seller's level.
  *
+ * fn_list_card does NOT accept a payout method yet — the migration is filed in
+ * docs/handoff/data.md — so listing as 'credit' or 'either' is refused loudly
+ * here rather than silently recording a 'cash' listing the seller never
+ * elected. Once the migration lands, this guard is deleted and
+ * `p_payout_method` is passed straight through.
+ *
  * @returns the new listing id.
- * @throws NOT_OWNER, WRONG_STATUS.
+ * @throws NOT_OWNER, WRONG_STATUS, UNKNOWN (a payout_method other than 'cash',
+ *         pending the migration).
  */
 export async function listCard(
   cardId: UUID,
   sellerId: UUID,
   priceCents: Cents,
+  payoutMethod: PayoutMethod = 'cash',
 ): Promise<UUID> {
+  if (payoutMethod !== 'cash') {
+    throw new ContractError(
+      'UNKNOWN',
+      `cannot list as '${payoutMethod}': fn_list_card has no payout_method argument yet. ` +
+        'The migration is filed in docs/handoff/data.md; list as cash or promote it.',
+      { payoutMethod },
+    );
+  }
+
   const supabase = await createServerSupabase();
   return unwrap(
     await supabase.rpc('fn_list_card', {
@@ -1080,20 +1252,181 @@ export async function purchaseCard(
 }
 
 /**
- * The redemption handling fee charged by fn_redeem_card, in USD cents.
+ * The signed-in caller's `users.id`, or an error. `users.id` equals the
+ * Supabase auth id — 006's users_self_insert WITH CHECK pins both to
+ * auth.uid(), enforced in lib/db/provision.ts — so auth.getUser() is the whole
+ * resolution.
+ *
+ * @throws UNAUTHENTICATED when there is no session.
+ */
+async function requireCurrentUserId(): Promise<UUID> {
+  const supabase = await createServerSupabase();
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data?.user) {
+    throw new ContractError('UNAUTHENTICATED', 'no active session; sign in first', { error });
+  }
+  return data.user.id as UUID;
+}
+
+/**
+ * fn_credit_balance(p_user) -> bigint
+ *
+ * The caller's own FSC credit balance, in cents. The balance is read for the
+ * signed-in user — there is deliberately no argument, so a session cannot ask
+ * after someone else's. Zero is a valid balance, not an empty state.
+ *
+ * @throws UNAUTHENTICATED.
+ */
+export async function getCreditBalance(): Promise<Cents> {
+  const userId = await requireCurrentUserId();
+  const supabase = await createServerSupabase();
+
+  const balance = unwrap(
+    await supabase.rpc('fn_credit_balance', { p_user: userId }),
+    'fn_credit_balance',
+  ) as number;
+
+  return balance ?? 0;
+}
+
+/**
+ * fn_purchase_credit(p_user_id, p_cents, p_settlement_ref) -> uuid
+ *
+ * Credits FSC to a user in exchange for cash that has ALREADY settled through
+ * Stripe. SERVICE-ROLE ONLY: call it from the payment_intent.succeeded webhook,
+ * never from client code, exactly like purchaseCard().
+ *
+ * Idempotent on `settlementRef`: 011 refuses a second credit_purchase entry
+ * with the same ref and returns null, so Stripe's at-least-once redelivery
+ * records once. The minimum top-up (platform_config.credit_purchase_min_cents)
+ * is enforced inside the SQL, not here.
+ *
+ * @param userId the buyer's users.id (which equals their auth id).
+ * @param cents the USD cents actually captured.
+ * @param settlementRef the Stripe payment_intent id.
+ * @returns the credit txn id, or null when this settlement was already recorded.
+ * @throws BELOW_MINIMUM_TOPUP, INVALID_AMOUNT.
+ */
+export async function purchaseCredit(
+  userId: UUID,
+  cents: Cents,
+  settlementRef: string,
+): Promise<UUID | null> {
+  const supabase = createServiceSupabase();
+  return unwrap(
+    await supabase.rpc('fn_purchase_credit', {
+      p_user_id: userId,
+      p_cents: cents,
+      p_settlement_ref: settlementRef,
+    }),
+    'fn_purchase_credit',
+  ) as UUID | null;
+}
+
+/**
+ * fn_purchase_card_with_credit(p_listing_id, p_buyer_id) -> uuid
+ *
+ * Buys a card paying with FSC credit. The buyer must be the signed-in user —
+ * the SQL function does not compare p_buyer_id to auth.uid() (it is security
+ * definer, so RLS would not stop a caller anyway), and the contract closes
+ * that gap. The schema-level check is filed in docs/handoff/data.md as part of
+ * the payout migration.
+ *
+ * Only 'credit'/'either' listings can be bought this way — a 'cash' listing
+ * refuses with PAYOUT_MISMATCH, which keeps the loop closed: credit never has
+ * to become money for anyone.
+ *
+ * @returns the new order id.
+ * @throws UNAUTHENTICATED, FORBIDDEN (buyerId is not the session user),
+ *         PAYOUT_MISMATCH, INSUFFICIENT_CREDIT, CREDIT_SETTLEMENT_DISABLED,
+ *         SELF_PURCHASE, EARLY_ACCESS_LOCKED, WRONG_STATUS, NOT_FOUND.
+ */
+export async function purchaseCardWithCredit(
+  listingId: UUID,
+  buyerId: UUID,
+): Promise<UUID> {
+  const sessionUserId = await requireCurrentUserId();
+  if (buyerId !== sessionUserId) {
+    throw new ContractError(
+      'FORBIDDEN',
+      'credit purchases can only be made for the signed-in user',
+      { buyerId, sessionUserId },
+    );
+  }
+
+  const supabase = await createServerSupabase();
+  return unwrap(
+    await supabase.rpc('fn_purchase_card_with_credit', {
+      p_listing_id: listingId,
+      p_buyer_id: buyerId,
+    }),
+    'fn_purchase_card_with_credit',
+  ) as UUID;
+}
+
+/**
+ * The redeem handling fee, in USD cents, when no platform_config row exists.
+ *
+ * 011 gave it a permanent home: platform_config['redemption_handling_fee_cents']
+ * (seeded at 1500). The authoritative value is now getRedemptionHandlingFeeCents();
+ * this constant is only the fallback for a database that has not been migrated.
  *
  * fn_redeem_card takes the fee as an argument (p_fee_cents) and the schema
- * records it on the redemption and in the ledger, but nothing in the schema
- * tells a UI what the fee IS. This is the single server-side source of truth —
- * pass it to redeemCard(), and never take the fee from client input.
- *
- * BELONGS IN CONFIGURATION, NOT CODE. The right long-term home for this is a
- * platform_config row read by fn_redeem_card (or a levels.perks value), so the
- * platform can adjust the fee without shipping a code change and without
- * trusting every client to send the right number. That needs a migration,
- * which is the human's job — filed in docs/handoff/data.md.
+ * records it on the redemption and in the ledger. Pass the config value to
+ * redeemCard(), and never take the fee from client input.
  */
 export const REDEMPTION_HANDLING_FEE_CENTS: Cents = 1500;
+
+/** The live platform_config rows that UI code can branch on. */
+export interface PlatformConfig {
+  /** redemption_handling_fee_cents, USD cents charged to ship a redeemed item. */
+  redemption_handling_fee_cents: Cents;
+  /** credit_payout_enabled — master switch for the seller-takes-credit leg. */
+  credit_payout_enabled: boolean;
+  /** credit_payout_premium_bps — bonus credit a seller gets for electing credit. */
+  credit_payout_premium_bps: number;
+  /** credit_purchase_min_cents — the smallest FSC top-up. */
+  credit_purchase_min_cents: Cents;
+}
+
+/**
+ * The platform_config rows, mapped to a single object. config_read (011) is
+ * `for select using (true)`, so an anonymous visitor can read this too.
+ *
+ * The two *_cents values are `bigint` in the schema (correct — money), so they
+ * arrive as numbers and are typed Cents. Missing rows fall back to the same
+ * values 011 seeds, so a half-migrated database still reads coherently.
+ */
+export async function getPlatformConfig(): Promise<PlatformConfig> {
+  const supabase = await createServerSupabase();
+
+  const rows = unwrap(
+    await supabase.from('platform_config').select('key, num_value, bool_value'),
+    'platform_config',
+  ) as { key: string; num_value: number | null; bool_value: boolean | null }[] | null;
+
+  const byKey = new Map((rows ?? []).map((row) => [row.key, row]));
+
+  return {
+    redemption_handling_fee_cents: (byKey.get('redemption_handling_fee_cents')
+      ?.num_value as Cents | undefined) ?? REDEMPTION_HANDLING_FEE_CENTS,
+    credit_payout_enabled:
+      byKey.get('credit_payout_enabled')?.bool_value ?? true,
+    credit_payout_premium_bps:
+      byKey.get('credit_payout_premium_bps')?.num_value ?? 500,
+    credit_purchase_min_cents:
+      (byKey.get('credit_purchase_min_cents')?.num_value as Cents | undefined) ?? 500,
+  };
+}
+
+/**
+ * The live redemption handling fee. Reads platform_config, falling back to the
+ * constant when the row is missing. Pass it to redeemCard().
+ */
+export async function getRedemptionHandlingFeeCents(): Promise<Cents> {
+  const config = await getPlatformConfig();
+  return config.redemption_handling_fee_cents;
+}
 
 /**
  * fn_redeem_card(p_card_id, p_user_id, p_address, p_fee_cents) -> uuid
@@ -1345,6 +1678,189 @@ export async function markShipped(
       p_tracking: tracking,
     }),
     'fn_mark_shipped',
+  );
+}
+
+// ============================================================
+// SELF-SERVE SUBMISSIONS & SELLER CUSTODY — added by
+// 013_seller_custody.sql
+// ============================================================
+//
+// All six functions derive the caller from auth.uid() inside the SQL, so they
+// run on the SESSION client: under service-role auth.uid() is null and every
+// 013 guard refuses. None of them take a seller/owner id — p_*_id arguments
+// identify the item or redemption, never the actor.
+
+/**
+ * fn_submit_listing(...) -> uuid
+ *
+ * The front door of the self-serve path (013). A seller declares an item they
+ * keep at home — price, payout preference, proof-of-possession photos and
+ * their own six condition scores. fn_submit_listing computes the float from
+ * the scores exactly as the grader does, records it as seller_declared in
+ * grade_source, and drops the item into 'pending_review'. Nothing is live
+ * until an admin approves: that review is the fraud gate.
+ *
+ * Cash/either settlement is gated to proven sellers — a seller paid in cash
+ * who never ships is an uncollateralised loss, so fn_submit_listing demands
+ * platform_config.cash_payout_min_fulfilments completed fulfilments and
+ * otherwise refuses with UNPROVEN_SELLER. Credit is the default and always
+ * the fallback.
+ *
+ * @returns the created item id.
+ * @throws UNAUTHENTICATED, RESTRICTED, INVALID_AMOUNT, UNPROVEN_SELLER,
+ *         TOO_FEW_PHOTOS, INVALID_PHOTO_URL.
+ */
+export async function submitListing(input: SubmitListingInput): Promise<UUID> {
+  const supabase = await createServerSupabase();
+
+  return unwrap(
+    await supabase.rpc('fn_submit_listing', {
+      p_sku_id: input.skuId,
+      p_price_cents: input.priceCents,
+      p_payout: input.payoutMethod,
+      p_photos: input.photos,
+      p_outsole: input.grade.outsole,
+      p_midsole: input.grade.midsole,
+      p_creasing: input.grade.creasing,
+      p_upper: input.grade.upper,
+      p_heel: input.grade.heel,
+      p_accessories: input.grade.accessories,
+      p_notes: input.notes ?? null,
+    }),
+    'fn_submit_listing',
+  ) as UUID;
+}
+
+/**
+ * fn_approve_submission(p_item_id, p_price_cents) -> uuid
+ *
+ * The admin half of the review gate (013). Fiats the submission: moves the
+ * item to 'in_custody', mints the card, and puts a 'public' listing live at
+ * the submitted asking price (or p_price_cents when the admin overrides it).
+ * Returns the listing id.
+ *
+ * @throws FORBIDDEN ("admin privileges required"), NOT_FOUND, WRONG_STATUS.
+ */
+export async function approveSubmission(
+  itemId: UUID,
+  priceCents?: Cents | null,
+): Promise<UUID> {
+  const supabase = await createServerSupabase();
+
+  return unwrap(
+    await supabase.rpc('fn_approve_submission', {
+      p_item_id: itemId,
+      p_price_cents: priceCents ?? null,
+    }),
+    'fn_approve_submission',
+  ) as UUID;
+}
+
+/**
+ * fn_reject_submission(p_item_id, p_reason) -> void
+ *
+ * Rejects a pending review: the item returns to the seller ('returned_to
+ * _consignor') and the reason is appended to grading_notes. The submission
+ * cannot be resubmitted; it is dead.
+ *
+ * @throws FORBIDDEN ("admin privileges required"), NOT_FOUND, WRONG_STATUS.
+ */
+export async function rejectSubmission(
+  itemId: UUID,
+  reason: string,
+): Promise<void> {
+  const supabase = await createServerSupabase();
+  unwrap(
+    await supabase.rpc('fn_reject_submission', {
+      p_item_id: itemId,
+      p_reason: reason,
+    }),
+    'fn_reject_submission',
+  );
+}
+
+/**
+ * fn_confirm_shipment(p_redemption_id, p_carrier, p_tracking) -> void
+ *
+ * Dispatch for a seller-held redemption: the custody holder (or an admin)
+ * stamps carrier, tracking and shipped_at, moves the redemption to 'shipped'
+ * and the item to 'shipped', and credits the fulfiller's
+ * fulfilments_completed. Refuses once already shipped, refuses anyone who is
+ * neither the fulfiller nor an admin.
+ *
+ * @throws NOT_FOUND, WRONG_STATUS, NOT_FULFILLER, INVALID_SHIPMENT.
+ */
+export async function confirmShipment(
+  redemptionId: UUID,
+  carrier: string,
+  tracking: string,
+): Promise<void> {
+  const supabase = await createServerSupabase();
+  unwrap(
+    await supabase.rpc('fn_confirm_shipment', {
+      p_redemption_id: redemptionId,
+      p_carrier: carrier,
+      p_tracking: tracking,
+    }),
+    'fn_confirm_shipment',
+  );
+}
+
+/**
+ * fn_mark_default(p_redemption_id, p_note) -> void
+ *
+ * The seller never shipped. FlexSoar absorbs the loss: the redemption is
+ * marked defaulted, the item frees back to 'released', and the defaulting
+ * seller is permanently restricted (is_restricted = true) with the note on
+ * the item. Credit held by the seller is NOT clawed back here —
+ * deliberately, 013 wants that to be a considered admin action with its own
+ * written reason.
+ *
+ * @throws FORBIDDEN ("admin privileges required"), NOT_FOUND, WRONG_STATUS.
+ */
+export async function markDefault(
+  redemptionId: UUID,
+  note: string,
+): Promise<void> {
+  const supabase = await createServerSupabase();
+  unwrap(
+    await supabase.rpc('fn_mark_default', {
+      p_redemption_id: redemptionId,
+      p_note: note,
+    }),
+    'fn_mark_default',
+  );
+}
+
+/**
+ * fn_record_proof(p_item_id, p_photos) -> void
+ *
+ * The custody holder re-photographs a held item to prove it still exists
+ * (driven off items_proof_overdue). Writes the photos and stamps
+ * last_proof_at. NOT a FlexSoar authentication — grade_source stays honest.
+ *
+ * SCHEMA FOLLOW-UP: 013 routes this through the existing fn_set_item_photos,
+ * which calls fn_require_admin() — so a non-admin custody holder is refused
+ * with FORBIDDEN in the current schema, pre-mint or not. The wrapper is
+ * written against 013's intent; the refusal and the fix both belong in
+ * docs/handoff/data.md.
+ *
+ * @throws NOT_FOUND, NOT_OWNER, FORBIDDEN (013 follow-up), TOO_FEW_PHOTOS,
+ *         INVALID_PHOTO_URL, WRONG_STATUS (post-mint, "grading evidence is
+ *         frozen").
+ */
+export async function recordProof(
+  itemId: UUID,
+  photos: string[],
+): Promise<void> {
+  const supabase = await createServerSupabase();
+  unwrap(
+    await supabase.rpc('fn_record_proof', {
+      p_item_id: itemId,
+      p_photos: photos,
+    }),
+    'fn_record_proof',
   );
 }
 
@@ -1917,6 +2433,65 @@ export async function getItems(query: ItemsQuery = {}): Promise<ItemSummary[]> {
   for (const card of cards ?? []) cardByItem.set(card.item_id, card.id);
 
   return items.map((item) => toItemSummary(item, cardByItem.get(item.id) ?? null));
+}
+
+/**
+ * The review queue: submissions an admin has not yet ruled on, before the
+ * fraud gate closes. Defaults to 'pending_review' — getSubmissions() with no
+ * arguments is the admin in-box. Oldest first, like the fulfilment queue.
+ *
+ * Visibility is 013's policies, exactly like the other queues: items_admin_read
+ * gives admins the whole queue, items_holder_read gives the submitting seller
+ * their own pre-mint submissions. An empty array means "none you may see",
+ * not "no submissions". grade is the seller's own six scores, guaranteed
+ * present on any 013 submission (fn_submit_listing always writes all six).
+ */
+export async function getSubmissions(
+  query: SubmissionsQuery = {},
+): Promise<SubmissionSummary[]> {
+  const supabase = await createServerSupabase();
+  const page = pageBounds(query.limit, query.offset);
+
+  const statuses =
+    query.status && query.status.length > 0
+      ? query.status
+      : ['pending_review'];
+
+  const rows = unwrap(
+    await supabase
+      .from('items')
+      .select(
+        `${ITEM_SUMMARY_COLUMNS}, created_at, ` +
+          `sku:skus(${SKU_REF_COLUMNS}), ` +
+          `seller:public_profiles!custody_holder_id(${PUBLIC_PROFILE_COLUMNS})`,
+      )
+      .in('status', statuses as ItemStatus[])
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(page.from, page.to),
+    'items',
+  ) as SubmissionRow[] | null;
+
+  return (rows ?? []).map((row) => ({
+    id: row.id,
+    sku_id: row.sku_id,
+    status: row.status,
+    float_value: row.float_value,
+    // fn_submit_listing writes all six scores on every submission, so this
+    // cannot be the both-or-neither null that toGradeComponents guards.
+    grade: toGradeComponents(row)!,
+    photos: row.photos,
+    asking_price_cents: row.asking_price_cents,
+    submitted_payout: row.submitted_payout,
+    custody: row.custody,
+    custody_holder_id: row.custody_holder_id,
+    grade_source: row.grade_source,
+    last_proof_at: row.last_proof_at,
+    authenticated_at: row.authenticated_at,
+    created_at: row.created_at,
+    sku: requireEmbed(row.sku, 'items.sku'),
+    seller: toUserSummary(requireEmbed(row.seller, 'items.seller')),
+  }));
 }
 
 /**
