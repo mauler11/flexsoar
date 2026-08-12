@@ -1,0 +1,40 @@
+/**
+ * app/(market)/list/page.tsx
+ *
+ * The self-serve listing flow. Server page: it resolves the live SKU catalog
+ * and the caller's payout eligibility once, then hands the wizard all the data
+ * it needs as props. The wizard stays client-side so steps survive back/next
+ * without re-fetching.
+ */
+import type { Metadata } from "next";
+import { getSkus } from "@/lib/api/contract";
+import { getPayoutEligibilityAction } from "@/app/(market)/list/actions";
+import { IntakeWizard } from "@/components/market/intake/IntakeWizard";
+
+export const metadata: Metadata = {
+  title: "List a shoe — FlexSoar Market",
+};
+
+export default async function ListPage() {
+  const skus = await getSkus({});
+  const payoutEligibility = await getPayoutEligibilityAction();
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <h1 className="font-mono text-xl font-black uppercase tracking-tight">
+          List a shoe
+        </h1>
+        <p className="font-mono text-[10px] uppercase tracking-tight text-muted">
+          Six photos · honest condition · you set the reserve
+        </p>
+      </div>
+
+      <IntakeWizard
+        skus={skus}
+        payoutEligibility={payoutEligibility}
+        signedIn={payoutEligibility != null}
+      />
+    </div>
+  );
+}

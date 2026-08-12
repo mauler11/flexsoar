@@ -31,6 +31,13 @@ import type { Timestamptz, UUID } from "@/lib/db/types";
 export const REDEMPTION_HANDLING_FEE_CENTS = 1500;
 
 /**
+ * Cash on /list unlocks after this many fulfilled shipments. The payout ledger
+ * is pending (handoff M4); until it lands, "fulfilled" means a redemption on
+ * this account with status 'shipped', re-checked server-side at submit.
+ */
+export const CASH_FULFILMENT_THRESHOLD = 1;
+
+/**
  * The signed-in caller's `users.id`, or null when anonymous. `users.id` equals
  * the Supabase auth id (see lib/db/provision.ts), but reading it through
  * getUser() keeps the id resolution in one place.
