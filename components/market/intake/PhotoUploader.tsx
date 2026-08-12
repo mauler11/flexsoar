@@ -18,7 +18,7 @@
  * photo actually has a URL, so a local-only selection can never slip through.
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   PHOTO_ANGLES,
   REQUIRED_PHOTO_COUNT,
@@ -44,6 +44,13 @@ function sanitizeFileName(name: string): string {
   return base.length ? base : "photo.bin";
 }
 
+/** The { url, angle } payload the wizard wants: only stored photos, one per angle. */
+function toPayload(photos: Record<string, StagedPhoto>): IntakePhoto[] {
+  return Object.values(photos)
+    .filter((p): p is StagedPhoto & { url: string } => p.url != null)
+    .map((p) => ({ url: p.url, angle: p.angleKey }));
+}
+
 export interface PhotoUploaderProps {
   onChange: (photos: IntakePhoto[]) => void;
 }
@@ -58,24 +65,19 @@ export function PhotoUploader({ onChange }: PhotoUploaderProps) {
     (p) => p.status === "uploaded",
   ).length;
 
-  const report = useCallback(
-    (next: Record<string, StagedPhoto>) => {
-      const payload = Object.values(next)
-        .filter((p): p is StagedPhoto & { url: string } => p.url != null)
-        .map((p) => ({ url: p.url, angle: p.angleKey }));
-      onChange(payload);
-    },
-    [onChange],
-  );
+  // Parent notification fires AFTER commit, never during another component's
+  // render. Calling onChange inside a setPhotos updater (as this file once did)
+  // mutates the wizard mid-render — React 19 warns and the payload is flaky.
+  // onChange is the wizard's setPhotos, a stable setter, so this effect runs
+  // once per staged-photo change.
+  useEffect(() => {
+    onChange(toPayload(photos));
+  }, [photos, onChange]);
 
   async function pickFile(angleKey: string, file: File) {
     const id = `p${nextId++}`;
     const put: StagedPhoto = { id, angleKey, url: null, status: "local", error: null };
-    setPhotos((prev) => {
-      const next = { ...prev, [angleKey]: put };
-      report(next);
-      return next;
-    });
+    setPhotos((prev) => ({ ...prev, [angleKey]: put }));
     setUploading(true);
     setSignerPending(false);
 
@@ -86,31 +88,23 @@ export function PhotoUploader({ onChange }: PhotoUploaderProps) {
     });
 
     if (!target.ok) {
-      setPhotos((prev) => {
-        const next = {
-          ...prev,
-          [angleKey]: {
-            ...prev[angleKey],
-            status: "failed" as const,
-            error: target.message,
-          },
-        };
-        report(next);
-        return next;
-      });
+      setPhotos((prev) => ({
+        ...prev,
+        [angleKey]: {
+          ...prev[angleKey],
+          status: "failed" as const,
+          error: target.message,
+        },
+      }));
       if (target.code === "SIGNER_NOT_SHARED") setSignerPending(true);
       setUploading(false);
       return;
     }
 
-    setPhotos((prev) => {
-      const next = {
-        ...prev,
-        [angleKey]: { ...prev[angleKey], status: "uploading" as const },
-      };
-      report(next);
-      return next;
-    });
+    setPhotos((prev) => ({
+      ...prev,
+      [angleKey]: { ...prev[angleKey], status: "uploading" as const },
+    }));
 
     try {
       const res = await fetch(target.target.uploadUrl, {
@@ -120,32 +114,24 @@ export function PhotoUploader({ onChange }: PhotoUploaderProps) {
       });
       if (!res.ok) throw new Error(`upload returned ${res.status}`);
 
-      setPhotos((prev) => {
-        const next = {
-          ...prev,
-          [angleKey]: {
-            ...prev[angleKey],
-            url: target.target.publicUrl,
-            status: "uploaded" as const,
-            error: null,
-          },
-        };
-        report(next);
-        return next;
-      });
+      setPhotos((prev) => ({
+        ...prev,
+        [angleKey]: {
+          ...prev[angleKey],
+          url: target.target.publicUrl,
+          status: "uploaded" as const,
+          error: null,
+        },
+      }));
     } catch (thrown) {
-      setPhotos((prev) => {
-        const next = {
-          ...prev,
-          [angleKey]: {
-            ...prev[angleKey],
-            status: "failed" as const,
-            error: thrown instanceof Error ? thrown.message : "upload failed",
-          },
-        };
-        report(next);
-        return next;
-      });
+      setPhotos((prev) => ({
+        ...prev,
+        [angleKey]: {
+          ...prev[angleKey],
+          status: "failed" as const,
+          error: thrown instanceof Error ? thrown.message : "upload failed",
+        },
+      }));
     } finally {
       setUploading(false);
     }
@@ -155,7 +141,6 @@ export function PhotoUploader({ onChange }: PhotoUploaderProps) {
     setPhotos((prev) => {
       const next = { ...prev };
       delete next[angleKey];
-      report(next);
       return next;
     });
     if (inputRefs.current[angleKey]) inputRefs.current[angleKey]!.value = "";
@@ -208,13 +193,25 @@ export function PhotoUploader({ onChange }: PhotoUploaderProps) {
                     alt={`${angle.label} photo`}
                     className="mt-1 aspect-square w-full border border-line-strong object-cover"
                   />
+                ) : photo.status === "failed" ? (
+                  <div className="mt-1 flex aspect-square w-full flex-col items-center justify-center gap-1 border border-dashed border-[#FF4444] bg-[#FF4444]/10 px-2 py-4 text-center">
+                    <span className="font-mono text-[9px] font-bold uppercase tracking-tight text-[#FF4444]">
+                      upload failed
+                    </span>
+                    <span className="font-mono text-[9px] tracking-tight text-[#FF4444]">
+                      {photo.error ?? "unknown error"}
+                    </span>
+                    <span className="font-mono text-[9px] tracking-tight text-muted">
+                      remove above and choose the photo again
+                    </span>
+                  </div>
+                ) : photo.status === "uploading" ? (
+                  <div className="mt-1 flex aspect-square w-full items-center justify-center border border-dashed border-line-strong px-2 py-4 font-mono text-[10px] tracking-tight text-muted">
+                    uploading…
+                  </div>
                 ) : (
-                  <div className="mt-1 flex aspect-square w-full items-center justify-center border border-dashed border-line-strong px-2 py-4 text-center font-mono text-[10px] tracking-tight text-muted">
-                    {photo.status === "uploading"
-                      ? "uploading…"
-                      : photo.status === "failed"
-                        ? `upload failed — ${photo.error ?? "try again"}`
-                        : "photo selected locally"}
+                  <div className="mt-1 flex aspect-square w-full items-center justify-center border border-dashed border-line-strong px-2 py-4 font-mono text-[10px] tracking-tight text-muted">
+                    photo selected locally
                   </div>
                 )
               ) : (
