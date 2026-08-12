@@ -7,10 +7,11 @@
 -- FSC credit: a one-way, closed-loop store credit.
 --
 -- THE DESIGN RULE, and the reason this is store credit rather than
--- e-money: credit can ONLY ever pay a seller who has elected to be paid
--- in credit. A seller who wants money is paid money, by Stripe, from the
--- buyer. Credit never becomes money for anyone, at any point, including
--- for the platform on a user's behalf.
+-- e-money: the payout always follows the payment method. Buyer pays
+-- cash, seller receives cash from Stripe. Buyer pays credit, seller
+-- receives credit. A seller may accept 'either' and let the buyer
+-- choose. What never happens, in any path, is the platform paying money
+-- against credit — credit never becomes money for anyone.
 --
 -- There is deliberately NO fn_withdraw_credit, no fn_convert_credit, and
 -- no admin path that pays cash against a credit balance. That absence is
@@ -130,8 +131,10 @@ $$;
 -- 3. Sellers elect their payout at listing time
 -- ------------------------------------------------------------
 
+-- 'either' opens both doors and lets the buyer pick. Safe, because the
+-- payout mirrors whatever the buyer paid with — no conversion occurs.
 do $$ begin
-  create type payout_method as enum ('cash', 'credit');
+  create type payout_method as enum ('cash', 'credit', 'either');
 exception when duplicate_object then null;
 end $$;
 
@@ -211,7 +214,7 @@ begin
   if v_l.status not in ('early_access', 'public') then
     raise exception 'listing % is %', p_listing_id, v_l.status;
   end if;
-  if v_l.payout_method <> 'credit' then
+  if v_l.payout_method not in ('credit', 'either') then
     raise exception 'listing % settles in cash and cannot be bought with credit',
       p_listing_id;
   end if;
@@ -286,4 +289,7 @@ grant execute on function fn_purchase_card_with_credit(uuid, uuid) to authentica
 --      redemption_handling_fee_cents and accept credit.
 --    - fn_list_card does not yet set payout_method; it defaults to
 --      'cash'. The contract needs an argument for it.
+--    - fn_purchase_card (the Stripe path) does not yet check
+--      payout_method. It must reject listings marked 'credit', or a
+--      credit-only seller could be paid cash they never elected.
 -- ------------------------------------------------------------
