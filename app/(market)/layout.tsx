@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { getUser } from "@/lib/api/contract";
 import { signOut } from "@/app/(auth)/actions";
 import { currentUserId } from "@/app/(market)/queries";
+import { MarketNav, type MarketNavItem } from "@/components/market/MarketNav";
 
 export const metadata: Metadata = {
   title: "FlexSoar Market",
@@ -27,6 +28,17 @@ export default async function MarketLayout({
   const meId = await currentUserId();
   const me = meId ? await getUser({ id: meId }).catch(() => null) : null;
 
+  const navItems: MarketNavItem[] = [
+    { href: "/", label: "Market" },
+    { href: "/list", label: "List" },
+    ...(me
+      ? [
+          { href: "/dashboard", label: "Dashboard" },
+          { href: `/u/${me.handle}`, label: "Profile" },
+        ]
+      : []),
+  ];
+
   return (
     <div className="flex min-h-screen flex-col">
       <ToastProvider>
@@ -38,36 +50,7 @@ export default async function MarketLayout({
             >
               FlexSoar
             </Link>
-            <nav
-              aria-label="Market"
-              className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-tight"
-            >
-              <span className="border border-accent bg-accent px-1.5 py-0.5 font-bold text-[#0B0B0B]">
-                Market
-              </span>
-              <a
-                href="/list"
-                className="border border-line px-1.5 py-0.5 text-muted hover:text-foreground"
-              >
-                List
-              </a>
-              {me && (
-                <>
-                  <a
-                    href="/dashboard"
-                    className="border border-line px-1.5 py-0.5 text-muted hover:text-foreground"
-                  >
-                    Dashboard
-                  </a>
-                  <a
-                    href={`/u/${me.handle}`}
-                    className="border border-line px-1.5 py-0.5 text-muted hover:text-foreground"
-                  >
-                    Profile
-                  </a>
-                </>
-              )}
-            </nav>
+            <MarketNav items={navItems} />
             <div className="flex items-center gap-2">
               {me ? (
                 <>
