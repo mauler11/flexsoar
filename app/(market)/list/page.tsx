@@ -26,7 +26,7 @@ export default async function ListPage() {
           List a shoe
         </h1>
         <p className="font-mono text-[10px] uppercase tracking-tight text-muted">
-          Six photos · honest condition · you set the reserve
+          Four photos · honest condition · you set the reserve
         </p>
       </div>
 

@@ -22,19 +22,21 @@ export interface PhotoAngle {
   key: string;
   label: string;
   hint: string;
-  required: boolean;
 }
 
-/** Required first: a buyer must see the four money views. */
+/**
+ * Exactly four — the count fn_submit_listing actually enforces. Chosen for
+ * the most information per shot: toe (creasing, the first thing a buyer
+ * checks), both full-length sides (upper condition, shape), and the outsole
+ * (tread wear, a resale-critical view a buyer can't otherwise judge). No
+ * optional angles — four is the whole photo step, not a floor under a
+ * longer wishlist.
+ */
 export const PHOTO_ANGLES: readonly PhotoAngle[] = [
-  { key: "toe", label: "Toe", hint: "Top-down, straight over the toe box", required: true },
-  { key: "lateral_left", label: "Left side", hint: "Medial side of the left shoe, full length", required: true },
-  { key: "lateral_right", label: "Right side", hint: "Lateral side of the right shoe, full length", required: true },
-  { key: "heel", label: "Heel", hint: "Heel counter, dead-on from behind", required: true },
-  { key: "outsole", label: "Outsole", hint: "Tread, showing wear across the whole sole", required: false },
-  { key: "insole", label: "Insole / size tag", hint: "Inside the shoe — size tag if you can", required: false },
-  { key: "box_label", label: "Box label", hint: "The sticker on the box with style and size", required: false },
-  { key: "accessories", label: "Extras", hint: "Extra laces, tags, tote — everything that came with it", required: false },
+  { key: "toe", label: "Toe", hint: "Top-down, straight over the toe box" },
+  { key: "lateral_left", label: "Left side", hint: "Full length, lateral side of the left shoe" },
+  { key: "lateral_right", label: "Right side", hint: "Full length, lateral side of the right shoe" },
+  { key: "outsole", label: "Outsole", hint: "Tread, showing wear across the whole sole" },
 ];
 
 export const REQUIRED_PHOTO_COUNT = 4;
@@ -62,12 +64,25 @@ export interface ConditionQuestion {
   options: readonly ConditionOption[];
 }
 
-/** Four everyday answer levels, one per component. */
+/** Four everyday answer levels, one per wear component. */
 const WEAR_LEVELS: readonly ConditionOption[] = [
   { label: "Like new", score: 0.05 },
   { label: "Light wear", score: 0.25 },
   { label: "Noticeable wear", score: 0.55 },
   { label: "Heavy wear", score: 0.85 },
+];
+
+/**
+ * Accessories asks a possession question, not a wear question — it does not
+ * belong on the WEAR_LEVELS scale ("Like new" answering "do you have the
+ * box?" reads as a bug). Three options because the rubric calls out the
+ * box-damaged-or-partial case by name and it is common enough to earn its
+ * own slot, not get rounded to "yes" or "no."
+ */
+const ACCESSORIES_LEVELS: readonly ConditionOption[] = [
+  { label: "Yes — box, tags, everything", score: 0.0 },
+  { label: "Box only", score: 0.4 },
+  { label: "No box or extras", score: 1.0 },
 ];
 
 /** Plain-language, in buyer order: money views first, accessories last. */
@@ -106,7 +121,7 @@ export const CONDITION_QUESTIONS: readonly ConditionQuestion[] = [
     key: "accessories",
     question: "Do you have the box, tags, and any extras?",
     hint: "Missing or damaged extras cost value — be honest, it protects you at review.",
-    options: WEAR_LEVELS,
+    options: ACCESSORIES_LEVELS,
   },
 ];
 
