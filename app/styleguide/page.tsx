@@ -6,7 +6,7 @@
  *
  *   - all 5 tiers + exceptional (frame ornament, greyscale-proof)
  *   - all 5 float bands
- *   - both sprite silhouettes across the fixture colourways
+ *   - all three sprite silhouettes across the fixture colourways
  *   - every ui primitive in every state
  */
 import type { ReactNode } from "react";
@@ -22,6 +22,7 @@ import {
   DEFAULT_PALETTE,
   HIGH_TOP,
   LOW_TOP,
+  MID_TOP,
   PALETTES,
   paletteFromJson,
   spriteMapForKey,
@@ -90,9 +91,10 @@ const EMPTY_ICON = (
   </div>
 );
 
-/** The Sprites section: both silhouettes, one block per shipped palette. */
+/** The Sprites section: all three silhouettes, one block per shipped palette. */
 const SPRITE_ROWS: { label: string; map: SpriteMap }[] = [
   { label: "High-top", map: HIGH_TOP },
+  { label: "Mid-top", map: MID_TOP },
   { label: "Low-top", map: LOW_TOP },
 ];
 
@@ -226,7 +228,7 @@ export default function StyleguidePage() {
         {/* ------------------------------------------------------------ */}
         <Section
           title="Sprites"
-          subtitle="Both silhouettes across all four shipped palettes. One map, many colourways — swap skus.palette, keep the silhouette. px=2 is the thumbnail size, px=7 the hero."
+          subtitle="All three silhouettes across all four shipped palettes. One map, many colourways — swap skus.palette, keep the silhouette. px=2 is the thumbnail size, px=7 the hero."
         >
           <div className="flex flex-col gap-8">
             {SPRITE_ROWS.map(({ label, map }) => (

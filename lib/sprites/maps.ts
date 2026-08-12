@@ -1,7 +1,11 @@
 // lib/sprites/maps.ts
 //
 // Hand-drawn silhouettes. Each map is a string[] on a 40-wide grid,
-// rendered left-facing (toe at left, heel/collar at right).
+// rendered left-facing (toe at left, heel/collar at right):
+//
+//   HIGH_TOP  40x26    MID_TOP  40x22    LOW_TOP  40x18
+//
+// Iterate with scripts/render-sprite.ts — render to PNG, look, fix, repeat.
 //
 // Palette characters:
 //   .  transparent      D  outline
@@ -22,55 +26,94 @@
 
 import type { SpriteMap, SpritePalette } from "./types";
 
+/**
+ * Every row of a map must be the same width — a short row silently truncates
+ * the render. Called at module load for each exported map; throws on drift.
+ */
+function assertUniformWidth(name: string, map: SpriteMap): void {
+  const width = map[0]?.length ?? 0;
+  for (let i = 0; i < map.length; i++) {
+    if (map[i].length !== width) {
+      throw new Error(
+        `sprite map ${name}: row ${i} is ${map[i].length} cells wide, expected ${width}`,
+      );
+    }
+  }
+}
+
 export const HIGH_TOP: string[] = [
-  '........................................',
-  '.......................DDDDDDDDDDDDD....',
-  '......................DBbBBBBBBBBBBBD...',
-  '......................DBBBBBBBBBBBBBD...',
-  '.....................DBBBBBBBBBBBBBbD...',
-  '.....................DBBBBBBBBBBBBBbD...',
-  '................DDDDDDCCCCCCCCBBBBBbD...',
-  '............DDDDDCCCCCCCCCCCCCBBBBBbD...',
-  '.........DDDDCCCCCGCCCCCCCCCCCBBBBBbD...',
-  '.......DDCCCCCCCCGGCCCCCCCCCCCBBBBBbD...',
-  '......DCCCCCCCCCGGCCCCCCCCCCCCCBBBBbD...',
-  '.....DCCCCCCCCCGGCCCCCCCCCCCCCCCBBBbD...',
-  '....DCCCCCCCCCGGCCCCCCCCCBBBBBBBBBBBD...',
-  '...DBBBCCCCCCGGCCCCCCCCBBBBBBBBBBBBBD...',
-  '...DBBBBCCCCCGGCCCCCCBBBBBBBBBBBBBBbD...',
-  '..DBBBBBBCCCCGGCCCCBBBBBBBBBBBBBBCCbD...',
-  '..DBBBBBBBCCCCCCCCCCCCCCCCCCCCBBBBBbD...',
-  '..DBBBBBBBBCCCCCCCCCCCCCCCCCCCCCCBBBD...',
-  '..DcCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCcD..',
-  '..DcccccccccccccccccccccccccccccccccccD.',
-  '.DWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWD.',
-  '.DWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWD.',
-  '.DIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIID.',
-  '.DiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiD.',
-  '..DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD..',
+  '.................DDDDDDDDDDDDDDDDD......',
+  '................DCCBBBBBBBBBBBBBBbD.....',
+  '................DCGGBBBBBBBBBBBBBbbD....',
+  '..............DDCCBBBBBBBBBBBBBBBbbD....',
+  '..............DCGGBBBBBBBBBBBBBBBbbD....',
+  '..............DCCCBBBBBBBBBBBBBBBbbD....',
+  '............DDGGBBDDDDDDDDDDDDDDDbbD....',
+  '............DCCCBBCCCCCCCCCCCCCCCbbD....',
+  '............DCGGBBCCCCCCCCCCCCCCCbbD....',
+  '..........DDCCBBCCCCCCCCCCCCCCCCCbbD....',
+  '..........DCGGBBCCCCCCCCCCCCCCCCCbbD....',
+  '..........DCCCBBCCCCCCCCCCCCCCCCCbbD....',
+  '..........DCCCCCCCCCCCCCCCCCDDDCDBbD....',
+  '.......DDDCCCCCCCCCCCCCCCCDDDDDCDBbD....',
+  '.....DDBBBbCCCCCCCCCCCCCDDDDDDCDBBbD....',
+  '...DDBBBBBbCCCCCCCCCCDDDDDDDDCCDBBbD....',
+  '..DBbBbBbBbCCCCCCDDDDDDDDDDCCCCDBBbD....',
+  '.DBBBBBBBBbCDDDDDDDDDDDDDCCCCCCDBBbD....',
+  '.DBBBBBBBBbCDDDDDDDDDDCCCCCCCCCDBBbD....',
+  '.DBBBBBBBBbCDDDDDDCCCCCCCCCCCCCDBBbD....',
+  '.DbbbbbbbbcccccccccccccccccccccbbbbD....',
+  '.DWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWD..',
+  'DWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWD..',
+  'DIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIID..',
+  'DiiIiiIiiIiiIiiIiiIiiIiiIiiIiiIiiIiiID..',
+  '.DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD...',
 ]
 
 export const LOW_TOP: string[] = [
-  '........................................',
-  '........................................',
-  '...................DDDDDDDDDDDDDDDD.....',
-  '...............DDDDDCCCCCCCCCCCBBBBD....',
-  '..........DDDDDCCCCCCCCCCCCCCCCBBBBD....',
-  '.......DDDCCCCCCGCCCCCCCCCCCCCCBBBBD....',
-  '.....DDCCCCCCCCGGCCCCCCCCCCCCCCBBBBD....',
-  '....DCCCCCCCCCGGCCCCCCCCCCCCCCCCBBBD....',
-  '...DCCCCCCCCCGGCCCCCCCCCBBBBBBBBBBBD....',
-  '...DBBBCCCCCGGCCCCCCCCBBBBBBBBBBBBBD....',
-  '..DBBBBCCCCGGCCCCCCCBBBBBBBBBBBBBBbD....',
-  '..DBBBBBCCCGGCCCCCBBBBBBBBBBBBBBCCbD....',
-  '..DBBBBBBCCCCCCCCCCCCCCCCCCCCBBBBBbD....',
-  '..DcCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCBbD...',
-  '..DccccccccccccccccccccccccccccccccD....',
-  '.DWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWD...',
-  '.DWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWD...',
-  '.DIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIID...',
-  '.DiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiD...',
-  '..DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD...',
+  '.........................DDDDDDDDDD.....',
+  '........................DCCBBBBBBbD.....',
+  '......................DDCGGBBBBBBbbD....',
+  '...................DDDCCGGBBCCDBBBbD....',
+  '................DDDCCGGBBCCCCCDBBBbD....',
+  '.............DDDCCGGBBCCCCCDDCDBBBbD....',
+  '...........DDCCGGBBCCCCCCDDDDCDBBBbD....',
+  '........DDDCCCCCCCCCCCCCDDDDDCDBBBbD....',
+  '.....DDDBbCCCCCCCCCCCDDDDDDCCCDBBBbD....',
+  '..DDDBBBBbCCCCCCCDDDDDDDDDCCCCDBBBbD....',
+  '.DBbBbBbBbCCCCDDDDDDDDCCCCCCCCDBBBbD....',
+  '.DBBBBBBBbCCCCDDDDCCCCCCCCCCCCDBBBbD....',
+  '.DbbbbbbbbccccccccccccccccccccbbbbbD....',
+  '.DWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWD..',
+  'DWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWD..',
+  'DIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIID..',
+  'DiiIiiIiiIiiIiiIiiIiiIiiIiiIiiIiiIiiID..',
+  '.DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD...',
+]
+
+export const MID_TOP: string[] = [
+  '...................DDDDDDDDDDDDDDD......',
+  '..................DCCBBBBBBBBBBBBbD.....',
+  '..................DCGGBBBBBBBBBBBbbD....',
+  '................DDCCBBBBBBBBBBBBBbbD....',
+  '................DCGGBBDDDDDDDDDDDbbD....',
+  '..............DDCCBBCCCCCCCCCCCCCbbD....',
+  '..............DCGGBBCCCCCCCCCCCCCbbD....',
+  '............DDCCBBCCCCCCCCCCCCCCCbbD....',
+  '............DCGGBBCCCCCCCCCCDDDCDBbD....',
+  '..........DCCCCCCCCCCCCCCCCDDDDCDBbD....',
+  '.......DDDCCCCCCCCCCCCCCDDDDDDCDBBbD....',
+  '.....DDBBBbCCCCCCCCCCDDDDDDDDCCDBBbD....',
+  '...DDBBBBBbCCCCCCDDDDDDDDDDCCCCDBBbD....',
+  '..DBBBBBBBbCDDDDDDDDDDDDCCCCCCCDBBbD....',
+  '.DBBbBbBbBbCDDDDDDDDDCCCCCCCCCCDBBbD....',
+  '.DBBBBBBBBbCDDDDDCCCCCCCCCCCCCCDBBbD....',
+  '.DbbbbbbbbcccccccccccccccccccccbbbbD....',
+  '.DWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWD..',
+  'DWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWD..',
+  'DIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIID..',
+  'DiiIiiIiiIiiIiiIiiIiiIiiIiiIiiIiiIiiID..',
+  '.DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD...',
 ]
 
 // Sail / university blue — the AJ1 colourway from the design reference.
@@ -98,16 +141,19 @@ export const PALETTE_CHICAGO: SpritePalette = {
   G: '#1A1417',
 }
 
+// Every value steps up off the #0B0B0B card. A true-black outline is darker
+// than the card and takes the silhouette edge with it, so D is the lightest
+// dark here, not the darkest — the shoe reads as tonal black, not a hole.
 export const PALETTE_TRIPLE_BLACK: SpritePalette = {
-  D: '#000000',
-  C: '#2A2A2A',
-  c: '#1E1E1E',
-  B: '#3D3D3D',
-  b: '#2E2E2E',
-  W: '#242424',
-  I: '#141414',
-  i: '#0C0C0C',
-  G: '#4A4A4A',
+  D: '#2B2B2E',
+  C: '#5E5E63',
+  c: '#4A4A4F',
+  B: '#3E3E43',
+  b: '#333338',
+  W: '#74747A',
+  I: '#2A2A2E',
+  i: '#202024',
+  G: '#85858B',
 }
 
 export const PALETTE_GUM: SpritePalette = {
@@ -122,8 +168,13 @@ export const PALETTE_GUM: SpritePalette = {
   G: '#3E2A18',
 }
 
+assertUniformWidth("HIGH_TOP", HIGH_TOP);
+assertUniformWidth("MID_TOP", MID_TOP);
+assertUniformWidth("LOW_TOP", LOW_TOP);
+
 export const SPRITE_MAPS: Record<string, SpriteMap> = {
   'low-top': LOW_TOP,
+  'mid-top': MID_TOP,
   'high-top': HIGH_TOP,
 }
 
