@@ -67,6 +67,8 @@ export type ConsignmentStatus =
 export type ItemStatus =
   | 'pending_intake'
   | 'in_custody'
+  | 'pending_review'
+  | 'awaiting_seller_shipment'
   | 'minted'
   | 'redemption_hold'
   | 'shipped'
@@ -88,6 +90,20 @@ export type ListingStatus =
  * never converts to money for anyone.
  */
 export type PayoutMethod = 'cash' | 'credit' | 'either';
+
+/**
+ * 013_seller_custody.sql — where the physical item lives and who is answerable
+ * for it. 'seller' is the launch model (the seller is a bailee keeping the
+ * shoe); 'warehouse' is the existing consignment pipeline.
+ */
+export type CustodyModel = 'warehouse' | 'seller';
+
+/**
+ * 013 — how `items.float_value` was arrived at. 'seller_declared' is the
+ * seller's own six scores from a submission; 'flexsoar' is a rubric grade at
+ * intake. The two are deliberately distinct — never render them identically.
+ */
+export type GradeSource = 'flexsoar' | 'seller_declared';
 
 export type LedgerEntryType =
   | 'mint'
@@ -120,6 +136,8 @@ export const CONSIGNMENT_STATUSES: readonly ConsignmentStatus[] = [
 export const ITEM_STATUSES: readonly ItemStatus[] = [
   'pending_intake',
   'in_custody',
+  'pending_review',
+  'awaiting_seller_shipment',
   'minted',
   'redemption_hold',
   'shipped',
@@ -188,6 +206,14 @@ export interface User {
   /** Cache. Rewritten by fn_refresh_levels(). */
   portfolio_value_cents: Cents;
   created_at: Timestamptz;
+  /**
+   * Seller trust counters (013). Optional to the type because the shared
+   * lib/mock fixtures predate 013 and cannot be edited here — the DB always
+   * sends them (NOT NULL DEFAULT 0 / false).
+   */
+  fulfilments_completed?: number;
+  defaults_count?: number;
+  is_restricted?: boolean;
 }
 
 // ------------------------------------------------------------
@@ -312,6 +338,17 @@ export interface Item {
   custody_location: string | null;
   reserve_price_cents: Cents | null;
   created_at: Timestamptz;
+  /**
+   * 013 custody. Optional to the type because lib/mock fixtures predate 013;
+   * the DB always sends custody + grade_source + submitted_payout (NOT NULL
+   * with defaults) and nulls the rest as appropriate.
+   */
+  custody?: CustodyModel;
+  custody_holder_id?: UUID | null;
+  grade_source?: GradeSource;
+  asking_price_cents?: Cents | null;
+  submitted_payout?: PayoutMethod;
+  last_proof_at?: Timestamptz | null;
 }
 
 // ------------------------------------------------------------

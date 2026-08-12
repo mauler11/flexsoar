@@ -105,6 +105,19 @@ hosts the art elsewhere) and the pixel-art PNGs are uploaded, every card
 renders the sprite fallback — which is the intended behaviour. `lib/mock/**`
 is not this track's lane, so the fixtures stay as they are.
 
+### 8. `fn_record_proof` cannot work for a seller — 013 routes it through an admin-only path
+
+Verified live (this session, on the project): a signed-in seller calling
+`recordProof()` / `fn_record_proof` on their own seller-held item is refused
+with `admin privileges required` (`FORBIDDEN`). The blocker is in the SQL
+layers, not the wrapper: `fn_record_proof` is security definer and calls the
+existing `fn_set_item_photos` (010), which begins with `fn_require_admin()`.
+A seller is never an admin, so every proof recording is refused — on top of
+the minted-item photo freeze 013 itself documents. The wrapper surfaces the
+refusal faithfully and cannot work around it. The fix is a migration: give
+proof its own path that skips `fn_require_admin()` (and, per 013's own notes,
+allows photo updates on a minted seller-held item).
+
 ---
 
 ## Resolved / notes for other tracks
@@ -176,3 +189,47 @@ matcher survived intact and still covers `/admin`; the anonymous branch
 redirects to `/sign-in` (verified live: `307` → `/sign-in?next=%2Fadmin`).
 Any track that touches the old `middleware.ts` must now touch `proxy.ts`.
 `lib/supabase/server.ts`'s "session refresh" comment was updated to match.
+
+### 9. 013 seller-custody contract surface — live-verified
+
+`submitListing`, `approveSubmission`, `rejectSubmission`, `confirmShipment`,
+`markDefault`, `recordProof` and `getSubmissions` now wrap 013 in the
+contract, all on the SESSION client (013 derives the actor from
+`auth.uid()`, so service-role is refused by construction — the pattern from
+item 5). `Item` / `ItemSummary` / `getItems` / `getItem` carry `custody`,
+`custody_holder_id`, `grade_source`, `asking_price_cents`, `submitted_payout`,
+`last_proof_at`; `User` gains `fulfilments_completed`, `defaults_count`,
+`is_restricted` (`getUser` returns them). New `ItemStatus` values
+`pending_review` / `awaiting_seller_shipment`, and the admin consignments
+page's status labels were extended to match. New error codes:
+`UNPROVEN_SELLER`, `RESTRICTED`, `TOO_FEW_PHOTOS`, `INVALID_PHOTO_URL`,
+`NOT_FULFILLER`, `INVALID_SHIPMENT`, with the 013 message→code rules in
+`lib/db/errors.ts` (including `price must be positive` → `INVALID_AMOUNT`).
+
+`getSubmissions()` defaults to the `pending_review` admin in-box. Its
+`seller:public_profiles!custody_holder_id(...)` embed hint is required
+because `items` has two FKs to `users` (`consignor_id` and
+`custody_holder_id`) — verified live that the hint resolves the right one.
+Oldest-first and paged like the other queues.
+
+`fn_redeem_card` now writes `redemptions.status = 'awaiting_seller'` for
+seller-held items (bare text, no constraint — `RedemptionStatus` is `OpenText`
+so no type change). The fulfilment queue UI sees it straight from
+`getRedemptions()`: distinguish "waiting on the seller to ship" from
+`requested`/`picking` there.
+
+**Live verification (this session, on the project), all through real sign-in
+sessions and the actual `lib/db/errors.ts` code:**
+- unproven seller, cash/either payout → `cash settlement needs 2 completed
+  fulfilments (you have 0); list for credit first` → `UNPROVEN_SELLER`;
+- fewer than four photos → `at least 4 photos are required` → `TOO_FEW_PHOTOS`;
+- a non-https photo → `photo entries must be https URLs, got …` →
+  `INVALID_PHOTO_URL`;
+- `price must be positive` → `INVALID_AMOUNT`;
+- restricted account → `this account cannot list items` → `RESTRICTED`;
+- positive submission lands a `pending_review` item with `custody=seller`,
+  `grade_source=seller_declared`, `submitted_payout=credit`, the six component
+  scores set, and `float` equal to the rubric weighted sum (probed 0.85);
+- non-fulfiller `confirmShipment` → `only the holder of this item can confirm
+  shipment` → `NOT_FULFILLER`; the fulfiller then confirms cleanly;
+- `recordProof` seller refusal — filed as open item 8.

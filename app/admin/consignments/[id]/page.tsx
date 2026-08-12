@@ -44,6 +44,8 @@ function photoCount(photos: unknown): number {
 const ITEM_STATUS_LABELS: Readonly<Record<ItemStatus, string>> = {
   pending_intake: "Pending intake",
   in_custody: "In custody",
+  pending_review: "Pending review",
+  awaiting_seller_shipment: "Awaiting seller shipment",
   minted: "Minted",
   redemption_hold: "Redemption hold",
   shipped: "Shipped",

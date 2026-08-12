@@ -74,6 +74,39 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   // word is 'settles' — but the two belong next to each other).
   { pattern: /settles in (?:cash|credit) and cannot be bought/i, code: 'PAYOUT_MISMATCH' },
 
+  // 013_seller_custody.sql — fn_submit_listing. Fires when the session has no
+  // users row at all (unprovisioned sign-in) — same recovery as UNAUTHENTICATED.
+  { pattern: /sign in to list an item/i, code: 'UNAUTHENTICATED' },
+  // fn_submit_listing — 'this account cannot list items' (is_restricted)
+  { pattern: /this account cannot list items/i, code: 'RESTRICTED' },
+  // fn_submit_listing — cash / either settlement gated behind a completed-
+  // fulfilment count, per platform_config.cash_payout_min_fulfilments.
+  // 'cash settlement needs % completed fulfilments (you have %); list for credit first'
+  { pattern: /cash settlement needs .+ completed fulfilments/i, code: 'UNPROVEN_SELLER' },
+  // fn_submit_listing and fn_set_item_photos (010) — the submission and proof
+  // gates both refuse fewer than four photos.
+  { pattern: /at least 4 photos are required/i, code: 'TOO_FEW_PHOTOS' },
+  // fn_submit_listing and fn_set_item_photos (010) — every photo must be an
+  // https URL.
+  { pattern: /photo entries must be https URLs/i, code: 'INVALID_PHOTO_URL' },
+  // fn_submit_listing — 'price must be positive'. Same recovery as the 011
+  // 'credit purchase must be positive' rule above.
+  { pattern: /price must be positive/i, code: 'INVALID_AMOUNT' },
+  // fn_confirm_shipment — the caller is neither the redemption's fulfiller nor
+  // an admin.
+  { pattern: /only the holder of this item can confirm shipment/i, code: 'NOT_FULFILLER' },
+  // fn_record_proof — the caller is not the item's custody holder.
+  { pattern: /you are not holding this item/i, code: 'NOT_OWNER' },
+  // fn_confirm_shipment — carrier and tracking are required together.
+  { pattern: /carrier and tracking are both required/i, code: 'INVALID_SHIPMENT' },
+  // fn_reject_submission — 'item % is not pending review'
+  { pattern: /is not pending review/i, code: 'WRONG_STATUS' },
+  // fn_mark_default — 'redemption % is warehouse-fulfilled'
+  { pattern: /is warehouse-fulfilled/i, code: 'WRONG_STATUS' },
+  // fn_set_item_photos (010) via fn_record_proof — 'item % is minted; its
+  // grading evidence is frozen', so proof cannot be recorded post-mint.
+  { pattern: /grading evidence is frozen/i, code: 'WRONG_STATUS' },
+
   // 008_grading.sql — fn_grade_item, fn_reject_item. Checked before the
   // generic status rules below, which would otherwise not match at all.
   { pattern: /is already minted; its float is immutable/i, code: 'WRONG_STATUS' },
