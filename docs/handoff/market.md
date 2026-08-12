@@ -149,3 +149,173 @@ no code change needed once they land.
 - Item 14's placeholder fields: never rendered from an embedded user except
   handle/level; the profile page value comes from `public_profiles` (which 007
   widened) not from `UserSummary.portfolio_value_cents`.
+
+---
+
+# Self-serve listing flow (`/list` + `/dashboard`) — items for track/data
+
+Built the whole front door in this pass (2026-08-13). The **UI is complete**;
+four pieces of backend surface block true persistence. Each is filed below
+with the EXACT shape this track calls, so granting them is mechanical. Until
+they land, `app/(market)/list/actions.ts` + `app/(market)/intake/rpc.ts` call
+the RPCs by name through the session client and surface the PostgREST
+"function does not exist" (42883) as a clear, honest message — the wizard is
+otherwise fully interactive and validated. None of this touches the frozen
+contract (`lib/api/contract.ts`); reads always go through it.
+
+### What this pass built (the flow itself)
+
+- `app/(market)/intake/rpc.ts` — server-only seam. Calls the M1/M2/M3 RPCs **by
+  name** through `createServerSupabase().rpc(...)` and detects a missing
+  function (PostgrestError 42883 / "function … does not exist") as an
+  `IntakeUnavailableError` so the UI can say exactly what isn't wired. When
+  track/data ships the contract functions, delete this file and import from the
+  contract.
+- `app/(market)/list/actions.ts` — Server Actions: `getUploadTargetAction`,
+  `fileSkuRequestAction`, `submitListingIntakeAction` (server-side validation of
+  all six components 0..1 `numeric(3,2)`-exact, https-only photo URLs,
+  cash re-gate via `getRedemptions`), `getPayoutEligibilityAction`. These return
+  structured `ActionResult` objects (wizard stays put, shows the outcome inline)
+  rather than redirecting.
+- `app/(market)/list/page.tsx` — server page: streams `getSkus({})` + payout
+  eligibility into the wizard.
+- `app/(market)/dashboard/page.tsx` — seller dashboard: submissions
+  (`getConsignments` consignor), held items (items flattened from
+  `getConsignment` details), owed redemptions with a "ship by" deadline
+  (M5), and the cash-gate meter.
+- `components/market/intake/**` — `intake-config.ts` (angles, six condition
+  questions, disclaimer), `SkuPicker`, `SkuRequestForm`, `PhotoUploader`
+  (target → PUT → url), `ConditionWizard`, `SelfDeclaredCondition` (amber,
+  dashed, SELF-DECLARED, never FloatBar), `PricePayout` (price beside oracle
+  value), and `IntakeWizard` (5-step orchestrator, review screen, "in review"
+  done state).
+- A self-declared float **never** renders like a FlexSoar-graded float: the
+  preview is `SelfDeclaredCondition`, visually distinct (amber dashed strip,
+  warning copy, no tier colouring), and submission stores answers in
+  `items.self_declared`, never the 008 `grade_*` columns.
+- Nav: "List" always visible, "Dashboard" and "Profile" when signed in
+  (`app/(market)/layout.tsx`).
+
+Verified at 2026-08-12: `next build`, `tsc --noEmit`, `npx eslint`, `npm test`
+= 87 passing.
+
+### M1. Intake write path — `fn_submit_listing_intake` (BLOCKING)
+
+No contract function, RPC, or RLS path can create a real submission (an item
+cannot be inserted: `items` has no insert policy; a bare `consignments` draft
+is not a submission). This track calls, from a Server Action:
+
+```sql
+fn_submit_listing_intake(
+  p_sku_id             uuid,
+  p_photo_urls         jsonb,     -- [{ "url": "https://...", "angle": "toe" }]
+  p_components         jsonb,     -- { outsole, midsole, creasing, upper, heel, accessories } 0.00..1.00
+  p_reserve_price_cents integer,
+  p_payout_method      text,      -- 'credit' | 'cash'
+  p_notes              text default null)
+returns uuid  -- the new consignment id
+```
+
+Requirements flagged, please:
+
+- SESSION client (the seller is the consignor), SECURITY DEFINER. Creates one
+  consignment `status='submitted'` (not draft — the seller submitting is the
+  submission event) with `intake_fee_cents` from `levels.seller_fee_bps` or
+  0 today, plus one item `status='pending_intake'`, `sku_id`,
+  `consignor_id`, `photos`, `reserve_price_cents`.
+- **Self-declared condition is NOT a FlexSoar grade.** Do NOT write into the
+  008 `grade_*` columns (the UI must never look graded). Store it as a new
+  `items.self_declared jsonb` column — `{ components, float, payout_method,
+  submitted_at }` — where `float` is the weighted sum computed in JS by
+  `lib/db/grading.ts gradeFloatFromComponents()`. A migration adding
+  `items.self_declared jsonb` is the cleanest home (grading evidence columns
+  stay owned by the human grader).
+- Photos land AFTER upload: the client uploads to storage first and posts
+  https URLs (see M3). Phone the RPC only with URLs already served.
+- `grant execute … to authenticated`.
+
+### M2. "Not listed?" path — `sku_requests` table + `fn_file_sku_request` (BLOCKING)
+
+The picker dead-ends for shoes not in the catalog; the failure mode the task
+called out ("file a request rather than dead-ending"). Requested table
+(a migration, human's job):
+
+```sql
+create table sku_requests (
+  id              uuid primary key default gen_random_uuid(),
+  user_id         uuid not null references users(id),
+  brand           text not null,
+  model           text not null,
+  colorway        text,
+  size_us         numeric(4,1),
+  notes           text,
+  status          text not null default 'open',   -- 'open' | 'reviewed' | 'catalogued'
+  created_at      timestamptz not null default now()
+);
+alter table sku_requests enable row level security;
+-- own insert, own read, admin read-all — mirror 009's consignments policies
+```
+
+```sql
+fn_file_sku_request(
+  p_brand text, p_model text, p_colorway text default null,
+  p_size_us numeric(4,1) default null, p_notes text default null)
+returns uuid
+```
+session client, `user_id` = `fn_current_user_id()`.
+
+### M3. Presigned photo upload signer — promote the R2 helper (BLOCKING)
+
+`components/admin/r2.ts` **does not exist on this branch** (checked the whole
+tree; there is no R2/S3 code anywhere and no R2 env vars). The seam
+`app/(market)/intake/rpc.ts` calls this RPC by name (a `getUploadTargetAction`
+wrapper returns a "signer not shared" code on 42883):
+
+1. Promote a shared signer (preferred): a server-only helper, e.g.
+   `lib/r2/sign.ts` exporting
+   `getUploadTarget({ prefix, fileName, contentType, sizeBytes }) ->
+   { uploadUrl, objectKey, publicUrl }` using a presigned PUT (Cloudflare R2
+   public bucket, or Supabase Storage `createSignedUploadUrl` — the latter
+   needs zero new dependencies, just a bucket + public-read policy created by
+   the human in the dashboard).
+2. The `NEXT_PUBLIC_*` note always. No keys in client code.
+
+The client (`components/market/intake/PhotoUploader.tsx`) is already shaped to
+mirror the pattern: request target → `fetch(uploadUrl, { method:'PUT',
+body:file })` → keep `publicUrl` → submit posts URLs. Minimum four photos,
+angles guided (toe, left lateral, right lateral, heel required; outsole,
+insole, box label, accessories optional). Exact RPC the seam calls:
+
+```sql
+fn_get_upload_target(
+  p_file_name     text,
+  p_content_type  text,
+  p_size_bytes    integer)
+returns jsonb  -- { uploadUrl, objectKey, publicUrl }
+```
+
+### M4. Payout: credit vs cash, gated on completed fulfilments (PARTIAL)
+
+No payout model exists anywhere in the schema. `getPayoutEligibilityAction`
+currently gates **cash** on a local proxy — the seller's own redemptions with
+`status='shipped'` via `getRedemptions({ userId })` (a fulfilled shipment on
+their account) — and that proxy is flagged in code as pending M4. Please
+define the real rule and surface it (a `platform_config` row, or a
+`fulfilments` table + RPC). Threshold constant `CASH_FULFILMENT_THRESHOLD = 1`
+lives in `app/(market)/queries.ts` (moved there because `'use server'` files
+may only export async functions); move it to wherever the real policy lives.
+Until then the UI explains why cash is locked instead of hiding it.
+
+### M5. Redemption ship deadline — display only, needs a source
+
+`/dashboard` shows the seller's owed redemptions (`status='requested'`) with a
+"ship by" deadline. There is no deadline column. Local constant
+`REDEMPTION_SHIP_DEADLINE_HOURS = 72` in `app/(market)/dashboard/page.tsx`
+(flagged). A `redemptions.due_at` or platform-config value would retire it.
+
+### M6. Per-SKU float curves for the live estimate
+
+The price step shows "estimated value at your self-declared condition" using
+the **linear fallback** of `lib/db/valuation.ts floatMultiplier([], skuId,
+float)` because nothing reads a SKU's curve back (admin.md item 4: no
+`getFloatCurve`). Once a curve read exists the estimate should use it.

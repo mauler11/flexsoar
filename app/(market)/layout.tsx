@@ -45,13 +45,27 @@ export default async function MarketLayout({
               <span className="border border-accent bg-accent px-1.5 py-0.5 font-bold text-[#0B0B0B]">
                 Market
               </span>
+              <a
+                href="/list"
+                className="border border-line px-1.5 py-0.5 text-muted hover:text-foreground"
+              >
+                List
+              </a>
               {me && (
-                <a
-                  href={`/u/${me.handle}`}
-                  className="border border-line px-1.5 py-0.5 text-muted hover:text-foreground"
-                >
-                  Profile
-                </a>
+                <>
+                  <a
+                    href="/dashboard"
+                    className="border border-line px-1.5 py-0.5 text-muted hover:text-foreground"
+                  >
+                    Dashboard
+                  </a>
+                  <a
+                    href={`/u/${me.handle}`}
+                    className="border border-line px-1.5 py-0.5 text-muted hover:text-foreground"
+                  >
+                    Profile
+                  </a>
+                </>
               )}
             </nav>
             <div className="flex items-center gap-2">
