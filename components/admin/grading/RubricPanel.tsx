@@ -83,9 +83,9 @@ function constraintContext(result: ActionResult & { ok: false }): string | null 
       return (
         "The database recomputed the weighted sum and got a different float " +
         "than the one sent. The float here is derived from the components " +
-        "server-side (contract helper, tie-corrected to numeric rounding), so " +
-        "this points at drift between the contract and 008 — re-save once, " +
-        "and if it persists, file it."
+        "server-side (contract helper, exact integer arithmetic matching the " +
+        "008 numeric rounding), so this points at drift between the contract " +
+        "and 008 — re-save once, and if it persists, file it."
       );
     case "GRADE_COMPONENTS_INCOMPLETE":
       return (

@@ -12,6 +12,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAdminPage } from "@/components/admin/auth";
 import { getAdminSku, getSkuFloatCurve } from "@/components/admin/db-reads";
+import { ArtUploader } from "@/components/admin/skus/ArtUploader";
 import { FloatCurveEditor } from "@/components/admin/skus/FloatCurveEditor";
 import { SkuForm } from "@/components/admin/skus/SkuForm";
 import { Badge } from "@/components/ui/Badge";
@@ -65,6 +66,8 @@ export default async function EditSkuPage({
       </header>
 
       <SkuForm sku={sku} />
+
+      <ArtUploader skuId={sku.id} currentArtUrl={sku.art_url} />
 
       <FloatCurveEditor skuId={sku.id} initialBands={curve} />
     </main>

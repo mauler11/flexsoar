@@ -12,6 +12,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { requireAdminPage } from "@/components/admin/auth";
+import { getSkuArtUrls } from "@/components/admin/db-reads";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -31,6 +32,9 @@ export default async function SkusPage() {
   await requireAdminPage("/admin/skus");
 
   const skus = await getSkus({ limit: 200 });
+  // art_url rides on the contract's Sku type the day track/data lands it; for
+  // now it is a local overlay (components/admin/db-reads.ts).
+  const art = await getSkuArtUrls(skus.map((sku) => sku.id));
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-6">
@@ -64,6 +68,7 @@ export default async function SkusPage() {
               <Th className="text-right">Confidence</Th>
               <Th className="text-right">Mint cap</Th>
               <Th>Sprite</Th>
+              <Th>Art</Th>
               <Th>
                 <span className="sr-only">Edit</span>
               </Th>
@@ -116,6 +121,18 @@ export default async function SkusPage() {
                   <Td className="text-muted">
                     {sku.sprite_key ?? "—"}
                     {sku.palette != null ? " · palette" : " · no palette"}
+                  </Td>
+                  <Td>
+                    {art.get(sku.id) ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- external host; preview, unoptimised like the grading PhotoViewer
+                      <img
+                        src={art.get(sku.id)!}
+                        alt={`Art for ${sku.brand} ${sku.model}`}
+                        className="h-8 w-8 border border-line bg-overlay object-contain"
+                      />
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
                   </Td>
                   <Td>
                     <Link

@@ -8,18 +8,23 @@
  * on view.
  *
  * THE OWNER IS THE CONSIGNOR. fn_mint_card takes an owner id; the owner of a
- * fresh card is whoever consigned the shoe. ItemSummary does not carry
- * consignor_id, so it is resolved through the local adapter — filed in
- * docs/handoff/admin.md.
+ * fresh card is whoever consigned the shoe. ItemSummary has carried
+ * consignor_id since track/data added it, so the caller passes it alongside
+ * each item id — no owner lookup adapter.
  */
 "use server";
 
 import { revalidatePath } from "next/cache";
 import { failure } from "@/components/admin/action-result";
 import { requireAdminAction } from "@/components/admin/auth";
-import { getItemOwners } from "@/components/admin/db-reads";
 import { mintCard, type ContractErrorCode } from "@/lib/api/contract";
 import type { UUID } from "@/lib/db/types";
+
+/** An item to mint, with the consignor who will own the card. */
+export interface MintRequest {
+  itemId: UUID;
+  consignorId: UUID | null;
+}
 
 export interface MintOutcome {
   itemId: UUID;
@@ -35,23 +40,22 @@ export interface BatchMintResult {
   message?: string;
 }
 
-export async function batchMintAction(itemIds: UUID[]): Promise<BatchMintResult> {
-  let owners: Map<UUID, UUID | null>;
+export async function batchMintAction(
+  requests: MintRequest[],
+): Promise<BatchMintResult> {
   try {
     await requireAdminAction();
-    if (itemIds.length === 0) {
+    if (requests.length === 0) {
       return { outcomes: [], message: "nothing selected" };
     }
-    owners = await getItemOwners(itemIds);
   } catch (thrown) {
     const f = failure(thrown);
     return { outcomes: [], message: f.ok ? undefined : f.message };
   }
 
   const outcomes: MintOutcome[] = [];
-  for (const itemId of itemIds) {
-    const owner = owners.get(itemId);
-    if (!owner) {
+  for (const { itemId, consignorId } of requests) {
+    if (!consignorId) {
       outcomes.push({
         itemId,
         ok: false,
@@ -61,7 +65,7 @@ export async function batchMintAction(itemIds: UUID[]): Promise<BatchMintResult>
       continue;
     }
     try {
-      const cardId = await mintCard(itemId, owner);
+      const cardId = await mintCard(itemId, consignorId);
       outcomes.push({ itemId, ok: true, cardId });
     } catch (thrown) {
       const f = failure(thrown);

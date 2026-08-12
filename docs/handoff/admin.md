@@ -5,69 +5,17 @@ started life in the shared `HANDOFF.md` its old global number is noted, since
 008's header cites those numbers.
 
 **Local adapters in play.** `components/admin/db-reads.ts` holds session-client
-READS for gaps itemised below (open items 2, 3, 4). Reads only, RLS-backed,
+READS for gaps itemised below (open items 4, 6). Reads only, RLS-backed,
 projected columns, and each dies the day the contract exports the real thing —
 the sanctioned local-adapter workaround, not a second data path. No writes
 bypass the contract anywhere in this track. `getAdminRedemptions` was deleted
-the day `getRedemptions()` landed, as promised.
+the day `getRedemptions()` landed; `getAdminItem` and `getItemOwners` were
+deleted the day the sync landed `getItem()` and the `consignor_id` columns —
+the promised lifecycle.
 
 ---
 
 ## Open
-
-### 1. BUG, STILL LIVE: `gradeFloatFromComponents()` rounds half-milli ties down
-
-**Reported fixed alongside the 009 contract surface; it is not.** The body is
-byte-identical to the one 896afb5 introduced — binary-FP products, then
-`Math.round(total * 1000) / 1000` — and `git log -S` shows no integer-space
-version ever landed on main.
-
-The failure: on exact half-milli ties the FP product lands just under the tie
-and rounds DOWN, while `items_grade_components_sum` recomputes in `numeric`
-and rounds half AWAY FROM ZERO — the helper returns a float its own constraint
-rejects. Smallest counterexample:
-
-```
-accessories 0.29, everything else 0.00
-  numeric:  0.29 × 0.05 = 0.0145 → round(_, 3) = 0.015   ← what the DB demands
-  helper:   0.28999… × 0.05 = 0.014499… → ×1000 = 14.499… → 0.014
-```
-
-`gradeItem(id, gradeFloatFromComponents(c), …, c)` fails with
-GRADE_COMPONENTS_MISMATCH for every such set, deterministically — a sweep of
-84,280,662 2dp combinations found 2,522,964 affected (~3%), all ties, all
-rounded down. The comment inside the helper ("Doing this in binary floating
-point and rounding at the end matches") is the part that is wrong.
-
-Exact fix, staying in 2dp/weight space — work in integers:
-
-```ts
-// hundredths × integer-percent weights land exactly in ten-thousandths
-const tenThousandths =
-  Math.round(c.outsole * 100) * 25 + Math.round(c.midsole * 100) * 20 +
-  Math.round(c.creasing * 100) * 20 + Math.round(c.upper * 100) * 20 +
-  Math.round(c.heel * 100) * 10 + Math.round(c.accessories * 100) * 5;
-return Math.round(tenThousandths / 10) / 1000; // .5 rounds up, like numeric
-```
-
-Until it lands, `floatForSave()` in `app/admin/grading/actions.ts` applies
-exactly this correction on top of the helper, only where the two differ. It is
-written to become a no-op and be deleted the day the helper is fixed — please
-say so in this file when it is, and it goes.
-
-### 2. `getItems()` cannot fetch one item
-
-`ItemsQuery` has no `id` filter and there is no `getItem(id)` — unchanged by
-the 009 contract extension. The grading bench (`/admin/grading/[itemId]`)
-still reads through the `getAdminItem()` local adapter. Either an `id?: UUID`
-on `ItemsQuery` or a `getItem(itemId)` retires it.
-
-### 3. `ItemSummary` has no `consignor_id` or `consignment_id`
-
-Unchanged by the 009 extension. The mint action resolves each item's consignor
-to pass as `mintCard`'s owner (the `getItemOwners()` adapter), and the grading
-bench links back to the item's consignment. Both columns exist on `items` and
-are admin-readable; adding them to the projection and the type is additive.
 
 ### 4. No read path for a SKU's float curve
 
@@ -89,11 +37,128 @@ policy, 009). A `getFloatCurve(skuId)` on the contract retires it —
   one is marketplace display, and `lib/domain` is not this track's lane — but
   if a boundary ever moves it has to move in `BAND_ANCHORS` too.
 
+### 6. No single-row read for a SKU
+
+`getSkus()` is list-only. The edit screen (`/admin/skus/[id]`) loads through
+the `getAdminSku()` local adapter. A `getSku(id)` on the contract, or an
+`id?: UUID` on `SkusQuery`, retires it.
+
+### 7. `fn_mint_card` does not verify the owner is the consignor
+
+The mint screen's rule is "owner = consignor", and now that `ItemSummary`
+carries `consignor_id` the action takes it straight off the item — but nothing
+enforces it. `fn_mint_card(p_item_id, p_owner_id)` accepts any owner id; the
+database never cross-checks `p_owner_id` against `items.consignor_id`, and the
+old `getItemOwners()` adapter at least re-read the column server-side. The
+surface is admin-only (`fn_require_admin` inside), so this is not a privilege
+bug, but a compromised or buggy client can mint a card to a user who never
+consigned the shoe. If the "owner is the consignor" rule matters, it belongs
+inside `fn_mint_card` — this screen cannot enforce it and the contract is
+frozen.
+
+### 8. Photo count disagrees between two screens on a malformed array
+
+The consignment detail page counts photos with `Array.isArray ? length : 0`;
+the grading queue and bench use `toPhotoList()`, which drops malformed entries.
+A `photos` array containing a non-string, non-`{url}` element shows N on
+`/admin/consignments/[id]` and fewer on `/admin/grading`. Both views should use
+`toPhotoList()` so the count is the count of real photos.
+
+### 9. Consignment history shows the actor as a raw UUID
+
+`/admin/consignments/[id]` renders `actor {event.actor_id}`. `public_profiles`
+is public and `consignment_events` is already readable by admins, so the actor
+could resolve to a handle the way every other embed on the screen does. Display
+gap, not a correctness bug.
+
+### 10. Intake photo upload: R2 build is in, but three needs block saving
+
+The upload path now works end to end on this branch: the grading bench has a
+`PhotoUploader` that asks `getItemPhotoUploadUrlAction` (in
+`app/admin/grading/actions.ts`) for a presigned PUT URL, then PUTs the file
+bytes straight to Cloudflare R2 (`components/admin/r2.ts`, config-first). What
+still blocks the feature from actually recording photos:
+
+- **R2 environment never exists.** The signer reads `R2_ACCOUNT_ID`,
+  `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` and `R2_PUBLIC_URL`
+  (all listed in DEPS.md). None are in `.env.local`; until they are, every
+  upload fails with "R2 photo upload is not configured". The build was
+  verified by typecheck/build only — there is no way to live-probe R2 without
+  credentials.
+- **The bucket needs a CORS policy for browser PUTs.** Presigned uploads are
+  PUT cross-origin from the app, so R2 must allow `PUT` (and the `Content-Type`
+  header) from the app's origin, configured in the Cloudflare dashboard — a
+  dashboard change, not code. Until it is set, the PUT fails with an HTTP
+  error and the uploader names the policy in its message.
+- **`items.photos` has no write path.** This is the one that needs the
+  contract: `items` has no UPDATE policy (only the three SELECT policies in
+  002/004) and the contract exposes no function that touches photos — every
+  items write goes through a security-definer RPC (`fn_mint_card`,
+  `fn_grade_item`, …), none of which accept photos. So the uploaded public URL
+  cannot be persisted by any code in this track, and the uploader stages
+  uploads in local state rather than pretending to save. A `fn_add_item_photos`
+  (or similar) RPC with `fn_require_admin()` inside, plus an additive contract
+  export, retires the staging and lets the page write `photos` for real.
+
+### 11. SKU art upload: R2 build is in, but `art_url` is missing from the contract
+
+The pixel-art upload now works on this branch the same way the intake photos
+do: `ArtUploader` (on `/admin/skus/[id]`) asks `getSkuArtUploadUrlAction` (in
+`app/admin/skus/actions.ts`) for a presigned PUT URL, then PUTs the bytes
+straight to Cloudflare R2 under `sku-art/<skuId>/` (`components/admin/r2.ts`,
+config-first, shared signer with the item photos). Previews of the current art
+show on the SKU list and the edit form. Two things stand in the way of a real
+save:
+
+- **`skus.art_url` is not on the contract.** The column exists in the live
+  database (verified: `select id, art_url` returns it, `null` for seeded
+  rows) but there is no migration file for it in `supabase/migrations/`, and
+  the contract's `Sku`/`SkuRef` types, `SKU_COLUMNS`/`SKU_REF_COLUMNS`, and
+  `UpsertSkuInput` do not carry it. So `getSkus()` cannot return it (the list
+  reads through a `getSkuArtUrls()` local adapter overlay — dies the day it
+  lands), and `upsertSku()` cannot write it (the form's save drops it
+  silently, so the uploader stages rather than fakes the save). **Ask:
+  track/data add `art_url: string | null` to `Sku`/`SkuRef`, include it in the
+  column projections, and accept it on `UpsertSkuInput`** — `skus_admin_write`
+  (009) already lets an admin session write it through `upsertSku`. The
+  `getSkuArtUrls()` overlay and the staging note in `ArtUploader` both retire
+  the day that lands.
+- **A migration for the live `art_url` column is missing from the repo.** The
+  column is in the database but no `.sql` file creates it — anyone resetting
+  the schema from `supabase/migrations/` loses it. The human needs to add the
+  numbered migration (with the https-only check the column appears to carry)
+  as part of promoting this.
+- **R2 creds + CORS are still the standing needs from item 10.** No
+  `R2_*` vars exist in `.env.local` yet; the bucket needs a CORS policy for
+  browser PUTs. Until then every upload fails with the config/copy-policy
+  message, which is by design.
+
 ---
 
 ## Resolved
 
 Kept as a record, since 008's header cites the old numbers.
+
+### ~~1. `gradeFloatFromComponents()` half-milli tie bug~~ — fixed by the sync
+
+track/data's 010-era work rewrote the helper in integer arithmetic (now in
+`lib/db/grading.ts`, re-exported by the contract; pinned by
+`tests/invariants.test.ts`, which grew 77 → 87). `floatForSave()` in
+`app/admin/grading/actions.ts` was deleted the same day — it is a no-op on the
+integer helper. `RubricPanel`'s client preview and the server action both now
+derive the float from the same exact arithmetic as `items_grade_components_sum`.
+
+### ~~2. `getItems()` cannot fetch one item~~ — landed as `getItem()`
+
+`getItem(itemId)` now exists on the contract (RLS-scoped, SKU embed, card_id
+lookup). The grading bench reads through it; `getAdminItem()` is deleted.
+
+### ~~3. `ItemSummary` has no `consignor_id` / `consignment_id`~~ — landed
+
+Both columns are on the projection and the type. The mint action takes
+`consignor_id` straight off each `ItemSummary` (`MintRequest`), and the grading
+bench links back to the consignment from it. `getItemOwners()` is deleted.
+See open item 7 for what this exposed.
 
 ### ~~Fulfilment has no contract surface~~ — landed in 009 + contract
 
@@ -150,8 +215,8 @@ with `fn_require_admin()` inside. Wired up in `/admin/grading/[itemId]`.
 
 ### ~~14. No read path for the grading queue~~ — landed as `getItems()`
 
-The queue at `/admin/grading` runs on it. Single-item fetch is the remaining
-gap (open item 2).
+The queue at `/admin/grading` runs on it. Single-item fetch landed as
+`getItem()` (resolved item 2).
 
 ### ~~15. The six component scores deserve real columns~~ — landed in 008
 

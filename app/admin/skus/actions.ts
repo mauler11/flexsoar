@@ -17,6 +17,8 @@
 import { revalidatePath } from "next/cache";
 import { failure, type ActionResult } from "@/components/admin/action-result";
 import { requireAdminAction } from "@/components/admin/auth";
+import { getAdminSku } from "@/components/admin/db-reads";
+import { getSkuArtUploadUrl } from "@/components/admin/r2";
 import {
   setFloatCurve,
   upsertSku,
@@ -62,5 +64,58 @@ export async function setFloatCurveAction(
     return { ok: true };
   } catch (thrown) {
     return failure(thrown);
+  }
+}
+
+export type SkuArtUploadResult =
+  | { ok: true; uploadUrl: string; publicUrl: string; key: string }
+  | { ok: false; message: string };
+
+/**
+ * Sign a presigned PUT URL for one SKU's pixel art, under `sku-art/<skuId>/`.
+ * Same pattern as the grading bench photo upload: the browser uploads the
+ * bytes straight to R2 so the 1MB server-action limit never sees them.
+ *
+ * Persisting the returned public URL into skus.art_url is deliberately NOT
+ * done here: the contract's Sku/UpsertSkuInput surface does not carry
+ * art_url yet, so a write would have to bypass the contract. Filed in
+ * docs/handoff/admin.md.
+ */
+export async function getSkuArtUploadUrlAction(input: {
+  skuId: UUID;
+  filename: string;
+  contentType: string;
+}): Promise<SkuArtUploadResult> {
+  try {
+    await requireAdminAction();
+
+    const filename = input.filename.trim();
+    const contentType = input.contentType.trim();
+    if (!filename || !contentType) {
+      return { ok: false, message: "a file name and type are required" };
+    }
+    if (!contentType.startsWith("image/")) {
+      return { ok: false, message: `${contentType} is not an image` };
+    }
+
+    const sku = await getAdminSku(input.skuId);
+    if (!sku) {
+      return { ok: false, message: "no such sku" };
+    }
+
+    const upload = await getSkuArtUploadUrl(
+      input.skuId,
+      filename,
+      contentType,
+    );
+
+    return { ok: true, ...upload };
+  } catch (thrown) {
+    // failure() is typed as ActionResult (ok:true carries no payload), but it
+    // is only ever reached with a thrown value, so the success arm is
+    // unreachable — kept as a guard so the mapping stays honest.
+    const failed = failure(thrown);
+    if (failed.ok) return { ok: false, message: "upload failed" };
+    return { ok: false, message: failed.message };
   }
 }
