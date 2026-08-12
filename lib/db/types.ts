@@ -82,6 +82,13 @@ export type ListingStatus =
   | 'cancelled'
   | 'expired';
 
+/**
+ * What a seller elects to be paid in (011). 'either' opens both doors and the
+ * buyer picks. The payout always mirrors the buyer's payment method — credit
+ * never converts to money for anyone.
+ */
+export type PayoutMethod = 'cash' | 'credit' | 'either';
+
 export type LedgerEntryType =
   | 'mint'
   | 'sale_gross'
@@ -206,7 +213,7 @@ export interface Sku {
   sprite_key: string | null;
   /** Colourway swap for the sprite: char -> hex. */
   palette: Json | null;
-  /** Uploaded pixel-art PNG. Absent or null falls back to the sprite renderer. */
+  /** Uploaded pixel-art PNG (012). Absent or null falls back to the sprite renderer. */
   art_url?: string | null;
   /** null = uncapped. */
   mint_cap: number | null;

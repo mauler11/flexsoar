@@ -27,7 +27,11 @@
 import Stripe from 'stripe';
 import { NextResponse, type NextRequest } from 'next/server';
 
-import { ContractError, purchaseCard } from '@/lib/api/contract';
+import {
+  ContractError,
+  purchaseCard,
+  purchaseCredit,
+} from '@/lib/api/contract';
 import {
   findListingForSettlement,
   findOrderBySettlementRef,
@@ -38,6 +42,29 @@ const HANDLED_EVENT = 'payment_intent.succeeded';
 
 /** Every *_cents column in the schema is USD. 1 FSC = 1 USD. */
 const SETTLEMENT_CURRENCY = 'usd';
+
+/** Metadata `purpose` that routes a settlement to the credit ledger (011). */
+const TOPUP_PURPOSE = 'credit_topup';
+
+/**
+ * Refusals that will reproduce identically on redelivery. Acknowledge and log,
+ * never feed them back to Stripe's retry loop.
+ */
+function isPermanentError(thrown: unknown): boolean {
+  if (!(thrown instanceof ContractError)) return false;
+  // Card purchase (fn_purchase_card, include 012's payout guard).
+  if (
+    thrown.code === 'SELF_PURCHASE' ||
+    thrown.code === 'EARLY_ACCESS_LOCKED' ||
+    thrown.code === 'WRONG_STATUS' ||
+    thrown.code === 'NOT_FOUND' ||
+    thrown.code === 'PAYOUT_MISMATCH'
+  ) {
+    return true;
+  }
+  // Credit top-up (fn_purchase_credit).
+  return thrown.code === 'BELOW_MINIMUM_TOPUP' || thrown.code === 'INVALID_AMOUNT';
+}
 
 /** 200 + a reason. The event is understood and will never become actionable. */
 function acknowledge(reason: string, detail?: unknown): NextResponse {
@@ -81,8 +108,66 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const intent = event.data.object as Stripe.PaymentIntent;
-  const listingId = intent.metadata?.listing_id;
-  const buyerId = intent.metadata?.buyer_id;
+  const metadata = intent.metadata ?? {};
+
+  // ---- Credit top-up: cash in for FSC. fn_purchase_credit is idempotent on
+  // the intent id, so redelivery records once. The card-purchase path below is
+  // unchanged.
+  if (metadata.purpose === TOPUP_PURPOSE) {
+    const userId = metadata.user_id;
+    const cents = Number(metadata.cents);
+
+    if (!userId || !Number.isInteger(cents) || cents <= 0) {
+      return acknowledge(
+        'credit_topup intent has no user_id, or a cents that is not a positive integer',
+        { paymentIntent: intent.id, userId, cents: metadata.cents },
+      );
+    }
+
+    if (intent.currency?.toLowerCase() !== SETTLEMENT_CURRENCY) {
+      return acknowledge('settled in a currency other than USD', {
+        purpose: TOPUP_PURPOSE,
+        userId,
+        currency: intent.currency,
+        paymentIntent: intent.id,
+      });
+    }
+
+    // fn_purchase_credit credits `cents` to the ledger; if Stripe actually
+    // captured a different amount the ledger would record money that did not
+    // move. Refuse and let a human reconcile, same as the listing path.
+    if (intent.amount_received !== cents) {
+      return acknowledge('topup captured amount does not match the requested cents', {
+        userId,
+        requested: cents,
+        captured: intent.amount_received,
+        paymentIntent: intent.id,
+      });
+    }
+
+    try {
+      const txnId = await purchaseCredit(userId, cents, intent.id);
+      return NextResponse.json(
+        { received: true, recorded: true, txnId, duplicate: txnId === null },
+        { status: 200 },
+      );
+    } catch (thrown) {
+      if (isPermanentError(thrown)) {
+        return acknowledge(thrown instanceof Error ? thrown.message : String(thrown), {
+          intent: intent.id,
+          userId,
+          cents,
+        });
+      }
+
+      const message = thrown instanceof Error ? thrown.message : String(thrown);
+      console.error(`[stripe-webhook] ${intent.id} failed, asking Stripe to retry: ${message}`);
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+  }
+
+  const listingId = metadata.listing_id;
+  const buyerId = metadata.buyer_id;
 
   if (!listingId || !buyerId) {
     return acknowledge(
@@ -136,23 +221,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       { status: 200 },
     );
   } catch (thrown) {
-    if (thrown instanceof ContractError) {
-      switch (thrown.code) {
-        // Permanent refusals from fn_purchase_card. A retry produces the same
-        // answer, so acknowledge and log rather than looping for days.
-        case 'SELF_PURCHASE':
-        case 'EARLY_ACCESS_LOCKED':
-        case 'WRONG_STATUS':
-        case 'NOT_FOUND':
-          return acknowledge(thrown.message, {
-            code: thrown.code,
-            listingId,
-            buyerId,
-            paymentIntent: intent.id,
-          });
-        default:
-          break;
-      }
+    if (isPermanentError(thrown)) {
+      // A refusal that reproduces on every delivery — acknowledge and log
+      // rather than asking Stripe to loop for days.
+      return acknowledge(thrown instanceof Error ? thrown.message : String(thrown), {
+        code: thrown instanceof ContractError ? thrown.code : undefined,
+        listingId,
+        buyerId,
+        paymentIntent: intent.id,
+      });
     }
 
     // Anything else — a dropped connection, a database that is down — could

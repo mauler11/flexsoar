@@ -76,6 +76,7 @@ import type {
   ListingStatus,
   Order,
   OrderStatus,
+  PayoutMethod,
   RedemptionStatus,
   Sku,
   Tier,
@@ -105,6 +106,30 @@ export type ContractErrorCode =
   | 'SELF_PURCHASE'
   | 'UNAUTHENTICATED'
   | 'FORBIDDEN'
+  /**
+   * 011 fn_purchase_credit — a top-up amount that is zero or negative.
+   */
+  | 'INVALID_AMOUNT'
+  /**
+   * 011 fn_purchase_credit — the top-up is smaller than
+   * platform_config.credit_purchase_min_cents.
+   */
+  | 'BELOW_MINIMUM_TOPUP'
+  /**
+   * 011 fn_purchase_card_with_credit — platform_config.credit_payout_enabled
+   * is false, so the seller-takes-credit leg is switched off.
+   */
+  | 'CREDIT_SETTLEMENT_DISABLED'
+  /**
+   * 011 fn_purchase_card_with_credit — the buyer's credit balance is below
+   * the listing price.
+   */
+  | 'INSUFFICIENT_CREDIT'
+  /**
+   * 011/012 — the payment method does not match the listing's payout_method:
+   * buying a cash listing with credit, or a credit-only listing with cash.
+   */
+  | 'PAYOUT_MISMATCH'
   /**
    * items_grade_components_sum: the six component scores were supplied, but
    * `float` is not their weighted sum. The grader scores components and the
@@ -198,6 +223,8 @@ export interface SkuRef {
   market_price_cents: Cents | null;
   sprite_key: string | null;
   palette: Json | null;
+  /** Uploaded pixel-art PNG (012). null falls back to the sprite renderer. */
+  art_url: string | null;
 }
 
 /** The active listing on a card, if there is one. */
@@ -478,6 +505,8 @@ export interface UpsertSkuInput {
   sprite_key?: string | null;
   /** Char -> hex map. Validate against the 9 sprite glyphs before saving. */
   palette?: Json | null;
+  /** Uploaded pixel-art PNG (012). https-only, enforced by the column check. */
+  art_url?: string | null;
   mint_cap?: number | null;
 }
 
@@ -539,11 +568,11 @@ const USER_COLUMNS =
   'level, xp_total, portfolio_value_cents, created_at';
 
 const SKU_REF_COLUMNS =
-  'id, brand, model, colorway, size_us, market_price_cents, sprite_key, palette';
+  'id, brand, model, colorway, size_us, market_price_cents, sprite_key, palette, art_url';
 
 const SKU_COLUMNS =
   'id, brand, model, colorway, size_us, retail_price_cents, market_price_cents, ' +
-  'price_confidence, priced_at, demand_score, sprite_key, palette, mint_cap, created_at';
+  'price_confidence, priced_at, demand_score, sprite_key, palette, art_url, mint_cap, created_at';
 
 const CARD_SUMMARY_COLUMNS =
   'id, sku_id, item_id, owner_id, float_value, float_percentile, tier, ' +
@@ -1010,14 +1039,31 @@ export async function mintCard(itemId: UUID, ownerId: UUID): Promise<UUID> {
  *
  * Locks the card and opens an early-access window sized by the seller's level.
  *
+ * fn_list_card does NOT accept a payout method yet — the migration is filed in
+ * docs/handoff/data.md — so listing as 'credit' or 'either' is refused loudly
+ * here rather than silently recording a 'cash' listing the seller never
+ * elected. Once the migration lands, this guard is deleted and
+ * `p_payout_method` is passed straight through.
+ *
  * @returns the new listing id.
- * @throws NOT_OWNER, WRONG_STATUS.
+ * @throws NOT_OWNER, WRONG_STATUS, UNKNOWN (a payout_method other than 'cash',
+ *         pending the migration).
  */
 export async function listCard(
   cardId: UUID,
   sellerId: UUID,
   priceCents: Cents,
+  payoutMethod: PayoutMethod = 'cash',
 ): Promise<UUID> {
+  if (payoutMethod !== 'cash') {
+    throw new ContractError(
+      'UNKNOWN',
+      `cannot list as '${payoutMethod}': fn_list_card has no payout_method argument yet. ` +
+        'The migration is filed in docs/handoff/data.md; list as cash or promote it.',
+      { payoutMethod },
+    );
+  }
+
   const supabase = await createServerSupabase();
   return unwrap(
     await supabase.rpc('fn_list_card', {
@@ -1080,20 +1126,181 @@ export async function purchaseCard(
 }
 
 /**
- * The redemption handling fee charged by fn_redeem_card, in USD cents.
+ * The signed-in caller's `users.id`, or an error. `users.id` equals the
+ * Supabase auth id — 006's users_self_insert WITH CHECK pins both to
+ * auth.uid(), enforced in lib/db/provision.ts — so auth.getUser() is the whole
+ * resolution.
+ *
+ * @throws UNAUTHENTICATED when there is no session.
+ */
+async function requireCurrentUserId(): Promise<UUID> {
+  const supabase = await createServerSupabase();
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data?.user) {
+    throw new ContractError('UNAUTHENTICATED', 'no active session; sign in first', { error });
+  }
+  return data.user.id as UUID;
+}
+
+/**
+ * fn_credit_balance(p_user) -> bigint
+ *
+ * The caller's own FSC credit balance, in cents. The balance is read for the
+ * signed-in user — there is deliberately no argument, so a session cannot ask
+ * after someone else's. Zero is a valid balance, not an empty state.
+ *
+ * @throws UNAUTHENTICATED.
+ */
+export async function getCreditBalance(): Promise<Cents> {
+  const userId = await requireCurrentUserId();
+  const supabase = await createServerSupabase();
+
+  const balance = unwrap(
+    await supabase.rpc('fn_credit_balance', { p_user: userId }),
+    'fn_credit_balance',
+  ) as number;
+
+  return balance ?? 0;
+}
+
+/**
+ * fn_purchase_credit(p_user_id, p_cents, p_settlement_ref) -> uuid
+ *
+ * Credits FSC to a user in exchange for cash that has ALREADY settled through
+ * Stripe. SERVICE-ROLE ONLY: call it from the payment_intent.succeeded webhook,
+ * never from client code, exactly like purchaseCard().
+ *
+ * Idempotent on `settlementRef`: 011 refuses a second credit_purchase entry
+ * with the same ref and returns null, so Stripe's at-least-once redelivery
+ * records once. The minimum top-up (platform_config.credit_purchase_min_cents)
+ * is enforced inside the SQL, not here.
+ *
+ * @param userId the buyer's users.id (which equals their auth id).
+ * @param cents the USD cents actually captured.
+ * @param settlementRef the Stripe payment_intent id.
+ * @returns the credit txn id, or null when this settlement was already recorded.
+ * @throws BELOW_MINIMUM_TOPUP, INVALID_AMOUNT.
+ */
+export async function purchaseCredit(
+  userId: UUID,
+  cents: Cents,
+  settlementRef: string,
+): Promise<UUID | null> {
+  const supabase = createServiceSupabase();
+  return unwrap(
+    await supabase.rpc('fn_purchase_credit', {
+      p_user_id: userId,
+      p_cents: cents,
+      p_settlement_ref: settlementRef,
+    }),
+    'fn_purchase_credit',
+  ) as UUID | null;
+}
+
+/**
+ * fn_purchase_card_with_credit(p_listing_id, p_buyer_id) -> uuid
+ *
+ * Buys a card paying with FSC credit. The buyer must be the signed-in user —
+ * the SQL function does not compare p_buyer_id to auth.uid() (it is security
+ * definer, so RLS would not stop a caller anyway), and the contract closes
+ * that gap. The schema-level check is filed in docs/handoff/data.md as part of
+ * the payout migration.
+ *
+ * Only 'credit'/'either' listings can be bought this way — a 'cash' listing
+ * refuses with PAYOUT_MISMATCH, which keeps the loop closed: credit never has
+ * to become money for anyone.
+ *
+ * @returns the new order id.
+ * @throws UNAUTHENTICATED, FORBIDDEN (buyerId is not the session user),
+ *         PAYOUT_MISMATCH, INSUFFICIENT_CREDIT, CREDIT_SETTLEMENT_DISABLED,
+ *         SELF_PURCHASE, EARLY_ACCESS_LOCKED, WRONG_STATUS, NOT_FOUND.
+ */
+export async function purchaseCardWithCredit(
+  listingId: UUID,
+  buyerId: UUID,
+): Promise<UUID> {
+  const sessionUserId = await requireCurrentUserId();
+  if (buyerId !== sessionUserId) {
+    throw new ContractError(
+      'FORBIDDEN',
+      'credit purchases can only be made for the signed-in user',
+      { buyerId, sessionUserId },
+    );
+  }
+
+  const supabase = await createServerSupabase();
+  return unwrap(
+    await supabase.rpc('fn_purchase_card_with_credit', {
+      p_listing_id: listingId,
+      p_buyer_id: buyerId,
+    }),
+    'fn_purchase_card_with_credit',
+  ) as UUID;
+}
+
+/**
+ * The redeem handling fee, in USD cents, when no platform_config row exists.
+ *
+ * 011 gave it a permanent home: platform_config['redemption_handling_fee_cents']
+ * (seeded at 1500). The authoritative value is now getRedemptionHandlingFeeCents();
+ * this constant is only the fallback for a database that has not been migrated.
  *
  * fn_redeem_card takes the fee as an argument (p_fee_cents) and the schema
- * records it on the redemption and in the ledger, but nothing in the schema
- * tells a UI what the fee IS. This is the single server-side source of truth —
- * pass it to redeemCard(), and never take the fee from client input.
- *
- * BELONGS IN CONFIGURATION, NOT CODE. The right long-term home for this is a
- * platform_config row read by fn_redeem_card (or a levels.perks value), so the
- * platform can adjust the fee without shipping a code change and without
- * trusting every client to send the right number. That needs a migration,
- * which is the human's job — filed in docs/handoff/data.md.
+ * records it on the redemption and in the ledger. Pass the config value to
+ * redeemCard(), and never take the fee from client input.
  */
 export const REDEMPTION_HANDLING_FEE_CENTS: Cents = 1500;
+
+/** The live platform_config rows that UI code can branch on. */
+export interface PlatformConfig {
+  /** redemption_handling_fee_cents, USD cents charged to ship a redeemed item. */
+  redemption_handling_fee_cents: Cents;
+  /** credit_payout_enabled — master switch for the seller-takes-credit leg. */
+  credit_payout_enabled: boolean;
+  /** credit_payout_premium_bps — bonus credit a seller gets for electing credit. */
+  credit_payout_premium_bps: number;
+  /** credit_purchase_min_cents — the smallest FSC top-up. */
+  credit_purchase_min_cents: Cents;
+}
+
+/**
+ * The platform_config rows, mapped to a single object. config_read (011) is
+ * `for select using (true)`, so an anonymous visitor can read this too.
+ *
+ * The two *_cents values are `bigint` in the schema (correct — money), so they
+ * arrive as numbers and are typed Cents. Missing rows fall back to the same
+ * values 011 seeds, so a half-migrated database still reads coherently.
+ */
+export async function getPlatformConfig(): Promise<PlatformConfig> {
+  const supabase = await createServerSupabase();
+
+  const rows = unwrap(
+    await supabase.from('platform_config').select('key, num_value, bool_value'),
+    'platform_config',
+  ) as { key: string; num_value: number | null; bool_value: boolean | null }[] | null;
+
+  const byKey = new Map((rows ?? []).map((row) => [row.key, row]));
+
+  return {
+    redemption_handling_fee_cents: (byKey.get('redemption_handling_fee_cents')
+      ?.num_value as Cents | undefined) ?? REDEMPTION_HANDLING_FEE_CENTS,
+    credit_payout_enabled:
+      byKey.get('credit_payout_enabled')?.bool_value ?? true,
+    credit_payout_premium_bps:
+      byKey.get('credit_payout_premium_bps')?.num_value ?? 500,
+    credit_purchase_min_cents:
+      (byKey.get('credit_purchase_min_cents')?.num_value as Cents | undefined) ?? 500,
+  };
+}
+
+/**
+ * The live redemption handling fee. Reads platform_config, falling back to the
+ * constant when the row is missing. Pass it to redeemCard().
+ */
+export async function getRedemptionHandlingFeeCents(): Promise<Cents> {
+  const config = await getPlatformConfig();
+  return config.redemption_handling_fee_cents;
+}
 
 /**
  * fn_redeem_card(p_card_id, p_user_id, p_address, p_fee_cents) -> uuid

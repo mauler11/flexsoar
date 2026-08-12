@@ -57,6 +57,23 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   // generic not-found rule below.
   { pattern: /is already shipped/i, code: 'WRONG_STATUS' },
 
+  // 011_credit_ledger.sql — fn_purchase_credit.
+  // 'credit purchase must be positive, got %'
+  { pattern: /credit purchase must be positive/i, code: 'INVALID_AMOUNT' },
+  // fn_purchase_credit — 'minimum top-up is % cents, got %'
+  { pattern: /minimum top-up is .+ cents/i, code: 'BELOW_MINIMUM_TOPUP' },
+  // fn_purchase_card_with_credit — 'credit settlement is disabled'
+  { pattern: /credit settlement is disabled/i, code: 'CREDIT_SETTLEMENT_DISABLED' },
+  // fn_purchase_card_with_credit — 'insufficient credit: balance %, price %'
+  { pattern: /insufficient credit/i, code: 'INSUFFICIENT_CREDIT' },
+
+  // 011 fn_purchase_card_with_credit — 'listing % settles in cash and cannot
+  // be bought with credit'; 012 fn_purchase_card — 'listing % settles in
+  // credit and cannot be bought with cash'. Must precede the generic
+  // `^listing\s+\S+\s+is\s+\S+$` status rule below (it does not match it — the
+  // word is 'settles' — but the two belong next to each other).
+  { pattern: /settles in (?:cash|credit) and cannot be bought/i, code: 'PAYOUT_MISMATCH' },
+
   // 008_grading.sql — fn_grade_item, fn_reject_item. Checked before the
   // generic status rules below, which would otherwise not match at all.
   { pattern: /is already minted; its float is immutable/i, code: 'WRONG_STATUS' },
