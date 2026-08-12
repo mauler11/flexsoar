@@ -6,7 +6,7 @@
  *
  *   - all 5 tiers + exceptional (frame ornament, greyscale-proof)
  *   - all 5 float bands
- *   - both sprite silhouettes across the fixture colourways
+ *   - all three sprite silhouettes across the fixture colourways
  *   - every ui primitive in every state
  */
 import type { ReactNode } from "react";
@@ -18,15 +18,9 @@ import {
   activeListingForCard,
 } from "@/lib/mock/fixtures";
 import { borderColorFor, tierName } from "@/lib/domain/rarity";
-import {
-  DEFAULT_PALETTE,
-  HIGH_TOP,
-  LOW_TOP,
-  PALETTES,
-  paletteFromJson,
-  spriteMapForKey,
-} from "@/lib/sprites";
+import { HIGH_TOP, LOW_TOP, MID_TOP, PALETTES } from "@/lib/sprites";
 import type { SpriteMap } from "@/lib/sprites";
+import { CardArt } from "@/components/card/CardArt";
 import { CardFrame } from "@/components/card/CardFrame";
 import { CardDetail } from "@/components/card/CardDetail";
 import { CardTile } from "@/components/card/CardTile";
@@ -90,9 +84,10 @@ const EMPTY_ICON = (
   </div>
 );
 
-/** The Sprites section: both silhouettes, one block per shipped palette. */
+/** The Sprites section: all three silhouettes, one block per shipped palette. */
 const SPRITE_ROWS: { label: string; map: SpriteMap }[] = [
   { label: "High-top", map: HIGH_TOP },
+  { label: "Mid-top", map: MID_TOP },
   { label: "Low-top", map: LOW_TOP },
 ];
 
@@ -120,12 +115,10 @@ function Section({
   );
 }
 
-/** A frame in isolation: sprite + tier label, to review the ornament alone. */
+/** A frame in isolation: art + tier label, to review the ornament alone. */
 function FrameDemo({ card }: { card: Card }) {
   const sku = skuById(card.sku_id);
   if (!sku) return null;
-  const map = spriteMapForKey(sku.sprite_key);
-  const palette = paletteFromJson(sku.palette) ?? DEFAULT_PALETTE;
   const color = borderColorFor(card.tier, card.is_exceptional);
   return (
     <div className="flex flex-col items-center gap-2">
@@ -135,7 +128,7 @@ function FrameDemo({ card }: { card: Card }) {
         className="w-44 bg-raised"
       >
         <div className="flex flex-col items-center gap-1.5 p-2">
-          <Sprite map={map} palette={palette} px={5} />
+          <CardArt sku={sku} />
           <span
             className="font-mono text-[10px] font-bold uppercase tracking-tight"
             style={{ color }}
@@ -226,7 +219,7 @@ export default function StyleguidePage() {
         {/* ------------------------------------------------------------ */}
         <Section
           title="Sprites"
-          subtitle="Both silhouettes across all four shipped palettes. One map, many colourways — swap skus.palette, keep the silhouette. px=2 is the thumbnail size, px=7 the hero."
+          subtitle="All three silhouettes across all four shipped palettes. One map, many colourways — swap skus.palette, keep the silhouette. px=2 is the thumbnail size, px=7 the hero."
         >
           <div className="flex flex-col gap-8">
             {SPRITE_ROWS.map(({ label, map }) => (

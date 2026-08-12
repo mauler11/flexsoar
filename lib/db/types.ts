@@ -206,6 +206,8 @@ export interface Sku {
   sprite_key: string | null;
   /** Colourway swap for the sprite: char -> hex. */
   palette: Json | null;
+  /** Uploaded pixel-art PNG. Absent or null falls back to the sprite renderer. */
+  art_url?: string | null;
   /** null = uncapped. */
   mint_cap: number | null;
   created_at: Timestamptz;

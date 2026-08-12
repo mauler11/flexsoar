@@ -9,11 +9,11 @@
  * char -> hex map). Use spriteMapForKey + paletteFromJson to turn a row into
  * what renderSprite expects. Base maps never change; only the palette does.
  */
-import { LOW_TOP, HIGH_TOP, SPRITE_MAPS, PALETTES } from "./maps";
+import { LOW_TOP, MID_TOP, HIGH_TOP, SPRITE_MAPS, PALETTES } from "./maps";
 import { renderSprite, spriteSize } from "./render";
 import type { SpriteMap, SpritePalette } from "./types";
 
-export { LOW_TOP, HIGH_TOP, SPRITE_MAPS, PALETTES, renderSprite, spriteSize };
+export { LOW_TOP, MID_TOP, HIGH_TOP, SPRITE_MAPS, PALETTES, renderSprite, spriteSize };
 export type { SpriteMap, SpritePalette };
 export type { RenderSpriteOptions } from "./render";
 export type { PaletteKey } from "./maps";
