@@ -149,9 +149,6 @@ export function PhotoUploader({ onChange }: PhotoUploaderProps) {
               <div className="flex items-center justify-between">
                 <span className="font-mono text-[10px] font-bold uppercase tracking-tight text-foreground">
                   {angle.label}
-                  {angle.required && (
-                    <span className="text-accent"> · required</span>
-                  )}
                 </span>
                 {photo && (
                   <Button
@@ -220,8 +217,8 @@ export function PhotoUploader({ onChange }: PhotoUploaderProps) {
       </div>
 
       <div className="border-t border-line-strong pt-2 font-mono text-[10px] tracking-tight text-muted">
-        {countUploaded}/{REQUIRED_PHOTO_COUNT} required photos uploaded — the
-        four money views. The optional angles help the grader and the buyer.
+        {countUploaded}/{REQUIRED_PHOTO_COUNT} photos uploaded — toe, both
+        sides, and the outsole. All four are required.
       </div>
     </div>
   );
