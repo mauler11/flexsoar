@@ -18,16 +18,9 @@ import {
   activeListingForCard,
 } from "@/lib/mock/fixtures";
 import { borderColorFor, tierName } from "@/lib/domain/rarity";
-import {
-  DEFAULT_PALETTE,
-  HIGH_TOP,
-  LOW_TOP,
-  MID_TOP,
-  PALETTES,
-  paletteFromJson,
-  spriteMapForKey,
-} from "@/lib/sprites";
+import { HIGH_TOP, LOW_TOP, MID_TOP, PALETTES } from "@/lib/sprites";
 import type { SpriteMap } from "@/lib/sprites";
+import { CardArt } from "@/components/card/CardArt";
 import { CardFrame } from "@/components/card/CardFrame";
 import { CardDetail } from "@/components/card/CardDetail";
 import { CardTile } from "@/components/card/CardTile";
@@ -122,12 +115,10 @@ function Section({
   );
 }
 
-/** A frame in isolation: sprite + tier label, to review the ornament alone. */
+/** A frame in isolation: art + tier label, to review the ornament alone. */
 function FrameDemo({ card }: { card: Card }) {
   const sku = skuById(card.sku_id);
   if (!sku) return null;
-  const map = spriteMapForKey(sku.sprite_key);
-  const palette = paletteFromJson(sku.palette) ?? DEFAULT_PALETTE;
   const color = borderColorFor(card.tier, card.is_exceptional);
   return (
     <div className="flex flex-col items-center gap-2">
@@ -137,7 +128,7 @@ function FrameDemo({ card }: { card: Card }) {
         className="w-44 bg-raised"
       >
         <div className="flex flex-col items-center gap-1.5 p-2">
-          <Sprite map={map} palette={palette} px={5} />
+          <CardArt sku={sku} />
           <span
             className="font-mono text-[10px] font-bold uppercase tracking-tight"
             style={{ color }}

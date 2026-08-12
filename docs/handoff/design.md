@@ -32,3 +32,17 @@ references (2026-08-12). What other tracks need to know:
 - `scripts/render-sprite.ts` renders any map x palette to PNGs (zero new
   dependencies; run with plain `node`). Use it to LOOK at a map while editing
   — the file's header documents the loop. Nothing was added to DEPS.md.
+
+### 2. Card art moves to `skus.art_url` (PNG), sprites are the fallback
+
+`CardTile`, `CardDetail`, and the styleguide's `FrameDemo` now render
+`sku.art_url` as a plain `<img>` (object-contain) inside a fixed-aspect box
+when present, else fall back to the sprite renderer. What other tracks need:
+
+- **Data track**: add an `art_url` column to `skus` (nullable `text`) and
+  populate the six fixture SKUs in `lib/mock/fixtures.ts` with hosted
+  pixel-art PNG URLs. The `Sku` TS type already carries `art_url?: string | null`.
+  Until the column + fixtures land, every card renders the sprite fallback,
+  which is the intended behaviour.
+- **Schema note**: `lib/api/contract.ts` and `001_schema.sql` are frozen; the
+  new column arrives as a new numbered migration owned by track/data.

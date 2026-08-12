@@ -9,13 +9,8 @@
  * Pure props only. No fetching, no state.
  */
 import type { Card, Listing, Sku } from "@/lib/db/types";
-import {
-  DEFAULT_PALETTE,
-  paletteFromJson,
-  spriteMapForKey,
-} from "@/lib/sprites";
 import { cn } from "@/components/ui/cn";
-import { Sprite } from "./Sprite";
+import { CardArt } from "./CardArt";
 import { CardFrame } from "./CardFrame";
 import { FloatBar } from "./FloatBar";
 import { TierBadge } from "./TierBadge";
@@ -38,8 +33,6 @@ export function CardDetail({
   listing,
   className,
 }: CardDetailProps) {
-  const map = spriteMapForKey(sku.sprite_key);
-  const palette = paletteFromJson(sku.palette) ?? DEFAULT_PALETTE;
   const value = displayPriceCents(card, sku, priceCents);
   const percentile =
     card.float_percentile == null ? null : card.float_percentile.toFixed(2);
@@ -54,8 +47,8 @@ export function CardDetail({
       className={cn("w-full", className)}
     >
       <div className="grid gap-4 p-4 sm:grid-cols-2">
-        <div className="flex items-center justify-center bg-[#050505] px-4 py-6">
-          <Sprite map={map} palette={palette} px={8} />
+        <div className="flex items-center justify-center">
+          <CardArt sku={sku} className="w-full sm:w-auto sm:min-w-[280px]" px={8} />
         </div>
 
         <div className="flex flex-col gap-3 font-mono">

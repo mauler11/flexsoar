@@ -9,13 +9,8 @@
  * (fn_card_value_cents mirror); pass a listing's price to show the ask.
  */
 import type { Card, Listing, Sku } from "@/lib/db/types";
-import {
-  DEFAULT_PALETTE,
-  paletteFromJson,
-  spriteMapForKey,
-} from "@/lib/sprites";
 import { cn } from "@/components/ui/cn";
-import { Sprite } from "./Sprite";
+import { CardArt } from "./CardArt";
 import { CardFrame } from "./CardFrame";
 import { FloatBar } from "./FloatBar";
 import { TierBadge } from "./TierBadge";
@@ -40,8 +35,6 @@ export function CardTile({
   href,
   className,
 }: CardTileProps) {
-  const map = spriteMapForKey(sku.sprite_key);
-  const palette = paletteFromJson(sku.palette) ?? DEFAULT_PALETTE;
   const value = displayPriceCents(card, sku, priceCents);
   const percentile =
     card.float_percentile == null ? null : card.float_percentile.toFixed(2);
@@ -53,9 +46,7 @@ export function CardTile({
       className={cn("w-[180px] bg-raised", href && "transition-transform hover:-translate-y-0.5")}
     >
       <div className="flex flex-col gap-2 p-2">
-        <div className="flex min-h-[92px] items-center justify-center bg-[#050505] px-2 py-2">
-          <Sprite map={map} palette={palette} px={6} />
-        </div>
+        <CardArt sku={sku} />
 
         <div className="flex items-center justify-between gap-2">
           <TierBadge tier={card.tier} isExceptional={card.is_exceptional} />
