@@ -121,6 +121,31 @@ Confirmed both are still missing from `.env.local` (only the three Supabase
 vars are present). The checkout action surfaces a readable error when unset;
 no code change needed once they land.
 
+### 6. `components/market/bridge.ts` `toSku()` drops `art_url` — market tiles never show uploaded art
+
+Investigated the "card tiles render the sprite instead of the uploaded art"
+report. The data side is clean: `SKU_REF_COLUMNS` and `SKU_COLUMNS` in
+`lib/api/contract.ts` both select `art_url` (contract.ts:687-692), and it
+survives every read on this lane —
+`getListings`/`getListing`/`getCard`/`getSkus` all embed the full `SkuRef`
+(via `SKU_REF_COLUMNS`) or `SkuSummary` (`SKU_COLUMNS`) row, and
+`toCardSummary` (contract.ts:968-984) passes the embedded `sku` object through
+`requireEmbed` unchanged — nothing drops `art_url` before it reaches
+`app/(market)/**`.
+
+The gap is `toSku()` in `components/market/bridge.ts:31-48`. It hand-builds
+the `Sku` row from `SkuRef` field-by-field and never copies `art_url`, so
+every page that calls it (`app/(market)/page.tsx` and `u/[handle]/page.tsx`
+via `MarketTile`, `card/[id]/page.tsx` via `toSku` directly) hands
+`components/card/CardArt.tsx` a `sku.art_url` of `undefined`. `CardArt.tsx:40`
+checks `sku.art_url ?` to decide sprite vs. uploaded PNG, so it always falls
+back to the sprite renderer regardless of what's in the database.
+
+Fix is a one-line addition — `art_url: sku.art_url,` in the returned object —
+but `components/**` is outside this track's lane (AGENT_RULES.md), so I did
+not make the edit. Filing here per the lane-boundary rule; `getPublicProfile`
+(item 1) shape is unaffected, this is display-only.
+
 ---
 
 ## Lane boundary flags
