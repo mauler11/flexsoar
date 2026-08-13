@@ -165,6 +165,9 @@ const CODE_MAP: Readonly<Record<string, ContractErrorCode>> = {
   '23505': 'WRONG_STATUS',
   // References a row that does not exist.
   '23503': 'NOT_FOUND',
+  // plpgsql's explicit "no row" (fn_replace_sku_art raises this with errcode
+  // P0002 when the SKU is absent). Reads as NOT_FOUND like 23503.
+  'P0002': 'NOT_FOUND',
   // RLS refused it, or the role lacks the grant.
   '42501': 'FORBIDDEN',
   // PostgREST: JWT missing, malformed, or expired.

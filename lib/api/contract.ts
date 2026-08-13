@@ -18,6 +18,7 @@
  *   008: gradeItem, authenticateItem, rejectItem, getItems
  *   009: markShipped, getRedemptions, upsertSku, setFloatCurve
  *   admin.md 3+4: getItem; consignment_id + consignor_id on ItemSummary
+ *   015: replaceSkuArt
  * along with their query/input types and two ContractErrorCode members.
  * Additive only: nothing that existed before behaves differently.
  *
@@ -1925,6 +1926,33 @@ export async function upsertSku(sku: UpsertSkuInput): Promise<Sku> {
   return unwrap(
     await supabase.from('skus').insert(columns).select(SKU_COLUMNS).single(),
     'skus',
+  ) as Sku;
+}
+
+/**
+ * fn_replace_sku_art(p_sku_id, p_art_url) -> skus
+ *
+ * The sanctioned replacement path for a SKU's pixel art: this changes the
+ * rendered art on every existing card of the SKU, so it must be a deliberate
+ * act. The trigger guard (fn_guard_sku_art_url, 015) blocks ordinary writes
+ * once a SKU has art; this RPC lifts that guard for its own transaction, runs
+ * SECURITY INVOKER under skus_admin_write, and requires an admin session via
+ * fn_require_admin(). Pass null to clear the art.
+ *
+ * Ordinary art writes (first art, null -> value) still go through upsertSku
+ * and are exempt from the guard.
+ *
+ * @returns the full row as written, id included.
+ * @throws FORBIDDEN ("admin privileges required"), NOT_FOUND (no such SKU).
+ */
+export async function replaceSkuArt(skuId: UUID, artUrl: string | null): Promise<Sku> {
+  const supabase = await createServerSupabase();
+  return unwrap(
+    await supabase.rpc('fn_replace_sku_art', {
+      p_sku_id: skuId,
+      p_art_url: artUrl,
+    }),
+    'fn_replace_sku_art',
   ) as Sku;
 }
 
