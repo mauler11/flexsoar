@@ -76,10 +76,8 @@ export type SkuArtUploadResult =
  * Same pattern as the grading bench photo upload: the browser uploads the
  * bytes straight to R2 so the 1MB server-action limit never sees them.
  *
- * Persisting the returned public URL into skus.art_url is deliberately NOT
- * done here: the contract's Sku/UpsertSkuInput surface does not carry
- * art_url yet, so a write would have to bypass the contract. Filed in
- * docs/handoff/admin.md.
+ * Persisting the returned public URL is a separate step — see
+ * setSkuArtUrlAction() below.
  */
 export async function getSkuArtUploadUrlAction(input: {
   skuId: UUID;
@@ -117,5 +115,47 @@ export async function getSkuArtUploadUrlAction(input: {
     const failed = failure(thrown);
     if (failed.ok) return { ok: false, message: "upload failed" };
     return { ok: false, message: failed.message };
+  }
+}
+
+export type SetSkuArtUrlResult =
+  | { ok: true; artUrl: string | null }
+  | { ok: false; message: string; code?: ContractErrorCode };
+
+/**
+ * Persists an uploaded art URL onto skus.art_url through upsertSku(). The
+ * contract requires the natural-key columns (brand, model, colorway,
+ * size_us) on every write, so this reads the current row first and writes
+ * them back unchanged alongside the new art_url.
+ */
+export async function setSkuArtUrlAction(
+  skuId: UUID,
+  artUrl: string,
+): Promise<SetSkuArtUrlResult> {
+  try {
+    await requireAdminAction();
+
+    const current = await getAdminSku(skuId);
+    if (!current) {
+      return { ok: false, message: "no such sku" };
+    }
+
+    const sku = await upsertSku({
+      id: skuId,
+      brand: current.brand,
+      model: current.model,
+      colorway: current.colorway,
+      size_us: current.size_us,
+      art_url: artUrl,
+    });
+
+    revalidatePath("/admin/skus");
+    revalidatePath(`/admin/skus/${skuId}`);
+    return { ok: true, artUrl: sku.art_url ?? null };
+  } catch (thrown) {
+    const f = failure(thrown);
+    return f.ok
+      ? { ok: false, message: "unknown failure" }
+      : { ok: false, message: f.message, code: f.code };
   }
 }

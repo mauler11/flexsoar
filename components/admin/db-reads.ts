@@ -10,7 +10,6 @@
  *
  *   - getSkuFloatCurve(skuId) -> wants getFloatCurve(skuId)
  *   - getAdminSku(id)         -> wants getSku(id) or SkusQuery.id
- *   - getSkuArtUrls(ids)      -> wants art_url on Sku (contract gap)
  *   - getPendingSubmissions() -> wants ItemsQuery to reach 'pending_review'
  *   - getSubmission(id)       -> wants the 013 columns on ItemSummary
  *   - getSellerHistory(id)    -> wants a trust read (012/013 columns on users)
@@ -84,10 +83,9 @@ export async function getSkuFloatCurve(skuId: UUID): Promise<FloatCurveBand[]> {
 // ------------------------------------------------------------
 
 /**
- * Same projection the contract's SKU reads use, plus the art_url the contract
- * does not carry yet (docs/handoff/admin.md). skus_read is public.
+ * Same projection the contract's SKU reads use. skus_read is public.
  */
-export async function getAdminSku(skuId: UUID): Promise<SkuWithArt | null> {
+export async function getAdminSku(skuId: UUID): Promise<Sku | null> {
   const supabase = await createServerSupabase();
 
   const result = await supabase
@@ -102,41 +100,7 @@ export async function getAdminSku(skuId: UUID): Promise<SkuWithArt | null> {
     throw new Error(`skus: ${result.error.message}`, { cause: result.error });
   }
 
-  return (result.data as SkuWithArt | null) ?? null;
-}
-
-// ------------------------------------------------------------
-// art_url for a page of SKUs, for the catalog list
-// ------------------------------------------------------------
-
-/** A SKU plus its art_url, which the contract's Sku type lacks. */
-export type SkuWithArt = Sku & { art_url: string | null };
-
-/**
- * The art_url overlay for the catalog list: the list reads through the
- * contract's getSkus(), then this fills in the one column the contract does
- * not expose. Dies the day art_url lands on Sku.
- */
-export async function getSkuArtUrls(
-  skuIds: readonly UUID[],
-): Promise<Map<UUID, string | null>> {
-  const supabase = await createServerSupabase();
-  const map = new Map<UUID, string | null>();
-
-  if (skuIds.length === 0) return map;
-
-  const result = await supabase
-    .from("skus")
-    .select("id, art_url")
-    .in("id", skuIds as UUID[]);
-  if (result.error) {
-    throw new Error(`skus: ${result.error.message}`, { cause: result.error });
-  }
-
-  for (const row of result.data ?? []) {
-    map.set(row.id as UUID, (row as { art_url: string | null }).art_url);
-  }
-  return map;
+  return (result.data as Sku | null) ?? null;
 }
 
 // ============================================================
@@ -174,9 +138,6 @@ export type PayoutMethod = "cash" | "credit" | "either";
  */
 export type GradeSource = "flexsoar" | "seller_declared";
 
-/** A SKU as the review bench needs it: the contract's SkuRef plus its art. */
-export type SubmissionSku = SkuRef & { art_url: string | null };
-
 /** Whoever a row points at, from `public_profiles` — never from `users`. */
 export interface ProfileRef {
   id: UUID;
@@ -209,7 +170,7 @@ export interface Submission {
   float_value: FloatValue | null;
   grade: GradeComponents | null;
   created_at: Timestamptz;
-  sku: SubmissionSku;
+  sku: SkuRef;
   /** The submitting seller. Null only on an orphaned row. */
   seller: ProfileRef | null;
 }
@@ -255,7 +216,7 @@ interface SubmissionRow {
   grade_upper: number | null;
   grade_heel: number | null;
   grade_accessories: number | null;
-  sku: SubmissionSku | SubmissionSku[] | null;
+  sku: SkuRef | SkuRef[] | null;
   seller: ProfileRef | ProfileRef[] | null;
 }
 
