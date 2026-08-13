@@ -42,6 +42,7 @@ export function toSku(sku: SkuRef): Sku {
     demand_score: 0,
     sprite_key: sku.sprite_key,
     palette: sku.palette,
+    art_url: sku.art_url,
     mint_cap: null,
     created_at: "",
   };
