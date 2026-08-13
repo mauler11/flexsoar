@@ -19,11 +19,11 @@
  *  2. R2 must allow the browser to PUT cross-origin. That is a bucket-level
  *     CORS policy, configured in the R2 dashboard, not code — filed in
  *     docs/handoff/admin.md with the other environment needs.
- *  3. The public URL returned here is what a screen would persist (item
- *     photos into items.photos, SKU art into skus.art_url). Those write
- *     paths are handoff needs too: `items` has no UPDATE policy and no
- *     contract write for photos, and `skus.art_url` is not yet on the
- *     contract's Sku/UpsertSkuInput surface — see docs/handoff/admin.md.
+ *  3. The public URL returned here is what a screen persists. SKU art
+ *     writes through the contract's upsertSku() (app/admin/skus/actions.ts).
+ *     Item photos into items.photos are still a handoff need — `items` has
+ *     no UPDATE policy and no contract write for photos, see
+ *     docs/handoff/admin.md.
  *
  * skus.art_url is https-only, so the SKU signer refuses to hand back a
  * public URL that is not https — the bucket must be served over https.

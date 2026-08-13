@@ -10,9 +10,10 @@
  * the decision controls are last.
  *
  * The pixel art panel is the SKU's, not this item's: art lives on `skus`, so
- * attaching it here changes the artwork for every card of that SKU. The
- * uploader says so, and it still only stages — persisting `skus.art_url` needs
- * the contract write filed as docs/handoff/admin.md item 11.
+ * attaching it here changes the artwork for every card of that SKU — every
+ * listing of the same model and colourway shares one artwork. If the SKU
+ * already has art, the panel renders it read-only; overwriting it is a
+ * SKU-page decision, made deliberately, not a side effect of a review.
  */
 
 import type { Metadata } from "next";
@@ -141,6 +142,7 @@ export default async function ReviewSubmissionPage({
           <ArtUploader
             skuId={submission.sku.id}
             currentArtUrl={submission.sku.art_url}
+            mode="review"
           />
           <DecisionControls
             itemId={submission.id}

@@ -67,7 +67,7 @@ export default async function EditSkuPage({
 
       <SkuForm sku={sku} />
 
-      <ArtUploader skuId={sku.id} currentArtUrl={sku.art_url} />
+      <ArtUploader skuId={sku.id} currentArtUrl={sku.art_url ?? null} />
 
       <FloatCurveEditor skuId={sku.id} initialBands={curve} />
     </main>
