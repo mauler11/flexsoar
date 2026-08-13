@@ -18,6 +18,7 @@
 import { useRef, useState, useTransition } from "react";
 import {
   getSkuArtUploadUrlAction,
+  replaceSkuArtAction,
   setSkuArtUrlAction,
 } from "@/app/admin/skus/actions";
 import { Button } from "@/components/ui/Button";
@@ -86,17 +87,11 @@ export function ArtUploader({
           return;
         }
 
-        const saved = await setSkuArtUrlAction(skuId, outcome.publicUrl);
+        const saved = replacing
+          ? await replaceSkuArtAction(skuId, outcome.publicUrl)
+          : await setSkuArtUrlAction(skuId, outcome.publicUrl);
         if (!saved.ok) {
-          // Migration 015 blocks a non-null art_url at the DB level (42501 ->
-          // FORBIDDEN) until fn_replace_sku_art is exported through the
-          // contract. Until it lands, replacing existing art is simply not
-          // available — say that instead of echoing the raw SQLSTATE text.
-          if (replacing && saved.code === "FORBIDDEN") {
-            setError("Replacing existing art is not available yet.");
-          } else {
-            setError(saved.message);
-          }
+          setError(saved.message);
           return;
         }
 

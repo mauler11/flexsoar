@@ -20,6 +20,7 @@ import { requireAdminAction } from "@/components/admin/auth";
 import { getAdminSku } from "@/components/admin/db-reads";
 import { getSkuArtUploadUrl } from "@/components/admin/r2";
 import {
+  replaceSkuArt,
   setFloatCurve,
   upsertSku,
   type ContractErrorCode,
@@ -123,6 +124,20 @@ export type SetSkuArtUrlResult =
   | { ok: false; message: string; code?: ContractErrorCode };
 
 /**
+ * Every page that renders a SKU's art, so an art write revalidates all of
+ * them. The market home and card detail routes live under the (market) route
+ * group, so their tags use that form.
+ */
+function revalidateArtPaths(skuId: UUID) {
+  revalidatePath("/admin/skus");
+  revalidatePath(`/admin/skus/${skuId}`);
+  // Art can also be uploaded from a submission's review bench.
+  revalidatePath("/admin/submissions/[itemId]", "page");
+  revalidatePath("/(market)/card/[id]", "page");
+  revalidatePath("/");
+}
+
+/**
  * Persists an uploaded art URL onto skus.art_url through upsertSku(). The
  * contract requires the natural-key columns (brand, model, colorway,
  * size_us) on every write, so this reads the current row first and writes
@@ -149,14 +164,37 @@ export async function setSkuArtUrlAction(
       art_url: artUrl,
     });
 
-    revalidatePath("/admin/skus");
-    revalidatePath(`/admin/skus/${skuId}`);
-    // Art can also be uploaded from a submission's review bench, and every
-    // page that renders SKU art. The market home and card detail routes live
-    // under the (market) route group, so their tags use that form.
-    revalidatePath("/admin/submissions/[itemId]", "page");
-    revalidatePath("/(market)/card/[id]", "page");
-    revalidatePath("/");
+    revalidateArtPaths(skuId);
+    return { ok: true, artUrl: sku.art_url ?? null };
+  } catch (thrown) {
+    const f = failure(thrown);
+    return f.ok
+      ? { ok: false, message: "unknown failure" }
+      : { ok: false, message: f.message, code: f.code };
+  }
+}
+
+export type ReplaceSkuArtResult =
+  | { ok: true; artUrl: string | null }
+  | { ok: false; message: string; code?: ContractErrorCode };
+
+/**
+ * Replaces a SKU's art_url through the contract's sanctioned RPC,
+ * fn_replace_sku_art(). The 015 trigger blocks ordinary upserts once a SKU has
+ * art — this is the only path that may change it. Replacing changes the
+ * rendered art on every existing card of this SKU, so it always runs the
+ * requireAdminAction() check before writing.
+ */
+export async function replaceSkuArtAction(
+  skuId: UUID,
+  artUrl: string | null,
+): Promise<ReplaceSkuArtResult> {
+  try {
+    await requireAdminAction();
+
+    const sku = await replaceSkuArt(skuId, artUrl);
+
+    revalidateArtPaths(skuId);
     return { ok: true, artUrl: sku.art_url ?? null };
   } catch (thrown) {
     const f = failure(thrown);
