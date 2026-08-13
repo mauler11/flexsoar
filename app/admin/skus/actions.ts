@@ -151,6 +151,12 @@ export async function setSkuArtUrlAction(
 
     revalidatePath("/admin/skus");
     revalidatePath(`/admin/skus/${skuId}`);
+    // Art can also be uploaded from a submission's review bench, and every
+    // page that renders SKU art. The market home and card detail routes live
+    // under the (market) route group, so their tags use that form.
+    revalidatePath("/admin/submissions/[itemId]", "page");
+    revalidatePath("/(market)/card/[id]", "page");
+    revalidatePath("/");
     return { ok: true, artUrl: sku.art_url ?? null };
   } catch (thrown) {
     const f = failure(thrown);
