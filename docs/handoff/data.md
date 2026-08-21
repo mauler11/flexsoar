@@ -71,26 +71,39 @@ its `BELOW_MINIMUM_TOPUP` `ContractErrorCode` member are gone —
 `service_role` (021, section 5), so the export could only ever throw. No stub,
 shim, or commented-out block was left in its place.
 
-**The one caller this breaks:** `app/api/webhooks/stripe/route.ts` imports
-`purchaseCredit` at line 33 and calls it at line 149, inside the
-`credit_topup` branch spanning lines 116-167 (guarded by
-`metadata.purpose === TOPUP_PURPOSE`, `TOPUP_PURPOSE = 'credit_topup'` at line
-47). `isPermanentError()` (line 53-67) also references the now-deleted
-`BELOW_MINIMUM_TOPUP` code at line 66. This task's prompt named this file and
-said explicitly not to edit it — "outside your lane" for this task, even
-though the AGENT_RULES.md lanes table lists `webhooks` under track/data
-broadly — so per AGENT_RULES §1 ("You own only the paths given in your task
-prompt") the file was left untouched. **Consequence, verified live in this
-session:** `npx tsc --noEmit` and `npm run build` both fail with exactly one
-error apiece, both pointing at this file (`TS2724`: no exported member
-`purchaseCredit`; Turbopack: `Export purchaseCredit doesn't exist in target
-module`) — nothing else regresses; every other file in the project compiles
-clean against the new contract. **This file needs its `credit_topup` branch
-(lines 116-167), the `TOPUP_PURPOSE` constant (line 47), the `purchaseCredit`
-import (line 33), and the `BELOW_MINIMUM_TOPUP` arm of `isPermanentError()`
-(line 66) deleted** before `tsc`/`build` will pass repo-wide again. 021's own
-migration comment anticipates exactly this: "The Stripe webhook's
-credit_topup branch must be deleted; this revoke only stops it succeeding."
+**RESOLVED (follow-up pass, same day): `app/api/webhooks/stripe/route.ts` is
+in fact track/data's lane** — AGENT_RULES.md §1's lanes table lists `webhooks`
+under `flexsoar-data`/`track/data` explicitly. The prior pass's prompt had
+said not to edit it; that was corrected and the deletion was finished. Removed:
+the `purchaseCredit` import, the `TOPUP_PURPOSE` constant, the entire
+`credit_topup` branch, and the `BELOW_MINIMUM_TOPUP` arm of
+`isPermanentError()` (which also simplified back to a single return
+statement — the "Card purchase" / "Credit top-up" split in its comment no
+longer has two branches to split). `npx tsc --noEmit` is clean repo-wide,
+`npm run build` completes (`Compiled successfully`, all 19 routes render),
+`npm test` is unaffected. 021's own migration comment anticipated exactly
+this: "The Stripe webhook's credit_topup branch must be deleted; this revoke
+only stops it succeeding."
+
+**While in the file: confirmed the webhook's remaining card-purchase call
+never needs a hold id, because checkout never creates one.** Read
+`app/(market)/actions.ts:149-221` (`createCheckoutAction`, track/market's
+lane, not edited): `payment_intent_data.metadata` carries only `{ listing_id,
+buyer_id }`; the full `listing.price_cents` is always charged through Stripe;
+there is no `reserveCredit()` call anywhere in the checkout path and no
+`credit_cents`/`hold_id` metadata field. The webhook's card-purchase leg
+still calls the frozen 3-arg `purchaseCard(listingId, buyerId, intent.id)`
+(unchanged), which default-fills `p_credit_cents=0, p_hold_id=null` — a
+pure-cash settlement, so 021's hold-provenance requirement never triggers
+today. **Ask for track/market, if/when an FSC-eligible checkout is wanted:**
+add a `reserveCredit(listingId, creditCents)` call before creating the
+Checkout Session, and carry the returned hold id plus the FSC amount through
+`payment_intent_data.metadata` (e.g. `credit_cents`, `hold_id`). Once that
+metadata exists, a follow-up track/data pass can switch this webhook from
+`purchaseCard()` to `purchaseCardSplit(listingId, buyerId, settlementRef,
+creditCents, holdId)`, reading `credit_cents`/`hold_id` off `metadata` the
+same way `listing_id`/`buyer_id` are read now. Not built speculatively here —
+there is no metadata field yet to read.
 
 **2. New reservation exports**, all session-client, wrapping 021's new RPCs
 verbatim (see their doc comments in `lib/api/contract.ts` for the full
