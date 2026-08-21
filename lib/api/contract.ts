@@ -24,6 +24,15 @@
  *     condition_grade on ItemSummary/CardSummary/SubmissionSummary;
  *     credit_cents/cash_cents/seller_payout/payout_release_at on OrderSummary;
  *     show_numeric_float on PlatformConfig
+ *   021: reserveCredit, releaseCreditHold, getCreditAvailable, getCreditHeld,
+ *     expireCreditHolds; purchaseCardSplit's own signature extended in place
+ *     with a 5th p_hold_id argument (it is a prior additive export, not one
+ *     of the frozen 16, so this is an in-place change, not a new overload);
+ *     new ContractErrorCode members for credit-hold provenance.
+ *     purchaseCredit() and its BELOW_MINIMUM_TOPUP code are DELETED — 021
+ *     revokes fn_purchase_credit's execute grant from every role including
+ *     service_role. FSC is earned by selling, never bought. See
+ *     docs/handoff/data.md for the one caller this left behind.
  * along with their query/input types and new ContractErrorCode members.
  * Additive only: nothing that existed before behaves differently.
  *
@@ -116,22 +125,25 @@ export type ContractErrorCode =
   | 'UNAUTHENTICATED'
   | 'FORBIDDEN'
   /**
-   * 011 fn_purchase_credit — a top-up amount that is zero or negative.
+   * A positive-amount check failed. 013 fn_submit_listing — 'price must be
+   * positive'. 021 fn_reserve_credit — 'reserve amount must be positive', or
+   * p_credit_cents greater than the listing's own price ('reserve of %
+   * exceeds listing price %' — distinct from settlement, which clamps
+   * p_credit_cents to the price silently rather than raising).
    */
   | 'INVALID_AMOUNT'
   /**
-   * 011 fn_purchase_credit — the top-up is smaller than
-   * platform_config.credit_purchase_min_cents.
-   */
-  | 'BELOW_MINIMUM_TOPUP'
-  /**
-   * 011 fn_purchase_card_with_credit — platform_config.credit_payout_enabled
+   * 011 fn_purchase_card_with_credit, and 021 fn_purchase_card_core /
+   * fn_reserve_credit's credit leg — platform_config.credit_payout_enabled
    * is false, so the seller-takes-credit leg is switched off.
    */
   | 'CREDIT_SETTLEMENT_DISABLED'
   /**
-   * 011 fn_purchase_card_with_credit — the buyer's credit balance is below
-   * the listing price.
+   * Not enough spendable FSC. 021 fn_purchase_card_core — 'insufficient FSC:
+   * balance %, requested %' (the buyer's ledger balance, ignoring holds).
+   * 021 fn_reserve_credit — 'insufficient available FSC: % available, %
+   * requested' (balance minus other active holds — see getCreditAvailable()).
+   * Both raises map here; branch on the message if the distinction matters.
    */
   | 'INSUFFICIENT_CREDIT'
   /**
@@ -181,19 +193,54 @@ export type ContractErrorCode =
    */
   | 'INVALID_SHIPMENT'
   /**
-   * 018-020 fn_purchase_card_core (purchaseCardSplit) — the cash remainder
-   * (price_cents - credit_cents) is greater than zero but settlementRef is
-   * null or empty. Cash-only and split settlements both need a real ref;
-   * FSC-only (credit_cents = price_cents) is the one case that may pass null.
+   * fn_purchase_card_core (018-020/021, purchaseCardSplit) — 'a cash leg of
+   * % cents requires a settlement_ref'. The cash remainder (price_cents -
+   * credit_cents) is greater than zero but settlementRef is null or empty.
+   * Cash-only and split settlements both need a real ref; FSC-only
+   * (credit_cents = price_cents) is the one case that may pass null.
    */
   | 'SETTLEMENT_REF_REQUIRED'
   /**
-   * 020 fn_record_sweep — p_amount_cents is greater than
-   * fn_platform_position().unswept_cents. Re-read the position before
-   * retrying; sweepable_cents (unswept minus the chargeback reserve) is the
-   * safe upper bound, not unswept_cents itself.
+   * 020 fn_guard_sweep (trigger on sweeps insert) — p_amount_cents is
+   * greater than fn_platform_position().unswept_cents. Re-read the position
+   * before retrying; sweepable_cents (unswept minus the chargeback reserve)
+   * is the safe upper bound, not unswept_cents itself.
    */
   | 'SWEEP_EXCEEDS_UNSWEPT'
+  /**
+   * 021 fn_purchase_card_core — the credit leg has no provenance: no
+   * p_hold_id, and the caller's own session (if any) does not match
+   * p_buyer_id. This is what stops the webhook, which has no session at
+   * all, from spending a buyer's FSC without a hold that buyer's own
+   * session created. purchaseCardSplit() throws this itself, client-side,
+   * before ever reaching the database — see its doc comment.
+   */
+  | 'CREDIT_PROVENANCE_REQUIRED'
+  /**
+   * 021 fn_purchase_card_core — 'credit hold % expired at %'. The hold was
+   * still 'active' in the row, but its expires_at has passed; the row is
+   * flipped to 'expired' in the same statement that raises this.
+   */
+  | 'CREDIT_HOLD_EXPIRED'
+  /**
+   * 021 fn_purchase_card_core ('credit hold % belongs to another user') and
+   * fn_release_credit_hold ('hold % does not belong to you') — the hold's
+   * user_id does not match the caller (settlement's p_buyer_id, or the
+   * releasing session).
+   */
+  | 'CREDIT_HOLD_WRONG_USER'
+  /**
+   * 021 fn_purchase_card_core — 'credit hold % is for a different listing'.
+   * The hold was reserved against a different listing than the one being
+   * settled.
+   */
+  | 'CREDIT_HOLD_WRONG_LISTING'
+  /**
+   * 021 fn_purchase_card_core — 'credit hold % covers only % of %
+   * requested'. The hold's amount_cents is smaller than the credit_cents
+   * this settlement is asking to spend.
+   */
+  | 'CREDIT_HOLD_INSUFFICIENT'
   | 'UNKNOWN';
 
 export class ContractError extends Error {
@@ -1325,16 +1372,35 @@ export async function purchaseCard(
 }
 
 /**
- * fn_purchase_card(p_listing_id, p_buyer_id, p_settlement_ref, p_credit_cents) -> uuid
+ * fn_purchase_card(p_listing_id, p_buyer_id, p_settlement_ref, p_credit_cents, p_hold_id) -> uuid
  *
- * 018-020's split-settlement path: the NEW 4-argument overload of the same
- * fn_purchase_card the frozen purchaseCard() above calls with 3 (the default
- * `p_credit_cents = 0` is what keeps that call frozen and working unchanged).
+ * 018-020's split-settlement path, extended in place by 021 with a 5th
+ * argument. This is a prior additive export (not one of the frozen 16), so
+ * the signature changes here rather than growing a second variant — 022
+ * dropped the pre-019c three-argument fn_purchase_card overloads for exactly
+ * this reason: an arity variant wins over default-filling in Postgres, so a
+ * second signature silently becomes a second settlement path. The same
+ * applies on this side of the RPC boundary, hence editing in place.
+ *
  * `creditCents` is the portion of the listing price the buyer pays in FSC;
- * the remainder is cash and needs a real `settlementRef` — cash-only
- * (creditCents = 0) and split settlements both require one. FSC-only
- * (creditCents = price_cents) is the one case `settlementRef` may be null,
- * because no money moved through Stripe for this order at all.
+ * the remainder is cash. Settlement rules, enforced in fn_purchase_card_core
+ * and mirrored here client-side where they can be checked without a round
+ * trip:
+ *   - a cash leg (price_cents - creditCents > 0) requires a non-empty
+ *     `settlementRef`. FSC-only (creditCents === the full price) is the one
+ *     case it may be null, because no money moved through Stripe.
+ *   - an FSC leg (creditCents > 0) requires EITHER a session matching the
+ *     buyer OR a `holdId`. This function runs on the service-role client —
+ *     the webhook has no session, ever — so in practice every call with an
+ *     FSC leg MUST carry a `holdId` created earlier by the buyer's own
+ *     session (via reserveCredit()). That is deliberate: it is what stops a
+ *     compromised or buggy webhook caller from spending a buyer's FSC on
+ *     its own say-so. This function throws CREDIT_PROVENANCE_REQUIRED
+ *     itself when creditCents > 0 and holdId is null, rather than letting
+ *     the round trip fail — the SQL raises the identical refusal
+ *     ('spending FSC requires a session matching the buyer, or a credit
+ *     hold') if this check is ever bypassed, so nothing relies on the
+ *     client-side check alone.
  *
  * Same calling rule as purchaseCard(): this records a settlement that has
  * ALREADY happened. Call it from the payment_intent.succeeded webhook (for
@@ -1348,16 +1414,33 @@ export async function purchaseCard(
  * @param settlementRef the Stripe payment_intent id, or null for an
  *   FSC-only settlement (creditCents === the full price).
  * @param creditCents the portion of the price paid in FSC, in cents.
+ * @param holdId a credit_holds id created by the buyer's session via
+ *   reserveCredit(), required whenever creditCents > 0. Pass null for a
+ *   cash-only settlement.
  * @returns the new order id.
  * @throws EARLY_ACCESS_LOCKED, WRONG_STATUS, SELF_PURCHASE, NOT_FOUND,
- *         SETTLEMENT_REF_REQUIRED, INSUFFICIENT_CREDIT, INVALID_AMOUNT.
+ *         SETTLEMENT_REF_REQUIRED, INSUFFICIENT_CREDIT, INVALID_AMOUNT,
+ *         CREDIT_PROVENANCE_REQUIRED, CREDIT_HOLD_EXPIRED,
+ *         CREDIT_HOLD_WRONG_USER, CREDIT_HOLD_WRONG_LISTING,
+ *         CREDIT_HOLD_INSUFFICIENT, CREDIT_SETTLEMENT_DISABLED.
  */
 export async function purchaseCardSplit(
   listingId: UUID,
   buyerId: UUID,
   settlementRef: string | null,
   creditCents: Cents,
+  holdId: UUID | null,
 ): Promise<UUID> {
+  if (creditCents > 0 && !holdId) {
+    throw new ContractError(
+      'CREDIT_PROVENANCE_REQUIRED',
+      'a webhook settlement with an FSC leg must carry a hold id created ' +
+        'by the buyer\'s own session; service-role has no session to spend ' +
+        'FSC on its own say-so',
+      { listingId, buyerId, creditCents },
+    );
+  }
+
   const supabase = createServiceSupabase();
   return unwrap(
     await supabase.rpc('fn_purchase_card', {
@@ -1365,6 +1448,7 @@ export async function purchaseCardSplit(
       p_buyer_id: buyerId,
       p_settlement_ref: settlementRef,
       p_credit_cents: creditCents,
+      p_hold_id: holdId,
     }),
     'fn_purchase_card',
   ) as UUID;
@@ -1390,9 +1474,18 @@ async function requireCurrentUserId(): Promise<UUID> {
 /**
  * fn_credit_balance(p_user) -> bigint
  *
- * The caller's own FSC credit balance, in cents. The balance is read for the
- * signed-in user — there is deliberately no argument, so a session cannot ask
- * after someone else's. Zero is a valid balance, not an empty state.
+ * The caller's own FSC LEDGER balance, in cents — NOT what they may actually
+ * spend. This ignores active credit_holds: FSC already committed to another
+ * in-flight checkout still counts here. AGENT_RULES.md section 5: "Spendable
+ * FSC is fn_credit_available(), not fn_credit_balance()." Every UI surface
+ * that shows a balance, and every check that gates a purchase, must use
+ * getCreditAvailable() instead. This export stays — it is the true ledger
+ * total and admin/solvency surfaces need it — but do not render it as "what
+ * you can spend" and do not use it to decide whether a purchase can proceed.
+ *
+ * The balance is read for the signed-in user — there is deliberately no
+ * argument, so a session cannot ask after someone else's. Zero is a valid
+ * balance, not an empty state.
  *
  * @throws UNAUTHENTICATED.
  */
@@ -1406,6 +1499,139 @@ export async function getCreditBalance(): Promise<Cents> {
   ) as number;
 
   return balance ?? 0;
+}
+
+/**
+ * fn_credit_available(p_user) -> bigint
+ *
+ * The caller's own SPENDABLE FSC, in cents: fn_credit_balance() minus every
+ * active, unexpired credit_holds row (getCreditHeld()). This is the number
+ * every UI surface renders as "your balance" and every pre-purchase check
+ * gates on — AGENT_RULES.md section 5. getCreditBalance() (the ledger total)
+ * is NOT a substitute; the difference is FSC already committed to another
+ * in-flight checkout.
+ *
+ * No argument, same reasoning as getCreditBalance(): a session cannot ask
+ * after someone else's available balance.
+ *
+ * @throws UNAUTHENTICATED.
+ */
+export async function getCreditAvailable(): Promise<Cents> {
+  const userId = await requireCurrentUserId();
+  const supabase = await createServerSupabase();
+
+  const available = unwrap(
+    await supabase.rpc('fn_credit_available', { p_user: userId }),
+    'fn_credit_available',
+  ) as number;
+
+  return available ?? 0;
+}
+
+/**
+ * fn_credit_held(p_user) -> bigint
+ *
+ * The caller's own FSC currently committed to in-flight checkouts: the sum
+ * of their active, unexpired credit_holds rows. getCreditBalance() -
+ * getCreditHeld() = getCreditAvailable(); exposed separately so a UI can
+ * show "X held in an open checkout" rather than just the net number.
+ *
+ * @throws UNAUTHENTICATED.
+ */
+export async function getCreditHeld(): Promise<Cents> {
+  const userId = await requireCurrentUserId();
+  const supabase = await createServerSupabase();
+
+  const held = unwrap(
+    await supabase.rpc('fn_credit_held', { p_user: userId }),
+    'fn_credit_held',
+  ) as number;
+
+  return held ?? 0;
+}
+
+/**
+ * fn_reserve_credit(p_listing_id, p_credit_cents) -> uuid
+ *
+ * Reserves FSC against an in-flight checkout, before Stripe Checkout is even
+ * created. This closes the race 021 documents: without a reservation, a
+ * buyer's FSC balance can be checked at checkout-intent time and spent
+ * elsewhere before the webhook settles minutes later. Session client ONLY —
+ * fn_current_user_id() resolves from auth.uid(), which is null under
+ * service-role, so the webhook cannot call this on a buyer's behalf. That is
+ * deliberate: a hold's provenance is exactly "a session that was actually
+ * signed in as this buyer at reservation time," and nothing else may create
+ * one. Pass the returned hold id to purchaseCardSplit() as holdId.
+ *
+ * At most one ACTIVE hold per (user, listing) — a second reserve on the same
+ * listing releases the first rather than stacking (021's partial unique
+ * index on (user_id, listing_id) where status = 'active', enforced by the
+ * SQL deleting the prior active hold before inserting the new one).
+ * Expired holds are swept internally before checking the balance, so a stale
+ * hold never blocks a fresh reservation.
+ *
+ * @param creditCents the FSC amount to reserve, in cents. May not exceed the
+ *   listing's own price_cents.
+ * @returns the new credit_holds id.
+ * @throws UNAUTHENTICATED, NOT_FOUND (no such listing), WRONG_STATUS
+ *   (listing not early_access/public), SELF_PURCHASE, INVALID_AMOUNT
+ *   (non-positive, or above the listing price), INSUFFICIENT_CREDIT
+ *   (above getCreditAvailable()).
+ */
+export async function reserveCredit(listingId: UUID, creditCents: Cents): Promise<UUID> {
+  await requireCurrentUserId();
+  const supabase = await createServerSupabase();
+  return unwrap(
+    await supabase.rpc('fn_reserve_credit', {
+      p_listing_id: listingId,
+      p_credit_cents: creditCents,
+    }),
+    'fn_reserve_credit',
+  ) as UUID;
+}
+
+/**
+ * fn_release_credit_hold(p_hold_id) -> void
+ *
+ * Releases a reservation before it is consumed — a buyer backing out of
+ * checkout, or a checkout switching to a different payment split. Session
+ * client, owner-or-admin (checked in the SQL against the hold's user_id).
+ * Idempotent on an already-released, already-consumed, or already-expired
+ * hold: the SQL returns without error rather than raising, so a client does
+ * not need to track hold state to call this safely.
+ *
+ * @throws UNAUTHENTICATED, NOT_FOUND (no such hold), CREDIT_HOLD_WRONG_USER.
+ */
+export async function releaseCreditHold(holdId: UUID): Promise<void> {
+  await requireCurrentUserId();
+  const supabase = await createServerSupabase();
+  unwrap(
+    await supabase.rpc('fn_release_credit_hold', { p_hold_id: holdId }),
+    'fn_release_credit_hold',
+  );
+}
+
+/**
+ * fn_expire_credit_holds() -> integer
+ *
+ * Sweeps every active hold whose expires_at has passed to 'expired', freeing
+ * the FSC it committed. fn_reserve_credit() already calls this internally
+ * before checking a new reservation's balance, so this export exists for a
+ * caller that wants to force the sweep on its own schedule (a maintenance
+ * page, a scheduled job). Granted to `authenticated`, not scoped to the
+ * caller's own holds — it sweeps every user's expired holds — so no session
+ * identity is threaded through here.
+ *
+ * @returns the number of holds expired.
+ */
+export async function expireCreditHolds(): Promise<number> {
+  const supabase = await createServerSupabase();
+  const count = unwrap(
+    await supabase.rpc('fn_expire_credit_holds'),
+    'fn_expire_credit_holds',
+  ) as number;
+
+  return count ?? 0;
 }
 
 /**
@@ -1435,57 +1661,6 @@ export async function getPayoutMethodForUser(userId: UUID): Promise<DerivedPayou
     await supabase.rpc('fn_payout_method_for_user', { p_user: userId }),
     'fn_payout_method_for_user',
   ) as DerivedPayoutMethod;
-}
-
-/**
- * DEAD, KEPT ONLY BECAUSE THE CONTRACT IS FROZEN. Do not call this. Do not
- * add a new top-up export beside it — 018-020 revokes the FSC-purchase
- * feature deliberately: FSC is earned by selling, never bought.
- *
- * Live-verified (2026-08-21): EXECUTE on fn_purchase_credit is revoked from
- * `authenticated` and `anon` (42501 "permission denied for function
- * fn_purchase_credit" from a real signed-in session and from anon alike).
- * It is still granted to `service_role` — a negative-amount probe from
- * service-role still reached the business-logic raise rather than a
- * permission error — so the webhook call below has not actually broken, but
- * it is calling a feature the product no longer wants to exist. Found one
- * caller: app/api/webhooks/stripe/route.ts's `credit_topup` branch (metadata
- * `purpose: 'credit_topup'`) still calls purchaseCredit() on
- * payment_intent.succeeded. That file is outside this track's lane
- * (lib/api/contract.ts only) so it has not been touched — reported instead,
- * per instruction, rather than deleted. See docs/handoff/data.md.
- *
- * fn_purchase_credit(p_user_id, p_cents, p_settlement_ref) -> uuid
- *
- * Credits FSC to a user in exchange for cash that has ALREADY settled through
- * Stripe. SERVICE-ROLE ONLY: call it from the payment_intent.succeeded webhook,
- * never from client code, exactly like purchaseCard().
- *
- * Idempotent on `settlementRef`: 011 refuses a second credit_purchase entry
- * with the same ref and returns null, so Stripe's at-least-once redelivery
- * records once. The minimum top-up (platform_config.credit_purchase_min_cents)
- * is enforced inside the SQL, not here.
- *
- * @param userId the buyer's users.id (which equals their auth id).
- * @param cents the USD cents actually captured.
- * @param settlementRef the Stripe payment_intent id.
- * @returns the credit txn id, or null when this settlement was already recorded.
- * @throws BELOW_MINIMUM_TOPUP, INVALID_AMOUNT.
- */
-export async function purchaseCredit(
-  userId: UUID,
-  cents: Cents,
-  settlementRef: string,
-): Promise<UUID | null> {
-  const supabase = createServiceSupabase();
-  return unwrap(
-    await supabase.rpc('fn_purchase_credit', {
-      p_user_id: userId,
-      p_cents: cents,
-      p_settlement_ref: settlementRef,
-    }),
-    'fn_purchase_credit',
-  ) as UUID | null;
 }
 
 /**

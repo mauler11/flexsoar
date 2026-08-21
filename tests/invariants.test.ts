@@ -828,3 +828,199 @@ describe('fn_record_sweep', () => {
     expect(() => recordSweepAmount(1, 40000)).not.toThrow();
   });
 });
+
+// ------------------------------------------------------------
+// CREDIT HOLDS (021)
+// ------------------------------------------------------------
+//
+// Model-level mirrors of fn_reserve_credit and fn_purchase_card_core's hold
+// handling in supabase/migrations/021_credit_holds.sql, run against an
+// in-memory array of synthetic rows — NOT the database, and these do not
+// exercise the real RPC, RLS, or PostgREST at all. AGENT_RULES.md forbids
+// writing to the live project, and these tests are the correct way to honour
+// that; the point of this comment block is to say so plainly rather than let
+// the describe/it names imply otherwise. Every test below runs in well under
+// a millisecond, which is itself the tell that nothing here touches Postgres.
+//
+// The ordering inside reserveCredit() below matters and is copied from the
+// live SQL, not simplified: fn_reserve_credit computes fn_credit_available()
+// BEFORE releasing the caller's own prior hold on the same listing, so a
+// re-reserve's headroom does not include what that prior hold was holding.
+// That is a real property of the applied migration, not an approximation.
+
+interface HoldRow {
+  id: string;
+  user_id: string;
+  listing_id: string;
+  amount_cents: number;
+  status: 'active' | 'consumed' | 'released' | 'expired';
+  /** epoch ms, so the tests can pass a fixed clock instead of racing Date.now(). */
+  expires_at: number;
+}
+
+/** fn_credit_held(p_user): sum of the caller's active, unexpired holds. */
+const creditHeld = (holds: readonly HoldRow[], userId: string, now: number): number =>
+  holds
+    .filter((h) => h.user_id === userId && h.status === 'active' && h.expires_at > now)
+    .reduce((sum, h) => sum + h.amount_cents, 0);
+
+/** fn_credit_available(p_user): fn_credit_balance(p_user) - fn_credit_held(p_user). */
+const creditAvailable = (
+  balanceCents: number,
+  holds: readonly HoldRow[],
+  userId: string,
+  now: number,
+): number => balanceCents - creditHeld(holds, userId, now);
+
+let nextHoldId = 1;
+
+/**
+ * fn_reserve_credit: validates, THEN releases any existing active hold for
+ * (user, listing) rather than stacking, THEN inserts the new one. Mutates
+ * `holds` in place, same as the real function mutates the table.
+ */
+const reserveCredit = (
+  holds: HoldRow[],
+  userId: string,
+  listingId: string,
+  creditCents: number,
+  balanceCents: number,
+  now: number,
+): HoldRow => {
+  if (!Number.isInteger(creditCents) || creditCents <= 0) {
+    throw new Error('reserve amount must be positive');
+  }
+
+  const available = creditAvailable(balanceCents, holds, userId, now);
+  if (available < creditCents) {
+    throw new Error(
+      `insufficient available FSC: ${available} available, ${creditCents} requested`,
+    );
+  }
+
+  const prior = holds.find(
+    (h) => h.user_id === userId && h.listing_id === listingId && h.status === 'active',
+  );
+  if (prior) prior.status = 'released';
+
+  const hold: HoldRow = {
+    id: `hold_${nextHoldId++}`,
+    user_id: userId,
+    listing_id: listingId,
+    amount_cents: creditCents,
+    status: 'active',
+    expires_at: now + 30 * 60_000,
+  };
+  holds.push(hold);
+  return hold;
+};
+
+/**
+ * fn_purchase_card_core's hold-consumption checks (021), in the SQL's own
+ * order: found, active, unexpired, right user, right listing, covers the
+ * requested credit_cents. Consuming flips status to 'consumed' in place, so
+ * calling this twice with the same hold hits the "not active" branch on the
+ * second call, same as the real row would.
+ */
+const settleWithHold = (
+  holds: HoldRow[],
+  holdId: string,
+  buyerId: string,
+  listingId: string,
+  creditCents: number,
+  now: number,
+): void => {
+  const hold = holds.find((h) => h.id === holdId);
+  if (!hold) throw new Error(`credit hold ${holdId} not found`);
+  if (hold.status !== 'active') {
+    throw new Error(`credit hold ${holdId} is ${hold.status}`);
+  }
+  if (hold.expires_at <= now) {
+    hold.status = 'expired';
+    throw new Error(`credit hold ${holdId} expired at ${hold.expires_at}`);
+  }
+  if (hold.user_id !== buyerId) {
+    throw new Error(`credit hold ${holdId} belongs to another user`);
+  }
+  if (hold.listing_id !== listingId) {
+    throw new Error(`credit hold ${holdId} is for a different listing`);
+  }
+  if (hold.amount_cents < creditCents) {
+    throw new Error(
+      `credit hold ${holdId} covers only ${hold.amount_cents} of ${creditCents} requested`,
+    );
+  }
+  hold.status = 'consumed';
+};
+
+const NOW = 1_700_000_000_000;
+
+describe('credit holds (021)', () => {
+  it('computes available as balance minus held, and held excludes expired holds', () => {
+    const holds: HoldRow[] = [
+      { id: 'h1', user_id: 'u1', listing_id: 'l1', amount_cents: 3000, status: 'active', expires_at: NOW + 60_000 },
+      // Still flagged 'active' in the row — fn_expire_credit_holds has not
+      // swept it yet — but its expires_at has passed, so it must not count.
+      { id: 'h2', user_id: 'u1', listing_id: 'l2', amount_cents: 5000, status: 'active', expires_at: NOW - 1 },
+    ];
+    expect(creditHeld(holds, 'u1', NOW)).toBe(3000);
+    expect(creditAvailable(10_000, holds, 'u1', NOW)).toBe(7000);
+  });
+
+  it('raises when reserving more than available', () => {
+    const holds: HoldRow[] = [];
+    reserveCredit(holds, 'u1', 'l1', 4000, 10_000, NOW);
+    // 6000 left available; asking for 6001 on a different listing must raise.
+    expect(() => reserveCredit(holds, 'u1', 'l2', 6001, 10_000, NOW)).toThrow(
+      /insufficient available FSC: 6000 available, 6001 requested/,
+    );
+    // exactly at the remaining available is fine
+    expect(() => reserveCredit(holds, 'u1', 'l2', 6000, 10_000, NOW)).not.toThrow();
+  });
+
+  it('replaces a prior reserve on the same listing rather than stacking', () => {
+    const holds: HoldRow[] = [];
+    const first = reserveCredit(holds, 'u1', 'l1', 2000, 10_000, NOW);
+    const second = reserveCredit(holds, 'u1', 'l1', 2500, 10_000, NOW);
+
+    expect(first.status).toBe('released');
+    expect(second.status).toBe('active');
+    expect(holds.filter((h) => h.listing_id === 'l1' && h.status === 'active')).toHaveLength(1);
+    // held reflects only the surviving hold, not both
+    expect(creditHeld(holds, 'u1', NOW)).toBe(2500);
+  });
+
+  it('consumes a hold on settlement, and the same hold cannot be consumed twice', () => {
+    const holds: HoldRow[] = [];
+    const hold = reserveCredit(holds, 'u1', 'l1', 5000, 10_000, NOW);
+
+    expect(() => settleWithHold(holds, hold.id, 'u1', 'l1', 5000, NOW)).not.toThrow();
+    expect(hold.status).toBe('consumed');
+
+    expect(() => settleWithHold(holds, hold.id, 'u1', 'l1', 5000, NOW)).toThrow(
+      /credit hold .+ is consumed/,
+    );
+  });
+
+  it('raises on an expired hold rather than silently settling', () => {
+    const holds: HoldRow[] = [
+      { id: 'h1', user_id: 'u1', listing_id: 'l1', amount_cents: 5000, status: 'active', expires_at: NOW - 1 },
+    ];
+    expect(() => settleWithHold(holds, 'h1', 'u1', 'l1', 5000, NOW)).toThrow(
+      /credit hold h1 expired at/,
+    );
+    // the attempt flips the row to 'expired', same as the trigger statement does
+    expect(holds[0].status).toBe('expired');
+  });
+
+  it('refuses a hold reserved for listing A when settling listing B', () => {
+    const holds: HoldRow[] = [];
+    const hold = reserveCredit(holds, 'u1', 'listingA', 5000, 10_000, NOW);
+    expect(() => settleWithHold(holds, hold.id, 'u1', 'listingB', 5000, NOW)).toThrow(
+      /credit hold .+ is for a different listing/,
+    );
+    // the hold survives the refused attempt — it is not consumed by a
+    // settlement it was never valid for
+    expect(hold.status).toBe('active');
+  });
+});

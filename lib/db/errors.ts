@@ -57,33 +57,64 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   // generic not-found rule below.
   { pattern: /is already shipped/i, code: 'WRONG_STATUS' },
 
-  // 011_credit_ledger.sql — fn_purchase_credit.
-  // 'credit purchase must be positive, got %'
-  { pattern: /credit purchase must be positive/i, code: 'INVALID_AMOUNT' },
-  // fn_purchase_credit — 'minimum top-up is % cents, got %'
-  { pattern: /minimum top-up is .+ cents/i, code: 'BELOW_MINIMUM_TOPUP' },
-  // fn_purchase_card_with_credit — 'credit settlement is disabled'
+  // 021_credit_holds.sql fn_reserve_credit — no signed-in users row
+  // (fn_current_user_id() is null: either genuinely anonymous, which the
+  // grant to `authenticated` alone would already refuse with 42501, or a
+  // provisioned auth session with no matching `users` row).
+  { pattern: /sign in to reserve FSC/i, code: 'UNAUTHENTICATED' },
+  // fn_reserve_credit — 'reserve amount must be positive'
+  { pattern: /reserve amount must be positive/i, code: 'INVALID_AMOUNT' },
+  // fn_reserve_credit — 'reserve of % exceeds listing price %'. Distinct from
+  // the settlement path: fn_purchase_card_core clamps p_credit_cents to the
+  // listing price silently rather than raising, so this text only ever comes
+  // from a reservation, never a purchase.
+  { pattern: /reserve of .+ exceeds listing price/i, code: 'INVALID_AMOUNT' },
+  // fn_purchase_card_with_credit / fn_purchase_card_core — 'credit
+  // settlement is disabled' (platform_config.credit_payout_enabled false)
   { pattern: /credit settlement is disabled/i, code: 'CREDIT_SETTLEMENT_DISABLED' },
-  // fn_purchase_card_with_credit, and now fn_purchase_card_core's credit leg
-  // (018-020) — 'insufficient credit: balance %, price %' or similar wording
-  // for the split path. Kept broad on purpose: both call sites report the
-  // same failure (p_credit_cents exceeds what the buyer actually has).
-  { pattern: /insufficient credit/i, code: 'INSUFFICIENT_CREDIT' },
+  // Not enough spendable FSC, from any of three call sites with three
+  // different wordings, verified against the applied migration files:
+  // fn_reserve_credit's 'insufficient available FSC: % available, %
+  // requested' (021_credit_holds.sql:165), fn_purchase_card_core's
+  // 'insufficient FSC: balance %, requested %' (019c_settlement.sql:147,
+  // 021_credit_holds.sql:313), and the retired fn_purchase_card_with_credit
+  // body's 'insufficient credit: balance %, price %' (011/014 — superseded
+  // by 019c's create-or-replace, kept here in case an unreplaced install
+  // still runs the old body).
+  { pattern: /insufficient (?:credit|(?:available )?FSC)/i, code: 'INSUFFICIENT_CREDIT' },
 
-  // 018-020 fn_purchase_card_core (fn_purchase_card's new p_credit_cents /
-  // split-settlement leg). UNVERIFIED MESSAGE TEXT: migrations 018-020 are
-  // applied to the project but their .sql files are not in this worktree
-  // (docs/handoff/data.md), and live-probing a real fn_purchase_card call was
-  // out of bounds here (it would settle a real listing). This pattern is a
-  // best-effort guess at the raise for "the cash remainder needs a real
-  // settlement_ref" — if it doesn't match the live text, the failure still
-  // surfaces (verbatim message, code falls back to UNKNOWN); only the branch
-  // is missed. Verify against the actual migration and tighten this rule.
-  { pattern: /settlement_ref.*(?:required|missing|empty)|cash.*requires? a settlement/i, code: 'SETTLEMENT_REF_REQUIRED' },
-  // fn_purchase_card_core — p_credit_cents negative or greater than the
-  // listing price (distinct from INSUFFICIENT_CREDIT, which is about the
-  // buyer's balance, not the price ceiling). Same unverified-text caveat.
-  { pattern: /credit_cents.*(?:exceeds|greater than).*price|p_credit_cents must (?:not )?be/i, code: 'INVALID_AMOUNT' },
+  // 018-020/021 fn_purchase_card_core — 'a cash leg of % cents requires a
+  // settlement_ref'. Verified against 019c_settlement.sql:157 and
+  // 021_credit_holds.sql:320-321, now both in this worktree.
+  { pattern: /a cash leg of .+ requires a settlement_ref/i, code: 'SETTLEMENT_REF_REQUIRED' },
+
+  // 021_credit_holds.sql — provenance and lifecycle on a hold used to settle
+  // the FSC leg. Verified against the applied migration file.
+  //
+  // fn_purchase_card_core — no p_hold_id, and the caller's own session (if
+  // any) does not match p_buyer_id. This is what stops the webhook (no
+  // session at all) from spending a buyer's FSC without a hold the buyer's
+  // own session created.
+  { pattern: /spending FSC requires a session matching the buyer, or a credit hold/i, code: 'CREDIT_PROVENANCE_REQUIRED' },
+  // fn_purchase_card_core — the hold's expires_at has passed. Fires only when
+  // the row was still 'active' but time ran out; the row flips to 'expired'
+  // in the same statement that raises this.
+  { pattern: /credit hold \S+ expired at/i, code: 'CREDIT_HOLD_EXPIRED' },
+  // fn_purchase_card_core ('credit hold % belongs to another user') and
+  // fn_release_credit_hold ('hold % does not belong to you') — the hold's
+  // user_id does not match the caller.
+  { pattern: /credit hold \S+ belongs to another user|hold \S+ does not belong to you/i, code: 'CREDIT_HOLD_WRONG_USER' },
+  // fn_purchase_card_core — the hold was reserved against a different
+  // listing than the one being settled.
+  { pattern: /credit hold \S+ is for a different listing/i, code: 'CREDIT_HOLD_WRONG_LISTING' },
+  // fn_purchase_card_core — the hold's amount_cents is smaller than the
+  // credit_cents this settlement is asking to spend.
+  { pattern: /credit hold \S+ covers only/i, code: 'CREDIT_HOLD_INSUFFICIENT' },
+  // fn_purchase_card_core — the hold row exists but is not 'active' (already
+  // 'consumed' or 'released'). A hold id that does not exist at all falls
+  // through to the generic '% not found' rule below, same as everything
+  // else — 'credit hold % not found' and 'hold % not found' both contain it.
+  { pattern: /^credit hold \S+ is \S+$/i, code: 'WRONG_STATUS' },
 
   // 011 fn_purchase_card_with_credit — 'listing % settles in cash and cannot
   // be bought with credit'; 012 fn_purchase_card — 'listing % settles in
@@ -107,8 +138,8 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   // fn_submit_listing and fn_set_item_photos (010) — every photo must be an
   // https URL.
   { pattern: /photo entries must be https URLs/i, code: 'INVALID_PHOTO_URL' },
-  // fn_submit_listing — 'price must be positive'. Same recovery as the 011
-  // 'credit purchase must be positive' rule above.
+  // fn_submit_listing — 'price must be positive'. Same recovery as
+  // fn_reserve_credit's 'reserve amount must be positive' rule above.
   { pattern: /price must be positive/i, code: 'INVALID_AMOUNT' },
   // fn_confirm_shipment — the caller is neither the redemption's fulfiller nor
   // an admin.
@@ -169,9 +200,11 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   // 001_schema.sql, trg_ledger_immutable
   { pattern: /ledger_entries is append-only/i, code: 'FORBIDDEN' },
 
-  // 020 fn_record_sweep — p_amount_cents above fn_platform_position().unswept_cents.
-  // Same unverified-text caveat as the two 018-020 rules above.
-  { pattern: /(?:exceeds|greater than|above) .*unswept/i, code: 'SWEEP_EXCEEDS_UNSWEPT' },
+  // 020_platform_earnings.sql fn_guard_sweep (trigger on sweeps insert) —
+  // 'sweep of % cents exceeds unswept commission of % cents - the difference
+  // is buyer funds backing outstanding FSC'. Verified against the applied
+  // migration file, now in this worktree.
+  { pattern: /sweep of .+ exceeds unswept commission of/i, code: 'SWEEP_EXCEEDS_UNSWEPT' },
 ];
 
 /**

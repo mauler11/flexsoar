@@ -46,6 +46,137 @@ the third clause is complete. Until it lands, the contract surface is correct
 but the positive paths — `purchaseCredit()`, `purchaseCardWithCredit()` — are
 DB-blocked. Everything that refuses before writing already works (see item 5).
 
+### 11. 021 credit-hold reservation surface added; `purchaseCredit` deleted and breaks one out-of-lane caller
+
+Migrations 021 (`021_credit_holds.sql`) and 022 (`022_drop_legacy_settlement.sql`)
+are both applied and both now have `.sql` files in this worktree, along with
+019a/019b/019c/020 — item 10's "not in this worktree" note is stale; every
+message-pattern regex it flagged as a guess has been re-verified against the
+actual `raise exception` text in the applied files (see below).
+
+**Verified live before writing anything, per this task's instruction:**
+`fn_purchase_card` and `fn_purchase_card_core` each exist in exactly one
+five-argument form. `022`'s own `do $$ ... end $$` block asserts this at
+migration time (`expected exactly 1 fn_purchase_card, found %`), and reading
+`021_credit_holds.sql` confirms the four- and three-argument overloads were
+dropped by `021` and `022` respectively before `022` re-asserts the grants on
+the five-argument form only. Both `purchaseCard()` (3 args, defaults fill 4
+and 5) and `purchaseCardSplit()` (now 5 args) rely on default-filling into
+that one five-argument function — there is no second signature for either to
+accidentally bind to.
+
+**1. `fn_purchase_credit` deleted from the contract.** `purchaseCredit()` and
+its `BELOW_MINIMUM_TOPUP` `ContractErrorCode` member are gone —
+`fn_purchase_credit`'s EXECUTE grant is now revoked from every role including
+`service_role` (021, section 5), so the export could only ever throw. No stub,
+shim, or commented-out block was left in its place.
+
+**The one caller this breaks:** `app/api/webhooks/stripe/route.ts` imports
+`purchaseCredit` at line 33 and calls it at line 149, inside the
+`credit_topup` branch spanning lines 116-167 (guarded by
+`metadata.purpose === TOPUP_PURPOSE`, `TOPUP_PURPOSE = 'credit_topup'` at line
+47). `isPermanentError()` (line 53-67) also references the now-deleted
+`BELOW_MINIMUM_TOPUP` code at line 66. This task's prompt named this file and
+said explicitly not to edit it — "outside your lane" for this task, even
+though the AGENT_RULES.md lanes table lists `webhooks` under track/data
+broadly — so per AGENT_RULES §1 ("You own only the paths given in your task
+prompt") the file was left untouched. **Consequence, verified live in this
+session:** `npx tsc --noEmit` and `npm run build` both fail with exactly one
+error apiece, both pointing at this file (`TS2724`: no exported member
+`purchaseCredit`; Turbopack: `Export purchaseCredit doesn't exist in target
+module`) — nothing else regresses; every other file in the project compiles
+clean against the new contract. **This file needs its `credit_topup` branch
+(lines 116-167), the `TOPUP_PURPOSE` constant (line 47), the `purchaseCredit`
+import (line 33), and the `BELOW_MINIMUM_TOPUP` arm of `isPermanentError()`
+(line 66) deleted** before `tsc`/`build` will pass repo-wide again. 021's own
+migration comment anticipates exactly this: "The Stripe webhook's
+credit_topup branch must be deleted; this revoke only stops it succeeding."
+
+**2. New reservation exports**, all session-client, wrapping 021's new RPCs
+verbatim (see their doc comments in `lib/api/contract.ts` for the full
+signature and throw list): `reserveCredit(listingId, creditCents)`,
+`releaseCreditHold(holdId)`, `getCreditAvailable()`, `getCreditHeld()`,
+`expireCreditHolds()`. `getCreditAvailable()`/`getCreditHeld()` take no
+argument and resolve the caller from the session, mirroring
+`getCreditBalance()`'s existing "a session cannot ask after someone else's"
+pattern — this is a contract-layer choice, not one the underlying SQL
+enforces: `fn_credit_available(p_user)`/`fn_credit_held(p_user)` are plain
+`p_user`-argument functions granted to `authenticated` with no internal
+identity check (confirmed by reading the SQL), so a raw RPC call could ask
+after any user's held/available FSC. The wrapper is the only thing closing
+that.
+
+**3. `purchaseCardSplit` extended in place to five arguments** (`holdId` last).
+This is a prior additive export (018-020), not one of the frozen 16, so it
+was changed in place rather than given a second variant — a second variant
+here would recreate exactly the two-code-paths problem 022 just cleaned up on
+the SQL side. It now throws `CREDIT_PROVENANCE_REQUIRED` itself, client-side,
+when `creditCents > 0` and `holdId` is null — `purchaseCardSplit` always runs
+on the service-role client (the webhook), which never has a session, so any
+call of its with an FSC leg **must** carry a hold id created earlier by the
+buyer's own session via `reserveCredit()`. The SQL enforces the identical
+rule independently (`fn_purchase_card_core` raises the same-meaning
+`'spending FSC requires a session matching the buyer, or a credit hold'` if
+this client check is ever bypassed), so nothing relies on the TS check alone.
+No caller of `purchaseCardSplit` exists yet anywhere in the repo (grepped) —
+extending its signature could not break anyone.
+
+**4. `getCreditBalance()` doc comment now says plainly it is NOT spendable**
+and points at `getCreditAvailable()`, per AGENT_RULES.md §5. Grepped the
+whole repo for callers of `getCreditBalance` — there are none outside
+`lib/api/contract.ts` itself, so nothing needed fixing; the function was only
+ever exported, never called from any track's UI code.
+
+**5. Error-string verification, now against the applied `.sql` files rather
+than guesses** (`lib/db/errors.ts`): `SETTLEMENT_REF_REQUIRED` was guessing at
+wording that turned out to already substring-match by accident (the pattern
+has been tightened to the exact text anyway: `'a cash leg of % cents
+requires a settlement_ref'`, `019c_settlement.sql:157` /
+`021_credit_holds.sql:320-321`). `SWEEP_EXCEEDS_UNSWEPT` was also an
+accidental match, now tightened to `'sweep of % cents exceeds unswept
+commission of % cents...'` (`020_platform_earnings.sql:168-170`). The
+credit-cents-vs-price arm of `INVALID_AMOUNT` was **not** an accidental
+match — it was simply wrong: `fn_purchase_card_core` does not raise for
+`p_credit_cents` above the listing price, it silently clamps
+(`v_credit := least(greatest(coalesce(p_credit_cents, 0), 0), v_price);`,
+`021_credit_holds.sql:274`). That rule has been removed. The real "credit vs
+price" raise lives in `fn_reserve_credit` instead — `'reserve of % exceeds
+listing price %'` — and is mapped now. Also found and fixed:
+`INSUFFICIENT_CREDIT`'s pattern was `/insufficient credit/i`, but the two
+live raises actually say `'insufficient FSC: balance %, requested %'`
+(`fn_purchase_card_core`) and `'insufficient available FSC: % available, %
+requested'` (`fn_reserve_credit`) — **neither contains the word "credit"**,
+so the old pattern would never have matched either live raise; both would
+have fallen through to `UNKNOWN`. Broadened to catch all three wordings.
+New mappings added for 021's five new raise families: expired hold
+(`CREDIT_HOLD_EXPIRED`), hold belonging to another user
+(`CREDIT_HOLD_WRONG_USER`, covers both `fn_purchase_card_core`'s and
+`fn_release_credit_hold`'s wording), hold for a different listing
+(`CREDIT_HOLD_WRONG_LISTING`), hold smaller than the requested credit
+(`CREDIT_HOLD_INSUFFICIENT`), and the session-or-hold provenance refusal
+(`CREDIT_PROVENANCE_REQUIRED`).
+
+**6. Tests added to `tests/invariants.test.ts`** under `describe('credit
+holds (021)', ...)`: available = balance - held with expired holds excluded,
+reserving more than available raises, a second reserve on the same listing
+replaces rather than stacks, settling with a hold consumes it and a second
+consumption raises, an expired hold raises rather than settling, and a hold
+for listing A refuses to settle listing B. **All six are model-level checks
+against an in-memory array of synthetic rows, mirroring the SQL's logic —
+none of them touch the database or call the real RPC**, same as every other
+describe block in this file; the reservation order they mirror (available is
+checked BEFORE the caller's own prior hold on the same listing is released)
+was copied from reading `fn_reserve_credit` itself, not simplified. Full
+suite: 107 passing (was 87 before this pass).
+
+**Not verified live:** everything in this item was checked by reading the
+applied `.sql` files directly (all now present in `supabase/migrations/`),
+not by probing the live project — this task's instruction was to read
+`pg_get_functiondef`-equivalent source (the migration files themselves,
+since they are now in the worktree) rather than live-probe a real credit
+RPC, which would risk a real reservation/settlement. Nothing here was
+guessed.
+
 ### 1. Migration request: `fn_list_card` needs a `payout_method` argument
 
 `listings.payout_method` exists (011, defaults to `'cash'`), but
