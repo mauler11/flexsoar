@@ -64,8 +64,26 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   { pattern: /minimum top-up is .+ cents/i, code: 'BELOW_MINIMUM_TOPUP' },
   // fn_purchase_card_with_credit — 'credit settlement is disabled'
   { pattern: /credit settlement is disabled/i, code: 'CREDIT_SETTLEMENT_DISABLED' },
-  // fn_purchase_card_with_credit — 'insufficient credit: balance %, price %'
+  // fn_purchase_card_with_credit, and now fn_purchase_card_core's credit leg
+  // (018-020) — 'insufficient credit: balance %, price %' or similar wording
+  // for the split path. Kept broad on purpose: both call sites report the
+  // same failure (p_credit_cents exceeds what the buyer actually has).
   { pattern: /insufficient credit/i, code: 'INSUFFICIENT_CREDIT' },
+
+  // 018-020 fn_purchase_card_core (fn_purchase_card's new p_credit_cents /
+  // split-settlement leg). UNVERIFIED MESSAGE TEXT: migrations 018-020 are
+  // applied to the project but their .sql files are not in this worktree
+  // (docs/handoff/data.md), and live-probing a real fn_purchase_card call was
+  // out of bounds here (it would settle a real listing). This pattern is a
+  // best-effort guess at the raise for "the cash remainder needs a real
+  // settlement_ref" — if it doesn't match the live text, the failure still
+  // surfaces (verbatim message, code falls back to UNKNOWN); only the branch
+  // is missed. Verify against the actual migration and tighten this rule.
+  { pattern: /settlement_ref.*(?:required|missing|empty)|cash.*requires? a settlement/i, code: 'SETTLEMENT_REF_REQUIRED' },
+  // fn_purchase_card_core — p_credit_cents negative or greater than the
+  // listing price (distinct from INSUFFICIENT_CREDIT, which is about the
+  // buyer's balance, not the price ceiling). Same unverified-text caveat.
+  { pattern: /credit_cents.*(?:exceeds|greater than).*price|p_credit_cents must (?:not )?be/i, code: 'INVALID_AMOUNT' },
 
   // 011 fn_purchase_card_with_credit — 'listing % settles in cash and cannot
   // be bought with credit'; 012 fn_purchase_card — 'listing % settles in
@@ -150,6 +168,10 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
 
   // 001_schema.sql, trg_ledger_immutable
   { pattern: /ledger_entries is append-only/i, code: 'FORBIDDEN' },
+
+  // 020 fn_record_sweep — p_amount_cents above fn_platform_position().unswept_cents.
+  // Same unverified-text caveat as the two 018-020 rules above.
+  { pattern: /(?:exceeds|greater than|above) .*unswept/i, code: 'SWEEP_EXCEEDS_UNSWEPT' },
 ];
 
 /**
