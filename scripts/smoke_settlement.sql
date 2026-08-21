@@ -635,7 +635,11 @@ begin
   perform set_config('request.jwt.claims',
     json_build_object('sub', v_admin::text, 'role', 'authenticated')::text, true);
 
-  for r in select * from fn_check_solvency(v_currency) loop
+  -- p_actual_cents is meant to be the REAL bank/Stripe balance, so the
+  -- function can catch ledger-vs-bank divergence. Feeding it the ledger figure
+  -- makes variance vacuously zero. Pass null: this asserts internal
+  -- consistency only. Reconciling against Stripe is an operational step.
+  for r in select * from fn_check_solvency(null) loop
     if not r.ok then
       raise exception 'SOLVENCY: variance % — %', r.variance_cents, r.detail;
     end if;
