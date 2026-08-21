@@ -83,6 +83,78 @@ const sellerFeeBps = (level: number): number =>
 const levelForRankScore = (rankScore: number): number =>
   LEVELS.filter((l) => l.rankScoreRequired <= rankScore).at(-1)!.level;
 
+/**
+ * fn_purchase_card_core's settlement-split validation (018-020, applied to
+ * the project but not yet a .sql file in this worktree — see
+ * docs/handoff/data.md). Mirrors the RULE the migration documents, not its
+ * verbatim raise text: the cash remainder (price - credit) needs a real
+ * settlement_ref; FSC-only (credit === price) may pass null since no money
+ * moved through Stripe for that order at all.
+ */
+const splitSettlement = (
+  priceCents: number,
+  creditCents: number,
+  settlementRef: string | null,
+  buyerBalanceCents?: number,
+): { creditCents: number; cashCents: number } => {
+  if (!Number.isInteger(creditCents) || creditCents < 0) {
+    throw new Error(`credit_cents must be a non-negative integer, got ${creditCents}`);
+  }
+  if (creditCents > priceCents) {
+    throw new Error(`credit_cents ${creditCents} exceeds price ${priceCents}`);
+  }
+  if (buyerBalanceCents !== undefined && creditCents > buyerBalanceCents) {
+    throw new Error(
+      `insufficient credit: balance ${buyerBalanceCents}, requested ${creditCents}`,
+    );
+  }
+  const cashCents = priceCents - creditCents;
+  if (cashCents > 0 && (!settlementRef || settlementRef.trim() === '')) {
+    throw new Error(`cash settlement of ${cashCents} requires a settlement_ref`);
+  }
+  return { creditCents, cashCents };
+};
+
+/**
+ * fn_payout_method_for_user (018-020). cash_payout_countries live-verified
+ * against the project (2026-08-21): exactly one row, country_code 'MY'.
+ * Decoupled from HOW the buyer paid — splitSettlement() above never looks at
+ * the seller, and this never looks at the buyer's payment method.
+ */
+const CASH_PAYOUT_COUNTRIES = ['MY'];
+const derivePayoutMethod = (countryCode: string | null | undefined): 'cash' | 'credit' =>
+  countryCode && CASH_PAYOUT_COUNTRIES.includes(countryCode) ? 'cash' : 'credit';
+
+/**
+ * ledger_entries' append-only invariant: entries sharing a txn_id must net to
+ * zero within each asset class. `card` entries carry no amount_cents (the
+ * schema's check constraint requires it null for asset='card'), so weight
+ * defaults to 1 — one card moving from one direction to the other.
+ */
+interface LedgerProbe {
+  txn_id: string;
+  asset: 'currency' | 'card' | 'credit';
+  amount_cents: number | null;
+  direction: 1 | -1;
+}
+const ledgerNetsToZero = (entries: readonly LedgerProbe[]): boolean => {
+  const byTxnAsset = new Map<string, number>();
+  for (const entry of entries) {
+    const key = `${entry.txn_id}:${entry.asset}`;
+    const weight = entry.amount_cents ?? 1;
+    byTxnAsset.set(key, (byTxnAsset.get(key) ?? 0) + weight * entry.direction);
+  }
+  return [...byTxnAsset.values()].every((sum) => sum === 0);
+};
+
+/** fn_record_sweep (020): p_amount_cents may not exceed unswept_cents. */
+const recordSweepAmount = (amountCents: number, unsweptCents: number): number => {
+  if (amountCents > unsweptCents) {
+    throw new Error(`sweep of ${amountCents} exceeds unswept balance of ${unsweptCents}`);
+  }
+  return amountCents;
+};
+
 // ------------------------------------------------------------
 // LOOKUPS
 // ------------------------------------------------------------
@@ -613,5 +685,146 @@ describe('gradeFloatFromComponents', () => {
       }
     }
     expect(failures).toEqual([]);
+  });
+});
+
+// ------------------------------------------------------------
+// SETTLEMENT SPLIT (018-020)
+// ------------------------------------------------------------
+//
+// fn_purchase_card gained a 4th argument, p_credit_cents: the portion of the
+// listing price paid in FSC. docs/handoff/data.md has the live-verification
+// notes (platform_config, condition_bands, cash_payout_countries, the ledger
+// rows below) and flags the two new ContractErrorCode message patterns in
+// lib/db/errors.ts as best-effort until the migration's .sql file lands in
+// this worktree — these tests pin the RULE, not the SQL's exact wording.
+
+describe('fn_purchase_card_core split settlement', () => {
+  it('settles cash-only when credit_cents is 0 and a settlement_ref is given', () => {
+    expect(splitSettlement(21500, 0, 'pi_cash_only')).toEqual({
+      creditCents: 0,
+      cashCents: 21500,
+    });
+  });
+
+  it('settles FSC-only when credit_cents is the full price, with a null ref', () => {
+    expect(splitSettlement(21500, 21500, null)).toEqual({
+      creditCents: 21500,
+      cashCents: 0,
+    });
+  });
+
+  it('settles both legs on a split, and they sum back to the gross price', () => {
+    const result = splitSettlement(21500, 8000, 'pi_split');
+    expect(result.cashCents).toBe(13500);
+    expect(result.creditCents + result.cashCents).toBe(21500);
+  });
+
+  it('raises when a cash leg has a null or empty settlement_ref', () => {
+    expect(() => splitSettlement(21500, 8000, null)).toThrow(/settlement_ref/);
+    expect(() => splitSettlement(21500, 8000, '')).toThrow(/settlement_ref/);
+    expect(() => splitSettlement(21500, 8000, '   ')).toThrow(/settlement_ref/);
+    // the FSC-only case is the one exception — no cash leg, no ref needed
+    expect(() => splitSettlement(21500, 21500, null)).not.toThrow();
+  });
+
+  it("raises when credit_cents is above the buyer's FSC balance", () => {
+    expect(() => splitSettlement(21500, 15000, 'pi_x', 5000)).toThrow(/insufficient credit/);
+    // exactly at the balance is fine
+    expect(() => splitSettlement(21500, 5000, 'pi_x', 5000)).not.toThrow();
+  });
+
+  it('accepts a listing whose seller is non-Malaysian, paid in cash — the case the old code refused', () => {
+    // Settlement validation takes price/credit/ref and nothing about the
+    // seller — it must not gate on who the seller is or how they are paid.
+    expect(() => splitSettlement(21500, 0, 'pi_cash_only')).not.toThrow();
+    // The seller's payout is resolved separately and never blocks this.
+    expect(derivePayoutMethod('SG')).toBe('credit');
+  });
+});
+
+describe('fn_payout_method_for_user', () => {
+  it('resolves MY to cash and everything else — including null — to credit', () => {
+    expect(derivePayoutMethod('MY')).toBe('cash');
+    expect(derivePayoutMethod('SG')).toBe('credit');
+    expect(derivePayoutMethod('US')).toBe('credit');
+    expect(derivePayoutMethod(null)).toBe('credit');
+    expect(derivePayoutMethod(undefined)).toBe('credit');
+  });
+});
+
+describe('ledger_entries nets to zero per txn_id, per asset class', () => {
+  // Reproduced from real rows read back from the project (2026-08-21).
+  it('holds for a real credit-topup txn_id (asset=credit)', () => {
+    expect(
+      ledgerNetsToZero([
+        { txn_id: 't1', asset: 'credit', amount_cents: 2500, direction: 1 },
+        { txn_id: 't1', asset: 'credit', amount_cents: 2500, direction: -1 },
+      ]),
+    ).toBe(true);
+  });
+
+  it('holds for a real credit-sale txn_id (gross/net/fee triad)', () => {
+    expect(
+      ledgerNetsToZero([
+        { txn_id: 't2', asset: 'credit', amount_cents: 18000, direction: -1 },
+        { txn_id: 't2', asset: 'credit', amount_cents: 17460, direction: 1 },
+        { txn_id: 't2', asset: 'credit', amount_cents: 540, direction: 1 },
+      ]),
+    ).toBe(true);
+  });
+
+  it('holds for a real currency-sale txn_id, including its unpriced card leg', () => {
+    expect(
+      ledgerNetsToZero([
+        { txn_id: 't3', asset: 'currency', amount_cents: 21500, direction: -1 },
+        { txn_id: 't3', asset: 'currency', amount_cents: 19780, direction: 1 },
+        { txn_id: 't3', asset: 'currency', amount_cents: 1720, direction: 1 },
+        { txn_id: 't3', asset: 'card', amount_cents: null, direction: -1 },
+        { txn_id: 't3', asset: 'card', amount_cents: null, direction: 1 },
+      ]),
+    ).toBe(true);
+  });
+
+  it('holds across a split settlement: currency and credit legs each net to zero independently', () => {
+    // Constructed, not live-observed — no split-settlement order exists in
+    // the seed data yet — but each leg follows the same gross/net/fee triad
+    // shape as the live credit-sale and currency-sale cases above.
+    const { creditCents, cashCents } = splitSettlement(21500, 8000, 'pi_split');
+    const cashNet = Math.floor(cashCents * 0.92);
+    const creditNet = Math.floor(creditCents * 0.92);
+    expect(
+      ledgerNetsToZero([
+        { txn_id: 't4', asset: 'currency', amount_cents: cashCents, direction: -1 },
+        { txn_id: 't4', asset: 'currency', amount_cents: cashNet, direction: 1 },
+        { txn_id: 't4', asset: 'currency', amount_cents: cashCents - cashNet, direction: 1 },
+        { txn_id: 't4', asset: 'credit', amount_cents: creditCents, direction: -1 },
+        { txn_id: 't4', asset: 'credit', amount_cents: creditNet, direction: 1 },
+        { txn_id: 't4', asset: 'credit', amount_cents: creditCents - creditNet, direction: 1 },
+      ]),
+    ).toBe(true);
+    // and the two legs still sum to the gross price (orders.credit_cents +
+    // orders.cash_cents = orders.gross_cents)
+    expect(creditCents + cashCents).toBe(21500);
+  });
+
+  it('catches a lopsided txn_id (regression guard for the checker itself)', () => {
+    expect(
+      ledgerNetsToZero([
+        { txn_id: 't5', asset: 'currency', amount_cents: 1000, direction: -1 },
+        { txn_id: 't5', asset: 'currency', amount_cents: 999, direction: 1 },
+      ]),
+    ).toBe(false);
+  });
+});
+
+describe('fn_record_sweep', () => {
+  it('raises when the amount exceeds unswept_cents', () => {
+    expect(() => recordSweepAmount(50000, 40000)).toThrow(/exceeds/);
+  });
+
+  it('accepts an amount at or below unswept_cents', () => {
+    expect(() => recordSweepAmount(40000, 40000)).not.toThrow();
+    expect(() => recordSweepAmount(1, 40000)).not.toThrow();
   });
 });

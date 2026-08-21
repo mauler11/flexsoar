@@ -10,7 +10,7 @@
  * HANDOFF.md and work around it locally. Do not add a function here.
  *
  * ------------------------------------------------------------------
- * THREE SANCTIONED EXTENSIONS.
+ * SANCTIONED EXTENSIONS.
  *
  * The freeze still holds for the original 16 functions: none of their
  * signatures, parameters or return types have changed. On explicit
@@ -19,7 +19,12 @@
  *   009: markShipped, getRedemptions, upsertSku, setFloatCurve
  *   admin.md 3+4: getItem; consignment_id + consignor_id on ItemSummary
  *   015: replaceSkuArt
- * along with their query/input types and two ContractErrorCode members.
+ *   018-020: purchaseCardSplit (the 4-arg fn_purchase_card), getPayoutMethodForUser,
+ *     listConditionBands, getPlatformPosition, recordSweep, checkSolvency;
+ *     condition_grade on ItemSummary/CardSummary/SubmissionSummary;
+ *     credit_cents/cash_cents/seller_payout/payout_release_at on OrderSummary;
+ *     show_numeric_float on PlatformConfig
+ * along with their query/input types and new ContractErrorCode members.
  * Additive only: nothing that existed before behaves differently.
  *
  * Each grant was for its request. It is not standing permission — the rule
@@ -66,6 +71,7 @@ import type {
   Card,
   CardStatus,
   Cents,
+  ConditionGrade,
   Consignment,
   ConsignmentEvent,
   ConsignmentStatus,
@@ -174,6 +180,20 @@ export type ContractErrorCode =
    * 013 fn_confirm_shipment — carrier and tracking are required together.
    */
   | 'INVALID_SHIPMENT'
+  /**
+   * 018-020 fn_purchase_card_core (purchaseCardSplit) — the cash remainder
+   * (price_cents - credit_cents) is greater than zero but settlementRef is
+   * null or empty. Cash-only and split settlements both need a real ref;
+   * FSC-only (credit_cents = price_cents) is the one case that may pass null.
+   */
+  | 'SETTLEMENT_REF_REQUIRED'
+  /**
+   * 020 fn_record_sweep — p_amount_cents is greater than
+   * fn_platform_position().unswept_cents. Re-read the position before
+   * retrying; sweepable_cents (unswept minus the chargeback reserve) is the
+   * safe upper bound, not unswept_cents itself.
+   */
+  | 'SWEEP_EXCEEDS_UNSWEPT'
   | 'UNKNOWN';
 
 export class ContractError extends Error {
@@ -281,6 +301,12 @@ export interface CardSummary {
   mint_number: number;
   status: CardStatus;
   minted_at: Timestamptz;
+  /**
+   * 018-020, trigger-derived from float_value — always present on a card
+   * (cards.float_value is NOT NULL). The display label for it comes from
+   * listConditionBands(), not from formatting this string.
+   */
+  condition_grade: ConditionGrade;
   sku: SkuRef;
   /** Populated only for status in ('early_access','public'). */
   listing: ListingRef | null;
@@ -324,6 +350,15 @@ export interface ListingSummary {
   seller: UserSummary;
 }
 
+/**
+ * fn_payout_method_for_user's return, and orders.seller_payout — narrower
+ * than PayoutMethod (018-020): a seller is always paid 'cash' or 'credit',
+ * never 'either'. 'either' is a listing's own settlement election
+ * (ItemSummary.submitted_payout / SubmitListingInput.payoutMethod) — the
+ * buyer's side of the trade, not the seller's payout route.
+ */
+export type DerivedPayoutMethod = Extract<PayoutMethod, 'cash' | 'credit'>;
+
 export interface OrderSummary {
   id: UUID;
   listing_id: UUID;
@@ -337,6 +372,19 @@ export interface OrderSummary {
   settlement_ref: string | null;
   status: OrderStatus;
   created_at: Timestamptz;
+  /**
+   * 018-020 split settlement. credit_cents + cash_cents = gross_cents always
+   * — the invariant fn_purchase_card_core enforces on write.
+   */
+  credit_cents: Cents;
+  cash_cents: Cents;
+  /**
+   * fn_payout_method_for_user(seller_id), frozen at settlement — NEVER read
+   * listings.payout_method for this; that column is a cached display value
+   * only (see the WHAT CHANGED note in docs/handoff/data.md).
+   */
+  seller_payout: DerivedPayoutMethod | null;
+  payout_release_at: Timestamptz | null;
 }
 
 export interface ListingDetail extends ListingSummary {
@@ -360,6 +408,12 @@ export interface ItemSummary {
   consignor_id: UUID | null;
   status: ItemStatus;
   float_value: FloatValue | null;
+  /**
+   * 018-020, trigger-derived from float_value — null exactly when float_value
+   * is (pre-grade). See CardSummary.condition_grade for the minted-card
+   * mirror, which is never null.
+   */
+  condition_grade: ConditionGrade | null;
   graded_at: Timestamptz | null;
   grading_notes: string | null;
   photos: Json;
@@ -399,6 +453,8 @@ export interface SubmissionSummary {
   sku_id: UUID;
   status: ItemStatus;
   float_value: FloatValue | null;
+  /** 018-020, trigger-derived from float_value. See ItemSummary.condition_grade. */
+  condition_grade: ConditionGrade | null;
   /**
    * The seller's own six condition scores, always present on a 013
    * submission. NOT a FlexSoar grade — grade_source says which it is.
@@ -694,7 +750,7 @@ const SKU_COLUMNS =
 
 const CARD_SUMMARY_COLUMNS =
   'id, sku_id, item_id, owner_id, float_value, float_percentile, tier, ' +
-  'is_exceptional, mint_number, status, minted_at';
+  'is_exceptional, mint_number, status, minted_at, condition_grade';
 
 const LISTING_REF_COLUMNS =
   'id, price_cents, status, early_access_level, public_at, oracle_value_cents';
@@ -705,10 +761,12 @@ const LISTING_COLUMNS =
 
 const ORDER_COLUMNS =
   'id, listing_id, card_id, buyer_id, seller_id, gross_cents, fee_bps, fee_cents, ' +
-  'net_cents, settlement_ref, status, created_at';
+  'net_cents, settlement_ref, status, created_at, ' +
+  'credit_cents, cash_cents, seller_payout, payout_release_at';
 
 const ITEM_SUMMARY_COLUMNS =
-  'id, sku_id, consignment_id, consignor_id, status, float_value, graded_at, grading_notes, photos, ' +
+  'id, sku_id, consignment_id, consignor_id, status, float_value, condition_grade, ' +
+  'graded_at, grading_notes, photos, ' +
   'authenticated_at, custody_location, reserve_price_cents, ' +
   'custody, custody_holder_id, grade_source, asking_price_cents, submitted_payout, last_proof_at, ' +
   'grade_outsole, grade_midsole, grade_creasing, grade_upper, grade_heel, ' +
@@ -840,6 +898,7 @@ interface CardRow {
   mint_number: number;
   status: CardStatus;
   minted_at: Timestamptz;
+  condition_grade: ConditionGrade;
   sku: SkuRefRow | SkuRefRow[];
 }
 
@@ -869,6 +928,7 @@ interface ItemRow {
   consignor_id: UUID | null;
   status: ItemStatus;
   float_value: FloatValue | null;
+  condition_grade: ConditionGrade | null;
   graded_at: Timestamptz | null;
   grading_notes: string | null;
   photos: Json;
@@ -979,6 +1039,7 @@ function toCardSummary(row: CardRow, listing: ListingRef | null): CardSummary {
     mint_number: row.mint_number,
     status: row.status,
     minted_at: row.minted_at,
+    condition_grade: row.condition_grade,
     sku: requireEmbed(row.sku, 'cards.sku'),
     listing,
   };
@@ -1034,6 +1095,7 @@ function toItemSummary(row: ItemRow, cardId: UUID | null): ItemSummary {
     consignor_id: row.consignor_id,
     status: row.status,
     float_value: row.float_value,
+    condition_grade: row.condition_grade,
     graded_at: row.graded_at,
     grading_notes: row.grading_notes,
     photos: row.photos,
@@ -1263,6 +1325,52 @@ export async function purchaseCard(
 }
 
 /**
+ * fn_purchase_card(p_listing_id, p_buyer_id, p_settlement_ref, p_credit_cents) -> uuid
+ *
+ * 018-020's split-settlement path: the NEW 4-argument overload of the same
+ * fn_purchase_card the frozen purchaseCard() above calls with 3 (the default
+ * `p_credit_cents = 0` is what keeps that call frozen and working unchanged).
+ * `creditCents` is the portion of the listing price the buyer pays in FSC;
+ * the remainder is cash and needs a real `settlementRef` — cash-only
+ * (creditCents = 0) and split settlements both require one. FSC-only
+ * (creditCents = price_cents) is the one case `settlementRef` may be null,
+ * because no money moved through Stripe for this order at all.
+ *
+ * Same calling rule as purchaseCard(): this records a settlement that has
+ * ALREADY happened. Call it from the payment_intent.succeeded webhook (for
+ * the cash/split legs) — never from client code. SERVICE-ROLE, for the same
+ * reason as purchaseCard(): the webhook has no session to act on behalf of.
+ *
+ * Seller payout is derived server-side from fn_payout_method_for_user, never
+ * from listings.payout_method and never from anything this call passes in —
+ * see getPayoutMethodForUser().
+ *
+ * @param settlementRef the Stripe payment_intent id, or null for an
+ *   FSC-only settlement (creditCents === the full price).
+ * @param creditCents the portion of the price paid in FSC, in cents.
+ * @returns the new order id.
+ * @throws EARLY_ACCESS_LOCKED, WRONG_STATUS, SELF_PURCHASE, NOT_FOUND,
+ *         SETTLEMENT_REF_REQUIRED, INSUFFICIENT_CREDIT, INVALID_AMOUNT.
+ */
+export async function purchaseCardSplit(
+  listingId: UUID,
+  buyerId: UUID,
+  settlementRef: string | null,
+  creditCents: Cents,
+): Promise<UUID> {
+  const supabase = createServiceSupabase();
+  return unwrap(
+    await supabase.rpc('fn_purchase_card', {
+      p_listing_id: listingId,
+      p_buyer_id: buyerId,
+      p_settlement_ref: settlementRef,
+      p_credit_cents: creditCents,
+    }),
+    'fn_purchase_card',
+  ) as UUID;
+}
+
+/**
  * The signed-in caller's `users.id`, or an error. `users.id` equals the
  * Supabase auth id — 006's users_self_insert WITH CHECK pins both to
  * auth.uid(), enforced in lib/db/provision.ts — so auth.getUser() is the whole
@@ -1301,6 +1409,52 @@ export async function getCreditBalance(): Promise<Cents> {
 }
 
 /**
+ * fn_payout_method_for_user(p_user) -> payout_method
+ *
+ * The AUTHORITATIVE answer to "how will this seller be paid": 'cash' when
+ * `users.country_code` is in `cash_payout_countries` (currently MY only),
+ * 'credit' otherwise — including when country_code is null. Live-verified
+ * (2026-08-21): a MY user resolves 'cash', a null-country user and an
+ * unrecognised user id both resolve 'credit'.
+ *
+ * NEVER let a client supply a payout method and use it for routing —
+ * `listings.payout_method` is a cached DISPLAY value only, not a source of
+ * truth, and `submitted_payout` on ItemSummary is the seller's own election
+ * at intake, not this. fn_purchase_card_core already calls this internally
+ * to decide the seller's actual payout; this export exists purely as a READ
+ * so the UI can tell a seller how they will be paid before they list.
+ *
+ * Not admin-gated and takes no session — live-verified working for anon,
+ * an authenticated session, and service-role alike, since it is a query
+ * over a user id the caller supplies, not the caller's own identity. Runs on
+ * the session client for consistency with the rest of the read surface.
+ */
+export async function getPayoutMethodForUser(userId: UUID): Promise<DerivedPayoutMethod> {
+  const supabase = await createServerSupabase();
+  return unwrap(
+    await supabase.rpc('fn_payout_method_for_user', { p_user: userId }),
+    'fn_payout_method_for_user',
+  ) as DerivedPayoutMethod;
+}
+
+/**
+ * DEAD, KEPT ONLY BECAUSE THE CONTRACT IS FROZEN. Do not call this. Do not
+ * add a new top-up export beside it — 018-020 revokes the FSC-purchase
+ * feature deliberately: FSC is earned by selling, never bought.
+ *
+ * Live-verified (2026-08-21): EXECUTE on fn_purchase_credit is revoked from
+ * `authenticated` and `anon` (42501 "permission denied for function
+ * fn_purchase_credit" from a real signed-in session and from anon alike).
+ * It is still granted to `service_role` — a negative-amount probe from
+ * service-role still reached the business-logic raise rather than a
+ * permission error — so the webhook call below has not actually broken, but
+ * it is calling a feature the product no longer wants to exist. Found one
+ * caller: app/api/webhooks/stripe/route.ts's `credit_topup` branch (metadata
+ * `purpose: 'credit_topup'`) still calls purchaseCredit() on
+ * payment_intent.succeeded. That file is outside this track's lane
+ * (lib/api/contract.ts only) so it has not been touched — reported instead,
+ * per instruction, rather than deleted. See docs/handoff/data.md.
+ *
  * fn_purchase_credit(p_user_id, p_cents, p_settlement_ref) -> uuid
  *
  * Credits FSC to a user in exchange for cash that has ALREADY settled through
@@ -1398,6 +1552,16 @@ export interface PlatformConfig {
   credit_payout_premium_bps: number;
   /** credit_purchase_min_cents — the smallest FSC top-up. */
   credit_purchase_min_cents: Cents;
+  /**
+   * show_numeric_float (018-020) — live-verified false. While false, the raw
+   * numeric float and float_percentile must not be shown to a non-admin
+   * caller; render condition_grade (via listConditionBands()) instead. This
+   * flag only tells the UI which to show — CardSummary.float_value and
+   * float_percentile are unchanged (frozen fields) and still come back on
+   * every read regardless of this flag; gating their display is a UI
+   * decision, not something this contract can withhold.
+   */
+  show_numeric_float: boolean;
 }
 
 /**
@@ -1427,6 +1591,7 @@ export async function getPlatformConfig(): Promise<PlatformConfig> {
       byKey.get('credit_payout_premium_bps')?.num_value ?? 500,
     credit_purchase_min_cents:
       (byKey.get('credit_purchase_min_cents')?.num_value as Cents | undefined) ?? 500,
+    show_numeric_float: byKey.get('show_numeric_float')?.bool_value ?? false,
   };
 }
 
@@ -2048,6 +2213,121 @@ export async function setFloatCurve(
 }
 
 // ============================================================
+// PLATFORM EARNINGS — added by 020
+// ============================================================
+//
+// All three are admin-guarded via fn_require_admin() inside the SQL — the
+// 005/008 pattern — so they run on the SESSION client. Live-verified
+// (2026-08-21): calling fn_platform_position from service-role is refused
+// with "admin privileges required" (FORBIDDEN); a real admin session reads it
+// fine.
+
+/** fn_platform_position()'s row, shape live-verified against the project. */
+export interface PlatformPosition {
+  currency_balance_cents: Cents;
+  credit_liability_cents: Cents;
+  earned_gross_cents: Cents;
+  swept_cents: Cents;
+  /** Commission earned and not yet moved out. */
+  unswept_cents: Cents;
+  reserve_cents: Cents;
+  /**
+   * unswept_cents minus the chargeback reserve, floored at zero — the number
+   * that is actually safe to sweep. Pass this (or less) to recordSweep(),
+   * never unswept_cents itself.
+   */
+  sweepable_cents: Cents;
+}
+
+/**
+ * fn_platform_position() -> row
+ *
+ * The platform's own earnings position: what has been earned, what has
+ * already been swept to the bank, and what is safe to sweep next.
+ * `earned_gross_cents` includes money already swept — never spend against it
+ * directly, read `sweepable_cents`.
+ *
+ * ADMIN ONLY, SESSION CLIENT. `.single()` because the SQL function returns
+ * exactly one row (`returns table(...)`, not a set).
+ *
+ * @throws FORBIDDEN ("admin privileges required").
+ */
+export async function getPlatformPosition(): Promise<PlatformPosition> {
+  const supabase = await createServerSupabase();
+  return unwrap(
+    await supabase.rpc('fn_platform_position').single(),
+    'fn_platform_position',
+  ) as PlatformPosition;
+}
+
+/**
+ * fn_record_sweep(p_amount_cents, p_bank_ref, p_note) -> uuid
+ *
+ * Records that platform earnings were actually moved to the bank — a
+ * bookkeeping entry, not the transfer itself; move the money first, exactly
+ * like purchaseCard() records a settlement that already happened.
+ *
+ * ADMIN ONLY, SESSION CLIENT, same as getPlatformPosition(). Re-read
+ * getPlatformPosition() beforehand and pass no more than `sweepable_cents` —
+ * passing more than `unswept_cents` raises SWEEP_EXCEEDS_UNSWEPT.
+ *
+ * @param bankRef the bank's own reference for the transfer, for reconciliation.
+ * @returns the new sweep record id.
+ * @throws FORBIDDEN ("admin privileges required"), SWEEP_EXCEEDS_UNSWEPT.
+ */
+export async function recordSweep(
+  amountCents: Cents,
+  bankRef: string,
+  note?: string | null,
+): Promise<UUID> {
+  const supabase = await createServerSupabase();
+  return unwrap(
+    await supabase.rpc('fn_record_sweep', {
+      p_amount_cents: amountCents,
+      p_bank_ref: bankRef,
+      p_note: note ?? null,
+    }),
+    'fn_record_sweep',
+  ) as UUID;
+}
+
+/** fn_check_solvency()'s row, shape live-verified against the project. */
+export interface SolvencyCheck {
+  ok: boolean;
+  expected_cents: Cents;
+  /** Null when `actualCents` was omitted from checkSolvency(). */
+  actual_cents: Cents | null;
+  /** Null under the same condition as actual_cents. */
+  variance_cents: Cents | null;
+  liability_cents: Cents;
+  unswept_cents: Cents;
+  detail: string;
+}
+
+/**
+ * fn_check_solvency(p_actual_cents) -> row
+ *
+ * Compares what the ledger expects the platform to be holding in cash
+ * against `actualCents` (a real bank balance a human supplies) and reports
+ * `ok` plus the variance. Omit `actualCents` to see only `expected_cents`
+ * and the liability breakdown, with `actual_cents`/`variance_cents` null —
+ * live-verified.
+ *
+ * ADMIN ONLY, SESSION CLIENT, same as getPlatformPosition().
+ *
+ * @throws FORBIDDEN ("admin privileges required").
+ */
+export async function checkSolvency(actualCents?: Cents | null): Promise<SolvencyCheck> {
+  const supabase = await createServerSupabase();
+  return unwrap(
+    await supabase
+      .rpc('fn_check_solvency', { p_actual_cents: actualCents ?? null })
+      .single(),
+    'fn_check_solvency',
+  ) as SolvencyCheck;
+}
+
+// ============================================================
 // READS
 // ============================================================
 
@@ -2515,6 +2795,7 @@ export async function getSubmissions(
     sku_id: row.sku_id,
     status: row.status,
     float_value: row.float_value,
+    condition_grade: row.condition_grade,
     // fn_submit_listing writes all six scores on every submission, so this
     // cannot be the both-or-neither null that toGradeComponents guards.
     grade: toGradeComponents(row)!,
@@ -2748,9 +3029,42 @@ export async function getSkus(query: SkusQuery = {}): Promise<Sku[]> {
   return rows ?? [];
 }
 
+/** One row of condition_bands, projected for display — never the float bounds. */
+export interface ConditionBand {
+  grade: ConditionGrade;
+  label: string;
+  sort_order: number;
+}
+
+/**
+ * condition_bands: grade -> display label, oldest-condition first. Read-only
+ * table, no admin gate (matches condition_bands_read granted to anon per the
+ * live schema — same shape of grant as `levels`/`tier_bands`).
+ *
+ * Deliberately projects only `grade, label, sort_order` — NOT `min_float` /
+ * `max_float`. Those are numeric float boundaries, and
+ * platform_config.show_numeric_float gates the numeric float everywhere else
+ * in the UI; exposing the band cutoffs here would leak the same information
+ * through the back door. If a future task needs the bounds for an admin-only
+ * screen, that is additive surface for that task to add, not this one.
+ */
+export async function listConditionBands(): Promise<ConditionBand[]> {
+  const supabase = await createServerSupabase();
+  const rows = unwrap(
+    await supabase
+      .from('condition_bands')
+      .select('grade, label, sort_order')
+      .order('sort_order', { ascending: true }),
+    'condition_bands',
+  ) as ConditionBand[] | null;
+
+  return rows ?? [];
+}
+
 // Re-exported so consumers import row types and the contract from one place.
 export type {
   Card,
+  ConditionGrade,
   Consignment,
   ConsignmentEvent,
   Item,

@@ -105,6 +105,29 @@ export type CustodyModel = 'warehouse' | 'seller';
  */
 export type GradeSource = 'flexsoar' | 'seller_declared';
 
+/**
+ * `public.condition_grade` — 018-020. Derived from `float_value` by trigger on
+ * both `items` and `cards`; never write it directly. `condition_bands` holds
+ * the label/sort_order/float-range mapping — read it with listConditionBands()
+ * rather than hard-coding the boundaries, since platform_config.show_numeric_float
+ * gates whether the numeric float itself may be shown alongside this.
+ * Order matches condition_bands.sort_order, live-verified 2026-08-21.
+ */
+export type ConditionGrade =
+  | 'factory_new'
+  | 'minimal_wear'
+  | 'field_tested'
+  | 'well_worn'
+  | 'battle_scarred';
+
+export const CONDITION_GRADES: readonly ConditionGrade[] = [
+  'factory_new',
+  'minimal_wear',
+  'field_tested',
+  'well_worn',
+  'battle_scarred',
+] as const;
+
 export type LedgerEntryType =
   | 'mint'
   | 'sale_gross'
@@ -116,9 +139,24 @@ export type LedgerEntryType =
   | 'redemption_burn'
   | 'consignment_fee'
   | 'subscription_fee'
-  | 'handling_fee';
+  | 'handling_fee'
+  /**
+   * 011_credit_ledger.sql, asset = 'credit'. Also missing before 018-020;
+   * live-verified against ledger_entries (2026-08-21). '_gross'/'_net'/'_fee'
+   * mirror the currency sale_* triad one-for-one, just on the FSC leg.
+   */
+  | 'credit_purchase'
+  | 'credit_sale_gross'
+  | 'credit_sale_net'
+  | 'credit_sale_fee';
 
-export type AssetClass = 'currency' | 'card';
+/**
+ * 011_credit_ledger.sql added 'credit' as a third asset class alongside
+ * 'currency' and 'card' — live-verified against ledger_entries (2026-08-21):
+ * credit_purchase / credit_sale_gross / credit_sale_net / credit_sale_fee rows
+ * all carry asset = 'credit'. This was missing here even before 018-020.
+ */
+export type AssetClass = 'currency' | 'card' | 'credit';
 
 export const CONSIGNMENT_STATUSES: readonly ConsignmentStatus[] = [
   'draft',
@@ -349,6 +387,14 @@ export interface Item {
   asking_price_cents?: Cents | null;
   submitted_payout?: PayoutMethod;
   last_proof_at?: Timestamptz | null;
+  /**
+   * 018-020, trigger-derived from float_value — null exactly when float_value
+   * is null (pre-grade). Optional to the type for the same reason as the 013
+   * fields above: lib/mock fixtures predate this migration. The DB always
+   * sends it (NOT NULL is not the constraint here — nullability tracks
+   * float_value's).
+   */
+  condition_grade?: ConditionGrade | null;
 }
 
 // ------------------------------------------------------------
@@ -378,6 +424,13 @@ export interface Card {
   float_percentile: number | null;
   status: CardStatus;
   minted_at: Timestamptz;
+  /**
+   * 018-020, trigger-derived from float_value. cards.float_value is NOT NULL,
+   * so unlike Item this is always populated on a real row — live-verified.
+   * Optional here only for lib/mock fixture back-compat (they predate the
+   * migration and do not set it); a genuine DB row never omits it.
+   */
+  condition_grade?: ConditionGrade;
 }
 
 export interface CardProvenance {
@@ -452,6 +505,24 @@ export interface Order {
   status: OrderStatus;
   txn_id: UUID | null;
   created_at: Timestamptz;
+  /**
+   * 018-020 split settlement. credit_cents + cash_cents = gross_cents;
+   * credit_cents > 0 requires no settlement_ref condition of its own, but any
+   * cash_cents > 0 does — fn_purchase_card enforces both. NOT NULL DEFAULT 0
+   * in the schema; optional here only because lib/mock/fixtures.ts predates
+   * the migration and does not set them.
+   */
+  credit_cents?: Cents;
+  cash_cents?: Cents;
+  /**
+   * fn_payout_method_for_user(seller_id) at settlement time, frozen onto the
+   * order — never 'either' (that is a listing election, not a payout route).
+   * Null on orders settled before 018-020 (live-verified: pre-migration rows
+   * read back null here).
+   */
+  seller_payout?: PayoutMethod | null;
+  /** platform_config.payout_hold_days after settlement. Null pre-migration. */
+  payout_release_at?: Timestamptz | null;
 }
 
 // ------------------------------------------------------------

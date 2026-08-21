@@ -118,6 +118,88 @@ refusal faithfully and cannot work around it. The fix is a migration: give
 proof its own path that skips `fn_require_admin()` (and, per 013's own notes,
 allows photo updates on a minted seller-held item).
 
+### 10. 018-020 contract surface — live-verified where possible, two items need follow-up
+
+Migrations 018, 019a/b/c and 020 are applied to the project, but no
+`015_*.sql` .. `020_*.sql` file exists in this worktree (`supabase/migrations/`
+still ends at `014_fixes.sql`) — everything below came from probing the live
+project with the anon/service-role/seed-admin credentials in `.env.local`,
+not from reading SQL. `replaceSkuArt` (015) was merged the same way in an
+earlier session.
+
+**Added to the contract:** `purchaseCardSplit` (the 4-arg `fn_purchase_card`,
+service-role), `getPayoutMethodForUser` (session, not admin-gated — verified
+callable from anon/session/service-role alike), `listConditionBands` (session,
+projects `grade, label, sort_order` only — deliberately not `min_float`/
+`max_float`, see the function's doc comment), `getPlatformPosition` /
+`recordSweep` / `checkSolvency` (session, admin-gated — verified
+`fn_platform_position` refuses service-role with "admin privileges required").
+`condition_grade` added to `CardSummary`/`ItemSummary`/`SubmissionSummary` and
+copied through `toCardSummary`/`toItemSummary`/`getSubmissions()`'s mapper —
+checked this one specifically against the art_url mapper bug this task
+warned about. `credit_cents`/`cash_cents`/`seller_payout`/`payout_release_at`
+added to `OrderSummary`. `show_numeric_float` added to `PlatformConfig`
+(live-verified `false`). Also fixed in `lib/db/types.ts` while in there:
+`AssetClass` and `LedgerEntryType` were missing `'credit'` and the four
+`credit_*` entry types 011 actually writes (live-verified against
+`ledger_entries` — asset values are `card`/`currency`/`credit` and entry
+types include `credit_purchase`/`credit_sale_gross`/`credit_sale_net`/
+`credit_sale_fee`); this predates 018-020 but blocked writing a correct
+ledger net-to-zero invariant, so it's fixed now.
+
+**NOT added:** any FSC top-up export. `fn_purchase_credit`'s EXECUTE grant is
+revoked from `authenticated` and `anon` — live-verified (42501 "permission
+denied for function fn_purchase_credit" from both a real seed-admin session
+and anon). It is **still granted to `service_role`**: a negative-amount probe
+from service-role reached the business-logic raise ("credit purchase must be
+positive, got -1"), not a permission error, so the grant itself has not been
+pulled there. `purchaseCredit()` in `lib/api/contract.ts` is now commented
+DEAD per this task's instruction, and its one caller —
+`app/api/webhooks/stripe/route.ts`'s `credit_topup` branch (metadata
+`purpose: 'credit_topup'`) — still calls it and, per the grant above, would
+still technically succeed. That file is outside this track's lane
+(`lib/api/contract.ts` only), so it was not touched. Whoever owns webhooks
+should route that branch to something else, or a migration should pull the
+`service_role` grant too if the intent is "this can never fire again."
+
+**listings.payout_method for routing — none found.** Grepped the whole repo:
+`lib/api/contract.ts` never selects `listings.payout_method` at all (checked
+`LISTING_COLUMNS`) and never has. The only other hits —
+`components/market/intake/IntakeWizard.tsx`, `components/admin/db-reads.ts`,
+`app/(market)/list/actions.ts` — are all about `items.submitted_payout` (the
+seller's own election at intake, feeding `fn_submit_listing`'s `p_payout`),
+not `listings.payout_method`. Nothing to fix; noted here because the task
+asked this be reported either way.
+
+**Two ContractErrorCode message-pattern regexes are best-effort, not
+verified.** `SETTLEMENT_REF_REQUIRED`, the credit_cents-vs-price arm of
+`INVALID_AMOUNT`, and `SWEEP_EXCEEDS_UNSWEPT` in `lib/db/errors.ts` are
+guesses at the raise wording, not copies of it — the migration SQL isn't in
+this worktree, and live-probing an actual `fn_purchase_card` / `fn_record_sweep`
+call (even with a garbage listing id / an amount far above `unswept_cents`)
+was correctly refused by this session's sandbox as a real financial write
+RPC. If they don't match, nothing breaks silently: `fail()` always surfaces
+the server's verbatim message, the code just falls back to `UNKNOWN` instead
+of the specific one. Whoever has SQL access next should grep the actual
+`raise exception` text in the 018-020 migration(s) and tighten these three
+patterns (they currently sit right after the `INSUFFICIENT_CREDIT` rule and
+right before the `ledger_entries is append-only` rule in `MESSAGE_RULES`).
+
+**Other live-verified facts, for whoever touches this surface next:**
+`cash_payout_countries` holds exactly one row (`MY`, home corridor).
+`condition_bands` has 5 rows, `sort_order` 1-5:
+factory_new/minimal_wear/field_tested/well_worn/battle_scarred, boundaries
+`[0, .08, .2, .45, .7, 1.001)`. New `platform_config` keys beyond
+`show_numeric_float`: `sweep_reserve_bps` (1500), `sweep_reserve_min_cents`
+(50000), `payout_hold_days` (7), `seller_shipment_days` (7),
+`proof_of_possession_days` (90), `proof_required_on_first_sale` (true),
+`proof_response_days` (7), `cash_payout_min_fulfilments` (2) — the last few
+predate 018-020 but weren't previously catalogued here.
+`fn_platform_position()`/`fn_check_solvency()` both return a single-row
+`table(...)` — call `.single()` on the `.rpc()`, same as any other
+one-row-table RPC, or PostgREST hands back a one-element array instead of
+the object the types promise.
+
 ---
 
 ## Resolved / notes for other tracks
