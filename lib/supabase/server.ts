@@ -71,11 +71,18 @@ export async function createServerSupabase(): Promise<ServerSupabaseClient> {
             for (const { name, value, options } of cookiesToSet) {
               cookieStore.set(name, value, options);
             }
-          } catch {
+          } catch (thrown) {
             // Server Components cannot set cookies. Swallowing here is safe
             // *only* because proxy.ts refreshes the session on every visited
             // matched request and writes the rotated cookies there. If that
             // matcher stops covering a route, sessions on it stop refreshing.
+            const message = thrown instanceof Error ? thrown.message : String(thrown);
+            console.warn(
+              '[supabase/server] setAll swallowed an error for cookies',
+              cookiesToSet.map((c) => c.name),
+              '-',
+              message,
+            );
           }
         },
       },

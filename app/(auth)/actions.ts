@@ -17,7 +17,7 @@
  * same row itself, because there is no callback hop for a password session.
  */
 
-import { headers } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 import { safeNextPath } from '@/app/(auth)/paths';
@@ -57,6 +57,11 @@ function backTo(mode: AuthMode, params: Record<string, string>): string {
  * string — that keeps both pages Server Components with no client JS.
  */
 export async function requestMagicLink(formData: FormData): Promise<void> {
+  console.log(
+    '[requestMagicLink] readable cookies:',
+    (await cookies()).getAll().map((c) => c.name),
+  );
+
   const mode: AuthMode = formData.get('mode') === 'sign-up' ? 'sign-up' : 'sign-in';
   const email = String(formData.get('email') ?? '').trim();
   const handle = String(formData.get('handle') ?? '').trim();
