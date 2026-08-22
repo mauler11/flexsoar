@@ -12,6 +12,68 @@ with the credit-ledger and art_url work below.
 
 ## Open
 
+### 12. 022b `purchaseCardWithCredit` deletion, and two dead error mappings found while checking it
+
+`fn_purchase_card_with_credit(uuid, uuid)` is dropped by `022b_permissions_lockdown.sql`
+(verified by reading the file: `drop function if exists
+fn_purchase_card_with_credit(uuid, uuid);`, and its own assertion block
+confirms the drop). Deleted `purchaseCardWithCredit()` from
+`lib/api/contract.ts` — same treatment as `purchaseCredit()`'s deletion
+(item 11): no stub, no shim, doc comment removed with it. No caller existed
+anywhere in `app/**` (grepped). Added a `022b:` bullet to the SANCTIONED
+EXTENSIONS doc block recording the deletion, mirroring the `021:` bullet's
+`purchaseCredit()` entry.
+
+**Checked `lib/db/errors.ts` per this task's instruction — whether
+`fn_purchase_card_core` raises the same message before deleting a mapping —
+and found three different answers for the three codes this function touched:**
+
+- `CREDIT_SETTLEMENT_DISABLED`: **kept**, pattern fixed. `fn_purchase_card_core`
+  (019c/021) does raise for this same condition, but the wording changed:
+  `'FSC settlement is disabled'`, not the old `'credit settlement is
+  disabled'` that `fn_purchase_card_with_credit` (011/014, now dropped)
+  raised. The old regex only matched the dropped function's exact text, so
+  it had gone quietly dead — verified by reading `019c_settlement.sql:143`
+  and `021_credit_holds.sql:278` directly. Repointed the pattern at the
+  live wording.
+- `INSUFFICIENT_CREDIT`: **kept as-is**, comment only. Its regex already
+  covers `fn_purchase_card_core`'s and `fn_reserve_credit`'s live wordings;
+  only the `insufficient credit` alternative (011/014's exact text) was
+  dead weight, now dropped from the pattern along with the stale "kept in
+  case an unreplaced install still runs the old body" comment — the body
+  is not just replaced, it no longer exists.
+- `PAYOUT_MISMATCH`: **message rule deleted, `ContractErrorCode` member
+  kept.** Neither of the two raises this rule ever matched is reachable any
+  more: 011/014's `fn_purchase_card_with_credit` text (022b) and 012's
+  payout-guarded `fn_purchase_card` text (022, already dropped before this
+  session) are both gone, and the live `fn_purchase_card_core` (021)
+  never refuses on payout method at all — AGENT_RULES.md section 5's
+  "independent axes" model replaced it. Removed the dead `MESSAGE_RULES`
+  entry (with a comment explaining why, in place). **Did not** remove
+  `'PAYOUT_MISMATCH'` from `ContractErrorCode` itself:
+  `app/api/webhooks/stripe/route.ts`'s `isPermanentError()` still compares
+  `thrown.code === 'PAYOUT_MISMATCH'` (webhooks are this track's lane, but
+  this task named `contract.ts`/`errors.ts` only, and removing the member
+  would need editing that comparison too — flagging rather than doing it
+  unasked). That branch is now unreachable dead code in `route.ts`, harmless
+  as a never-true arm of an `||`, but worth cleaning up next time someone is
+  in that file.
+
+Also renamed `tests/invariants.test.ts`'s `'holds for a real credit-topup
+txn_id (asset=credit)'` to `'holds for a real credit txn_id with a single
+offsetting pair (asset=credit)'` — assertion unchanged, only the name, which
+previously read as evidence that a credit top-up path exists (it does not,
+per AGENT_RULES.md section 5).
+
+`npx tsc --noEmit` clean, `npm run build` compiles (all 19 routes render),
+`npm test`: **107 passing** (unchanged — this task only touched comments,
+one dead mapping, and one test name, no assertion logic).
+
+**Not verified live:** nothing here needed a live probe — every claim above
+came from reading the applied `.sql` files directly (`019c_settlement.sql`,
+`021_credit_holds.sql`, `022_drop_legacy_settlement.sql`,
+`022b_permissions_lockdown.sql`), all present in this worktree.
+
 ### 0. BLOCKER: the credit ledger cannot record anything until a migration widens `ledger_entries_check`
 
 Found by live probing (this session, on the project): **every** credit insert

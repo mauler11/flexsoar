@@ -33,6 +33,12 @@
  *     revokes fn_purchase_credit's execute grant from every role including
  *     service_role. FSC is earned by selling, never bought. See
  *     docs/handoff/data.md for the one caller this left behind.
+ *   022b: purchaseCardWithCredit() DELETED — 022b drops
+ *     fn_purchase_card_with_credit(uuid, uuid), the last pre-019c
+ *     credit-only settlement path, from the database. The unified
+ *     fn_purchase_card(p_listing_id, p_buyer_id, p_settlement_ref,
+ *     p_credit_cents, p_hold_id) (purchaseCard/purchaseCardSplit) is the
+ *     only settlement entry point now. No caller existed anywhere in app/**.
  * along with their query/input types and new ContractErrorCode members.
  * Additive only: nothing that existed before behaves differently.
  *
@@ -133,9 +139,11 @@ export type ContractErrorCode =
    */
   | 'INVALID_AMOUNT'
   /**
-   * 011 fn_purchase_card_with_credit, and 021 fn_purchase_card_core /
-   * fn_reserve_credit's credit leg — platform_config.credit_payout_enabled
-   * is false, so the seller-takes-credit leg is switched off.
+   * fn_purchase_card_core (019c/021) — 'FSC settlement is disabled' when
+   * platform_config.credit_payout_enabled is false, so the seller-takes-
+   * credit leg is switched off. 011/014's fn_purchase_card_with_credit
+   * raised the same condition worded 'credit settlement is disabled'; that
+   * function was dropped in 022b, so only the current wording applies now.
    */
   | 'CREDIT_SETTLEMENT_DISABLED'
   /**
@@ -147,8 +155,15 @@ export type ContractErrorCode =
    */
   | 'INSUFFICIENT_CREDIT'
   /**
-   * 011/012 — the payment method does not match the listing's payout_method:
-   * buying a cash listing with credit, or a credit-only listing with cash.
+   * DEAD as of 022/022b: both raising functions are dropped — 011/014's
+   * fn_purchase_card_with_credit ('listing % settles in cash and cannot be
+   * bought with credit') and 012's payout-guarded fn_purchase_card ('listing
+   * % settles in credit and cannot be bought with cash'). fn_purchase_card_core
+   * (021, the only settlement function left) never refuses on payout method
+   * at all — buyer settlement and seller payout are independent axes (see
+   * AGENT_RULES.md section 5). This member is kept only because
+   * app/api/webhooks/stripe/route.ts's isPermanentError() still checks
+   * thrown.code === 'PAYOUT_MISMATCH'; that branch can no longer fire.
    */
   | 'PAYOUT_MISMATCH'
   /**
@@ -1661,47 +1676,6 @@ export async function getPayoutMethodForUser(userId: UUID): Promise<DerivedPayou
     await supabase.rpc('fn_payout_method_for_user', { p_user: userId }),
     'fn_payout_method_for_user',
   ) as DerivedPayoutMethod;
-}
-
-/**
- * fn_purchase_card_with_credit(p_listing_id, p_buyer_id) -> uuid
- *
- * Buys a card paying with FSC credit. The buyer must be the signed-in user —
- * the SQL function does not compare p_buyer_id to auth.uid() (it is security
- * definer, so RLS would not stop a caller anyway), and the contract closes
- * that gap. The schema-level check is filed in docs/handoff/data.md as part of
- * the payout migration.
- *
- * Only 'credit'/'either' listings can be bought this way — a 'cash' listing
- * refuses with PAYOUT_MISMATCH, which keeps the loop closed: credit never has
- * to become money for anyone.
- *
- * @returns the new order id.
- * @throws UNAUTHENTICATED, FORBIDDEN (buyerId is not the session user),
- *         PAYOUT_MISMATCH, INSUFFICIENT_CREDIT, CREDIT_SETTLEMENT_DISABLED,
- *         SELF_PURCHASE, EARLY_ACCESS_LOCKED, WRONG_STATUS, NOT_FOUND.
- */
-export async function purchaseCardWithCredit(
-  listingId: UUID,
-  buyerId: UUID,
-): Promise<UUID> {
-  const sessionUserId = await requireCurrentUserId();
-  if (buyerId !== sessionUserId) {
-    throw new ContractError(
-      'FORBIDDEN',
-      'credit purchases can only be made for the signed-in user',
-      { buyerId, sessionUserId },
-    );
-  }
-
-  const supabase = await createServerSupabase();
-  return unwrap(
-    await supabase.rpc('fn_purchase_card_with_credit', {
-      p_listing_id: listingId,
-      p_buyer_id: buyerId,
-    }),
-    'fn_purchase_card_with_credit',
-  ) as UUID;
 }
 
 /**

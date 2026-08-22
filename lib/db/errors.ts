@@ -69,19 +69,21 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   // listing price silently rather than raising, so this text only ever comes
   // from a reservation, never a purchase.
   { pattern: /reserve of .+ exceeds listing price/i, code: 'INVALID_AMOUNT' },
-  // fn_purchase_card_with_credit / fn_purchase_card_core — 'credit
-  // settlement is disabled' (platform_config.credit_payout_enabled false)
-  { pattern: /credit settlement is disabled/i, code: 'CREDIT_SETTLEMENT_DISABLED' },
-  // Not enough spendable FSC, from any of three call sites with three
-  // different wordings, verified against the applied migration files:
-  // fn_reserve_credit's 'insufficient available FSC: % available, %
-  // requested' (021_credit_holds.sql:165), fn_purchase_card_core's
-  // 'insufficient FSC: balance %, requested %' (019c_settlement.sql:147,
-  // 021_credit_holds.sql:313), and the retired fn_purchase_card_with_credit
-  // body's 'insufficient credit: balance %, price %' (011/014 — superseded
-  // by 019c's create-or-replace, kept here in case an unreplaced install
-  // still runs the old body).
-  { pattern: /insufficient (?:credit|(?:available )?FSC)/i, code: 'INSUFFICIENT_CREDIT' },
+  // fn_purchase_card_core (019c_settlement.sql:143, 021_credit_holds.sql:278)
+  // — 'FSC settlement is disabled' (platform_config.credit_payout_enabled
+  // false). 011/014's fn_purchase_card_with_credit raised the same condition
+  // worded 'credit settlement is disabled'; that function was dropped in
+  // 022b, so only the current wording can occur.
+  { pattern: /FSC settlement is disabled/i, code: 'CREDIT_SETTLEMENT_DISABLED' },
+  // Not enough spendable FSC, from either of two live call sites, verified
+  // against the applied migration files: fn_reserve_credit's 'insufficient
+  // available FSC: % available, % requested' (021_credit_holds.sql:165), and
+  // fn_purchase_card_core's 'insufficient FSC: balance %, requested %'
+  // (019c_settlement.sql:147, 021_credit_holds.sql:313). 011/014's
+  // fn_purchase_card_with_credit raised 'insufficient credit: balance %,
+  // price %' — that function was dropped in 022b, so the old wording no
+  // longer needs matching.
+  { pattern: /insufficient (?:available )?FSC/i, code: 'INSUFFICIENT_CREDIT' },
 
   // 018-020/021 fn_purchase_card_core — 'a cash leg of % cents requires a
   // settlement_ref'. Verified against 019c_settlement.sql:157 and
@@ -116,12 +118,16 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   // else — 'credit hold % not found' and 'hold % not found' both contain it.
   { pattern: /^credit hold \S+ is \S+$/i, code: 'WRONG_STATUS' },
 
-  // 011 fn_purchase_card_with_credit — 'listing % settles in cash and cannot
-  // be bought with credit'; 012 fn_purchase_card — 'listing % settles in
-  // credit and cannot be bought with cash'. Must precede the generic
-  // `^listing\s+\S+\s+is\s+\S+$` status rule below (it does not match it — the
-  // word is 'settles' — but the two belong next to each other).
-  { pattern: /settles in (?:cash|credit) and cannot be bought/i, code: 'PAYOUT_MISMATCH' },
+  // PAYOUT_MISMATCH's message rule used to live here: 011 fn_purchase_card_
+  // with_credit raised 'listing % settles in cash and cannot be bought with
+  // credit'; 012 fn_purchase_card raised 'listing % settles in credit and
+  // cannot be bought with cash'. Both functions are now dropped (022b and 022
+  // respectively), and fn_purchase_card_core (021, the only settlement path
+  // left) never refuses on payout method at all — buyer settlement and
+  // seller payout are independent axes (AGENT_RULES.md section 5) — so no
+  // live raise can produce either message. Rule removed rather than kept
+  // dead. The 'PAYOUT_MISMATCH' ContractErrorCode member itself stays: see
+  // its doc comment in contract.ts for why.
 
   // 013_seller_custody.sql — fn_submit_listing. Fires when the session has no
   // users row at all (unprovisioned sign-in) — same recovery as UNAUTHENTICATED.

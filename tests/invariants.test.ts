@@ -755,7 +755,7 @@ describe('fn_payout_method_for_user', () => {
 
 describe('ledger_entries nets to zero per txn_id, per asset class', () => {
   // Reproduced from real rows read back from the project (2026-08-21).
-  it('holds for a real credit-topup txn_id (asset=credit)', () => {
+  it('holds for a real credit txn_id with a single offsetting pair (asset=credit)', () => {
     expect(
       ledgerNetsToZero([
         { txn_id: 't1', asset: 'credit', amount_cents: 2500, direction: 1 },
