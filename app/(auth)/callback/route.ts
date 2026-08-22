@@ -19,6 +19,7 @@
  * next/headers, and Next attaches them to this handler's response.
  */
 
+import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { safeNextPath } from '@/app/(auth)/paths';
@@ -42,6 +43,11 @@ function asOtpType(value: string | null): OtpType | null {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  console.log(
+    '[callback GET] readable cookies:',
+    (await cookies()).getAll().map((c) => c.name),
+  );
+
   const url = new URL(request.url);
   const next = safeNextPath(url.searchParams.get('next'));
 
