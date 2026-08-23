@@ -1,5 +1,189 @@
 # Handoff — track/market
 
+## 2026-08-23 — FSC-aware checkout, two disclosures, pending_vault on the card page
+
+Task: wire the UI to the split-settlement data layer track/data finished in
+`docs/handoff/data.md` item 13 — checkout was cash-only because nothing in
+`app/**` called `reserveCredit()` or carried `credit_cents`/`hold_id` into
+Stripe metadata. All of that is now wired.
+
+### 1. Checkout
+
+`createCheckoutAction` (`app/(market)/actions.ts`) now takes a second
+argument, `creditCentsRequested`. Order of operations, exactly as asked:
+`getCreditAvailable()` → `validateRequestedCredit()` (refuses, never clamps,
+a request above available) → `reserveCredit()` **before** anything
+Stripe-side → either settle directly (FSC-only) or create the Checkout
+Session with the cash leg only. Any failure after a successful reserve
+(session creation, or the direct-settle RPC) calls `releaseCreditHold()` so
+the hold is never stranded. Metadata keys (`credit_cents`, `hold_id`) match
+what `app/api/webhooks/stripe/route.ts` reads — read the file, not guessed.
+
+**FSC-only settlement — how it's handled, since the task asked specifically:**
+when `creditCentsRequested` covers the full price, `createCheckoutAction`
+calls `purchaseCardSplit(listingId, buyerId, null, creditCents, holdId)`
+**directly**, with no Stripe Session at all. `purchaseCardSplit`'s doc
+comment says "never from client code" — read narrowly, that's about the
+browser bundle (the service-role key can't reach a client component; the
+module is server-only by construction) and about not settling on behalf of a
+session-less caller. This call is neither: `app/(market)/actions.ts` is a
+`'use server'` Server Action running with the buyer's own session, and the
+settlement carries the `holdId` that same session just reserved through
+`reserveCredit()` — the exact provenance `fn_purchase_card_core` checks for
+(a hold whose `user_id` matches the buyer and whose listing matches). There
+is no other way to satisfy "must not create a Stripe session at all" — no
+`checkout.session.completed` event will ever fire for a $0 cash leg, so
+nothing else could ever call `purchaseCardSplit` for this case. Flagging the
+judgment call rather than burying it: if track/data reads this differently,
+say so and I'll rework it.
+
+**Stripe Session `expires_at`.** `platform_config.credit_hold_minutes` is
+**not** on `getPlatformConfig()` (checked the interface and the row-mapping
+in `lib/api/contract.ts` — it returns `redemption_handling_fee_cents` /
+`credit_payout_enabled` / `credit_payout_premium_bps` /
+`credit_purchase_min_cents` / `show_numeric_float` only). Live-verified value
+(read-only, anon key): **1440**, matching the task brief. Pinned as
+`CREDIT_HOLD_MINUTES_FALLBACK` in the new `app/(market)/checkout-math.ts`,
+same pattern as `REDEMPTION_HANDLING_FEE_CENTS`'s existing fallback in
+`contract.ts` itself. **Ask for track/data:** add `credit_hold_minutes` to
+`PlatformConfig`/`getPlatformConfig()` so this can read the live value
+instead of a pinned one.
+
+`checkoutExpiresAtSeconds()` clamps to Stripe's own [30min, 24h) bounds with
+a 60s safety margin below the 24h ceiling — `credit_hold_minutes` is exactly
+1440 (24h) today, and computing `now + 1440*60` then sending it to Stripe a
+moment later can land a few hundred milliseconds past what Stripe's own
+clock considers 24h out and get refused outright.
+
+### 2. Disclosures
+
+**Seller payout method** (`fn_payout_method_for_user`, geography-derived,
+never a client choice): shown before a seller commits, in both places a
+listing can be created — `ListForm.tsx` (relisting an owned card) and
+`PricePayout.tsx` (the self-serve intake wizard's price/payout step, wired
+through `IntakeWizard` from `app/(market)/list/page.tsx`). Not admin-gated,
+confirmed by reading `019b_payout_routing.sql:95` (`grant ... to
+authenticated`) — fine for this since a seller must be signed in to list at
+all.
+
+**First-sale freeze warning** (buying a `custody='seller'` listing freezes
+the card `pending_vault` until vault-in, 023c): shown in `BuyPanel` before
+checkout, gated on `itemCustody?.custody === "seller"`.
+
+**Investigated and ruled out as a blocker, worth recording:** my first read
+of `items_public_read` (`001_schema.sql:419` — `using (status in
+('minted','redemption_hold','shipped'))`) suggested a buyer couldn't read
+`items.custody` for a live first-sale listing at all, since
+`fn_approve_submission` sets the item to `'in_custody'` before minting — not
+in that allow-list. Live-probed (read-only, anon key) rather than assumed:
+`fn_mint_card` (`002_operations.sql:102`) sets `items.status = 'minted'`
+**in the same transaction**, so by the time a card is actually live for sale
+its item is always `'minted'`, which items_public_read does cover.
+Confirmed live: anon key reads `custody` on a real `minted`+`seller` item
+fine. So `getItem(item.id)` from a buyer session works as designed — no data
+gap here, despite how it first looked from the RLS text alone.
+
+**Not live-verified: the first-sale banner itself.** Checked the live
+project (read-only) for a public listing backed by a `custody='seller'`
+item to click through — none exists in the current seed data (all three live
+public listings trace to `custody='warehouse'` items). The mechanism it
+depends on (`getItem()` returning `custody` to a buyer session) is verified
+live per above; the banner's own conditional render was checked by reading
+the code and by `next build`/`tsc`, not by loading an actual first-sale
+listing in a browser.
+
+### 3. Card page — `pending_vault`
+
+`CardStatus` in `lib/db/types.ts` (track/data's lane) is still `'active' |
+'locked' | 'burned' | 'redeemed'` — `023a_card_status_pending_vault.sql`
+added `'pending_vault'` to the live enum but the TS mirror never caught up
+(grepped the whole repo: zero hits for `pending_vault` outside `.sql`
+files before this pass). Comparing `detail.status === "pending_vault"`
+directly doesn't just look wrong, it's a real `tsc` error (TS2367, "no
+overlap") — and it turns out **widening the variable's declared type isn't
+enough to silence it**: TypeScript's literal-comparability check narrows a
+`const` back to its initializer's type for that specific diagnostic, even
+past an explicit wider annotation (reproduced in isolation before trusting
+it). What works, with no cast/`any`/`@ts-ignore`: route the comparison
+through a function whose *parameter* is typed `CardStatus | "pending_vault"`
+— `isPendingVault()` at the top of `card/[id]/page.tsx`. **Ask for
+track/data:** add `'pending_vault'` to `CardStatus` in `lib/db/types.ts` so
+this workaround can go away.
+
+Rendered via a new `PendingVaultPanel` (owner-only branch, replacing the
+generic "Card is {status}" fallback for this one status) — explains the
+freeze, shows the 48h ship-by countdown and shipment status, and says
+plainly it isn't an error. Its data comes from a new
+`getVaultIntakeForCard()` read in `app/(market)/queries.ts`: `vault_intakes`
+(023c) has no contract export (grepped `contract.ts` for "vault": zero
+hits), so this follows the same "workaround read, flagged, server-only,
+never `users`" pattern the file's other three reads already use.
+`vault_intakes`' own RLS (`consignor_id/buyer_id = self OR admin`) does the
+access control; this just projects the columns the panel needs.
+
+### Bonus fix found while in `actions.ts`: `redirect()` inside `try` blocks
+
+`redirect()` throws Next's own internal control-flow error, and the docs are
+explicit it must not be caught without rethrowing
+(`node_modules/next/dist/docs/.../unstable_rethrow.md`) — a `catch` that
+doesn't check for it turns a *successful* redirect into a mishandled error.
+`cancelListingAction`'s existing `redirect(cardPath(...))` on its success
+path was already inside its `try`, ahead of a `catch` that didn't rethrow —
+found while adding the same shape to `createCheckoutAction`'s two new
+redirect-on-success paths (the FSC-only settle, and the Stripe Session
+success). Fixed all three with `unstable_rethrow(thrown)` as the first line
+of each affected `catch` (imported from `next/navigation`). Not verified
+live against a real cancel/checkout (would need a live mutation), but the
+docs' own example is exactly this shape, and it's a one-line, low-risk fix
+in a file already open for this task.
+
+### Tests
+
+`tests/invariants.test.ts`: **136 passing (was 119, +17)**. All new tests
+import `app/(market)/checkout-math.ts` directly (no mirroring) — it's a
+plain module with no `next/headers`/Stripe/Supabase in its graph, so there's
+none of the import-cost trade-off the webhook tests above accepted.
+Coverage: `validateRequestedCredit` (blank = no leg, refuses-not-clamps
+over-available, refuses over-price, refuses non-integer/negative, accepts
+inclusive bounds), `cashLegCents`/`isFscOnlyPurchase`, and
+`checkoutExpiresAtSeconds` (matches the live 1440 fallback, stays inside
+Stripe's [30min, 24h) bounds at both extremes).
+
+`npx tsc --noEmit` clean, `npm run build` compiles (all 19 routes,
+`Compiled successfully`), `npx eslint` clean on every changed file (3
+pre-existing warnings elsewhere, untouched by this pass).
+
+**Smoke-tested in a browser** (`npm run dev`, read-only — no purchase
+clicked, since that would reserve real FSC or create a real Checkout
+Session against the live project): `/`, `/list`, and `/card/<id>` for a real
+public listing all return 200 with no error boundary and no server-log
+errors; the FSC input, disclosures, and updated button copy render as
+expected for the states the current seed data has (see the "not
+live-verified" note above for the one state it doesn't have).
+
+### Files changed
+
+- `app/(market)/checkout-math.ts` (new) — pure checkout decision logic,
+  directly unit-tested.
+- `app/(market)/actions.ts` — `createCheckoutAction` extended for the FSC
+  leg; `unstable_rethrow` fix in it and in `cancelListingAction`.
+- `app/(market)/queries.ts` — added `getVaultIntakeForCard()`.
+- `app/(market)/card/[id]/page.tsx` — `pending_vault` rendering, first-sale
+  and seller-payout disclosure wiring, `isPendingVault()` helper.
+- `app/(market)/list/page.tsx` — threads `sellerPayoutMethod` into the wizard.
+- `components/market/BuyPanel.tsx` — FSC amount field, disclosures, FSC-only
+  button/copy states.
+- `components/market/ListForm.tsx`,
+  `components/market/intake/PricePayout.tsx`,
+  `components/market/intake/IntakeWizard.tsx` — seller-payout disclosure.
+- `tests/invariants.test.ts` — appended, did not touch existing blocks.
+
+No `.sql` file touched. No edit to `app/api/webhooks/**` or
+`lib/api/contract.ts`. No change to `components/card/**`,
+`components/ui/**`, or `app/globals.css` — FSC formatting reuses
+`formatFsc()`/`formatUsd()` from `components/card/format.ts` as-is.
+
+
 Items filed by the market track. Numbered within this file. Created on
 `track/market` at `861dfd8` (before `main`'s handoff split was visible here).
 

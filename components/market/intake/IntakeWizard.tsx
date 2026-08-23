@@ -40,6 +40,13 @@ export interface IntakeWizardProps {
   skus: readonly Sku[];
   payoutEligibility: PayoutEligibility | null;
   signedIn: boolean;
+  /**
+   * How THIS seller is actually paid — fn_payout_method_for_user, derived
+   * from their country. Distinct from `payout` (the buyer settlement method
+   * this listing accepts, chosen in PricePayout below): this is the seller's
+   * own payout route and is never a choice. Null when signed out.
+   */
+  sellerPayoutMethod?: "cash" | "credit" | null;
 }
 
 const STEPS = ["SKU", "Photos", "Condition", "Price", "Review"] as const;
@@ -49,6 +56,7 @@ export function IntakeWizard({
   skus,
   payoutEligibility,
   signedIn,
+  sellerPayoutMethod,
 }: IntakeWizardProps) {
   const [step, setStep] = useState<StepIndex>(0);
   const [selectedSku, setSelectedSku] = useState<Sku | null>(null);
@@ -186,6 +194,7 @@ export function IntakeWizard({
           payout={payout}
           onPayoutChange={setPayout}
           eligibility={payoutEligibility}
+          sellerPayoutMethod={sellerPayoutMethod}
         />
       )}
 

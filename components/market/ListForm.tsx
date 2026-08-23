@@ -18,6 +18,13 @@ import { formatFsc, formatMyr } from "@/components/card/format";
 export interface ListFormProps {
   cardId: string;
   oracleValueCents: number | null;
+  /**
+   * fn_payout_method_for_user's answer for this seller — 'cash' or 'credit',
+   * derived from their country, never a choice. Null when it couldn't be
+   * read (signed out, or the read failed) — the disclosure is simply
+   * omitted in that case rather than guessed at.
+   */
+  sellerPayoutMethod?: "cash" | "credit" | null;
 }
 
 function toCents(text: string): number | null {
@@ -27,7 +34,11 @@ function toCents(text: string): number | null {
   return cents > 0 ? cents : null;
 }
 
-export function ListForm({ cardId, oracleValueCents }: ListFormProps) {
+export function ListForm({
+  cardId,
+  oracleValueCents,
+  sellerPayoutMethod,
+}: ListFormProps) {
   const [price, setPrice] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -51,6 +62,19 @@ export function ListForm({ cardId, oracleValueCents }: ListFormProps) {
 
   return (
     <div className="flex flex-col gap-2 border border-line bg-overlay p-3">
+      {sellerPayoutMethod === "credit" && (
+        <Banner tone="info" title="You'll be paid in FSC">
+          Your account routes to FSC payout, not cash — determined by your
+          country, not a choice made here. Find that out now, not after this
+          sells.
+        </Banner>
+      )}
+      {sellerPayoutMethod === "cash" && (
+        <Banner tone="info" title="You'll be paid in cash">
+          Your account routes to a cash bank payout.
+        </Banner>
+      )}
+
       {oracleValueCents != null && (
         <div className="flex items-baseline justify-between font-mono text-[10px] uppercase tracking-tight text-muted">
           <span>Oracle fair value</span>

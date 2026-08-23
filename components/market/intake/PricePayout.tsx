@@ -19,6 +19,7 @@ import { floatMultiplier } from "@/components/card/value";
 import { formatFsc, formatUsd } from "@/components/card/format";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
+import { Banner } from "@/components/market/Banner";
 import type { PayoutMethod } from "@/components/market/intake/intake-config";
 import type { PayoutEligibility } from "@/app/(market)/list/actions";
 
@@ -30,6 +31,13 @@ export interface PricePayoutProps {
   payout: PayoutMethod | null;
   onPayoutChange: (method: PayoutMethod) => void;
   eligibility: PayoutEligibility | null;
+  /**
+   * How the SELLER (not the listing's buyer-settlement election below) is
+   * actually paid — fn_payout_method_for_user, derived from their country.
+   * Distinct from `payout`/`onPayoutChange`, which is the buyer's own
+   * payment method for this listing.
+   */
+  sellerPayoutMethod?: "cash" | "credit" | null;
 }
 
 export function PricePayout({
@@ -40,6 +48,7 @@ export function PricePayout({
   payout,
   onPayoutChange,
   eligibility,
+  sellerPayoutMethod,
 }: PricePayoutProps) {
   const oracle = sku.market_price_cents;
   const estimate =
@@ -52,6 +61,19 @@ export function PricePayout({
 
   return (
     <div className="flex flex-col gap-4">
+      {sellerPayoutMethod === "credit" && (
+        <Banner tone="info" title="You'll be paid in FSC, not cash">
+          Your account routes to FSC payout — determined by your country, not
+          a choice made here. Know that now, before you list, not after this
+          sells.
+        </Banner>
+      )}
+      {sellerPayoutMethod === "cash" && (
+        <Banner tone="info" title="You'll be paid in cash">
+          Your account routes to a cash bank payout.
+        </Banner>
+      )}
+
       <div className="flex flex-col gap-1 border border-line-strong bg-overlay p-3">
         <span className="font-mono text-[10px] font-bold uppercase tracking-tight text-muted">
           {sku.brand} {sku.model} · {sku.colorway} · US {sku.size_us}

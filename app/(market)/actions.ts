@@ -18,14 +18,31 @@
  */
 
 import { headers } from 'next/headers';
-import { redirect } from 'next/navigation';
+import { redirect, unstable_rethrow } from 'next/navigation';
 import Stripe from 'stripe';
 
-import { getCard, getListing, listCard, cancelListing, redeemCard } from '@/lib/api/contract';
+import {
+  getCard,
+  getListing,
+  listCard,
+  cancelListing,
+  redeemCard,
+  getCreditAvailable,
+  reserveCredit,
+  releaseCreditHold,
+  purchaseCardSplit,
+} from '@/lib/api/contract';
 import type { ShippingAddress } from '@/lib/api/contract';
 import type { UUID } from '@/lib/db/types';
 import { safeNextPath } from '@/app/(auth)/paths';
 import { currentUserId, currentUserLevel, REDEMPTION_HANDLING_FEE_CENTS } from '@/app/(market)/queries';
+import {
+  CREDIT_HOLD_MINUTES_FALLBACK,
+  cashLegCents,
+  checkoutExpiresAtSeconds,
+  isFscOnlyPurchase,
+  validateRequestedCredit,
+} from '@/app/(market)/checkout-math';
 
 /** The market route for a card id. Cards and listings live under (market). */
 function cardPath(cardId: UUID): string {
@@ -129,6 +146,12 @@ export async function cancelListingAction(formData: FormData): Promise<void> {
     await cancelListing(listingId, me);
     redirect(cardPath(listing.card_id));
   } catch (thrown) {
+    // The redirect() two lines up throws Next's own internal control-flow
+    // error on the success path — rethrow it before treating `thrown` as a
+    // real failure, or a successful cancel renders an error banner instead
+    // of navigating. Pre-existing gap in this function, fixed while in here
+    // for the same class of bug in createCheckoutAction below.
+    unstable_rethrow(thrown);
     const listing = await getListing(listingId).catch(() => null);
     redirectWithError(listing ? cardPath(listing.card_id) : `/card`, errorText(thrown));
   }
@@ -139,14 +162,32 @@ export async function cancelListingAction(formData: FormData): Promise<void> {
 // ------------------------------------------------------------
 
 /**
- * Builds a Checkout Session and redirects the browser to Stripe.
+ * Builds a Checkout Session and redirects the browser to Stripe — or, when
+ * FSC covers the whole price, settles directly and never talks to Stripe at
+ * all.
  *
- * The sale is recorded by app/api/webhooks/stripe, never here. Stripe only
- * receives the buyer id (users.id) and listing id it needs to attribute the
- * payment — see payment_intent_data.metadata, which the webhook refuses to
- * acknowledge without.
+ * Order of operations matters (docs/handoff/data.md item 13's ask): reserve
+ * the FSC hold BEFORE creating anything Stripe-side. If the reserve fails,
+ * nothing else happens. If a Stripe Session fails to create afterward, the
+ * hold is released rather than left stranded — same for the direct-settle
+ * path below.
+ *
+ * The cash leg — everything after this action — is recorded by
+ * app/api/webhooks/stripe, never here. Stripe only receives the buyer id
+ * (users.id), listing id, and (when an FSC leg exists) the credit amount and
+ * hold id it needs to attribute the payment — see
+ * payment_intent_data.metadata, which the webhook refuses to acknowledge
+ * without listing_id/buyer_id and reads credit_cents/hold_id for the split.
+ *
+ * @param creditCentsRequested FSC to apply, in cents. Validated against
+ *   getCreditAvailable() server-side — a request above what the buyer can
+ *   actually spend is REFUSED, never silently clamped. Omit or pass 0 for an
+ *   all-cash purchase.
  */
-export async function createCheckoutAction(listingId: UUID): Promise<void> {
+export async function createCheckoutAction(
+  listingId: UUID,
+  creditCentsRequested: number = 0,
+): Promise<void> {
   const backTo = `/card`;
   const me = await currentUserId();
   if (!me) requireSignedIn(backTo);
@@ -187,14 +228,73 @@ export async function createCheckoutAction(listingId: UUID): Promise<void> {
     }
   }
 
+  // The FSC leg. getCreditAvailable() (never getCreditBalance() — AGENT_RULES.md
+  // §5) is the buyer's own spendable balance, re-read here rather than trusted
+  // from whatever the browser last rendered — a second tab or a stale page
+  // could otherwise post a number that was true a minute ago and is not now.
+  const available = await getCreditAvailable();
+  const validated = validateRequestedCredit(creditCentsRequested, listing.price_cents, available);
+  if (!validated.ok) {
+    redirectWithError(cardLink, validated.error ?? 'invalid FSC amount');
+  }
+  const creditCents = validated.creditCents;
+
+  let holdId: UUID | null = null;
+  if (creditCents > 0) {
+    try {
+      // fn_reserve_credit replaces any prior active hold on this same
+      // (buyer, listing) rather than stacking — a retry here cannot double-
+      // reserve.
+      holdId = await reserveCredit(listingId, creditCents);
+    } catch (thrown) {
+      redirectWithError(cardLink, errorText(thrown));
+    }
+  }
+
+  if (isFscOnlyPurchase(listing.price_cents, creditCents)) {
+    // FSC covers the whole price: no cash leg, so nothing for Stripe to
+    // collect and no PaymentIntent for a webhook to ever receive. Settling
+    // here — through the same purchaseCardSplit() the webhook calls for a
+    // cash/split settlement — is the only way to record this at all, since
+    // no checkout.session.completed event will ever fire for it.
+    // purchaseCardSplit() always runs service-role internally regardless of
+    // caller; the provenance guarantee 021 asks for still holds here exactly
+    // as it does from the webhook — this settlement carries the `holdId`
+    // this buyer's own session just reserved, which fn_purchase_card_core
+    // verifies belongs to this buyer and this listing before spending it.
+    try {
+      const orderId = await purchaseCardSplit(listingId, me, null, creditCents, holdId);
+      redirect(`${cardLink}?order=${listing.id}&orderId=${orderId}`);
+    } catch (thrown) {
+      // redirect() above throws Next's own control-flow error on success —
+      // rethrow it before releasing a hold that was actually just consumed.
+      unstable_rethrow(thrown);
+      if (holdId) await releaseCreditHold(holdId).catch(() => {});
+      redirectWithError(cardLink, errorText(thrown));
+    }
+  }
+
   const apiKey = process.env['STRIPE_SECRET_KEY'];
   if (!apiKey) {
+    if (holdId) await releaseCreditHold(holdId).catch(() => {});
     redirectWithError(cardLink, 'checkout is not configured (STRIPE_SECRET_KEY unset)');
   }
 
   const sku = listing.card.sku;
   const productName = `${sku.brand} ${sku.model} — ${sku.colorway} · US ${sku.size_us} ` +
     `· Mint #${String(listing.card.mint_number).padStart(2, '0')}`;
+
+  // The cash leg is price minus whatever FSC this checkout reserved — never
+  // the full price. The webhook mirrors this exact clamp when it verifies
+  // what Stripe actually captured (app/api/webhooks/stripe/route.ts).
+  const cashCents = cashLegCents(listing.price_cents, creditCents);
+
+  // A session that outlives its FSC hold means cash could be collected after
+  // the hold has already freed the buyer's FSC back out from under it —
+  // "cash collected with no card transferred." credit_hold_minutes isn't on
+  // getPlatformConfig() yet (filed in docs/handoff/market.md); the fallback
+  // mirrors the live value (1440, verified 2026-08-23).
+  const expiresAtSeconds = checkoutExpiresAtSeconds(now, CREDIT_HOLD_MINUTES_FALLBACK);
 
   try {
     const stripe = new Stripe(apiKey);
@@ -205,26 +305,44 @@ export async function createCheckoutAction(listingId: UUID): Promise<void> {
           quantity: 1,
           price_data: {
             currency: 'usd',
-            unit_amount: listing.price_cents,
+            unit_amount: cashCents,
             product_data: { name: productName },
           },
         },
       ],
-      // The webhook attributes the sale from these two keys. An intent without
-      // them is acknowledged and logged as "not recorded" — never a sale.
+      // The webhook attributes the sale from these keys. An intent without
+      // listing_id/buyer_id is acknowledged and logged as "not recorded" —
+      // never a sale. credit_cents/hold_id are present only when this
+      // checkout actually reserved FSC — an all-cash checkout omits them
+      // entirely, which the webhook already treats identically to "no FSC
+      // leg" (docs/handoff/data.md item 13).
       payment_intent_data: {
-        metadata: { listing_id: listing.id, buyer_id: me },
+        metadata: {
+          listing_id: listing.id,
+          buyer_id: me,
+          ...(creditCents > 0
+            ? { credit_cents: String(creditCents), hold_id: holdId ?? '' }
+            : {}),
+        },
       },
       metadata: { listing_id: listing.id, buyer_id: me },
+      expires_at: expiresAtSeconds,
       success_url: `${origin}${cardLink}?order=${listing.id}`,
       cancel_url: `${origin}${cardLink}`,
     });
 
     if (!session.url) {
+      if (holdId) await releaseCreditHold(holdId).catch(() => {});
       redirectWithError(cardLink, 'stripe returned no checkout url');
     }
     redirect(session.url);
   } catch (thrown) {
+    // redirect() above throws Next's own control-flow error on success —
+    // rethrow it before releasing a hold that the Session it points at still
+    // needs (pre-existing gap in this function's original cash-only form,
+    // fixed while extending it for the FSC leg).
+    unstable_rethrow(thrown);
+    if (holdId) await releaseCreditHold(holdId).catch(() => {});
     const message =
       thrown instanceof Stripe.errors.StripeError
         ? thrown.message

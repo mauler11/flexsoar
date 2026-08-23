@@ -39,6 +39,13 @@ import {
   type GradeComponents,
 } from '../lib/db/grading';
 import type { Card, Sku, User } from '../lib/db/types';
+import {
+  CREDIT_HOLD_MINUTES_FALLBACK,
+  cashLegCents,
+  checkoutExpiresAtSeconds,
+  isFscOnlyPurchase,
+  validateRequestedCredit,
+} from '../app/(market)/checkout-math';
 
 // ------------------------------------------------------------
 // SQL MIRRORS
@@ -1186,5 +1193,109 @@ describe('stripe webhook error classification', () => {
 
   it('lets an unmapped code fall through to a 500 retry rather than silently acknowledging', () => {
     expect(isPermanentError('UNKNOWN')).toBe(false);
+  });
+});
+
+// ------------------------------------------------------------
+// market: FSC-aware checkout (app/(market)/checkout-math.ts)
+//
+// These import the real functions, not a mirror — checkout-math.ts is a
+// plain module with no next/headers, Stripe, or Supabase in its graph (split
+// out of the 'use server' actions.ts for exactly this reason), so there is
+// no import-cost trade-off like the webhook tests above faced.
+// ------------------------------------------------------------
+
+describe('validateRequestedCredit', () => {
+  it('treats an omitted or blank amount as no FSC leg, not an error', () => {
+    expect(validateRequestedCredit(undefined, 30000, 10000)).toEqual({ ok: true, creditCents: 0 });
+    expect(validateRequestedCredit(null, 30000, 10000)).toEqual({ ok: true, creditCents: 0 });
+    expect(validateRequestedCredit('', 30000, 10000)).toEqual({ ok: true, creditCents: 0 });
+  });
+
+  it('accepts a request within both the price and the available balance', () => {
+    expect(validateRequestedCredit(5000, 30000, 10000)).toEqual({ ok: true, creditCents: 5000 });
+  });
+
+  it('accepts a request equal to price or to available (inclusive bounds)', () => {
+    expect(validateRequestedCredit(30000, 30000, 30000)).toEqual({ ok: true, creditCents: 30000 });
+    expect(validateRequestedCredit(10000, 30000, 10000)).toEqual({ ok: true, creditCents: 10000 });
+  });
+
+  it('REFUSES a request above available rather than silently clamping to it — the task names this explicitly', () => {
+    const result = validateRequestedCredit(9000, 30000, 5000);
+    expect(result.ok).toBe(false);
+    expect(result.creditCents).toBe(0);
+    expect(result.error).toMatch(/9000/);
+    expect(result.error).toMatch(/5000/);
+  });
+
+  it('refuses a request above the listing price even when it is within the available balance', () => {
+    const result = validateRequestedCredit(40000, 30000, 100000);
+    expect(result.ok).toBe(false);
+  });
+
+  it('refuses a non-integer amount', () => {
+    expect(validateRequestedCredit(12.5, 30000, 30000).ok).toBe(false);
+    expect(validateRequestedCredit('abc', 30000, 30000).ok).toBe(false);
+  });
+
+  it('refuses a negative amount', () => {
+    expect(validateRequestedCredit(-1, 30000, 30000).ok).toBe(false);
+  });
+
+  it('accepts an explicit zero — the buyer lowering the field all the way down', () => {
+    expect(validateRequestedCredit(0, 30000, 30000)).toEqual({ ok: true, creditCents: 0 });
+  });
+});
+
+describe('cashLegCents / isFscOnlyPurchase', () => {
+  it('is the full price when no FSC is applied', () => {
+    expect(cashLegCents(30000, 0)).toBe(30000);
+    expect(isFscOnlyPurchase(30000, 0)).toBe(false);
+  });
+
+  it('is the remainder on a split purchase', () => {
+    expect(cashLegCents(30000, 12000)).toBe(18000);
+    expect(isFscOnlyPurchase(30000, 12000)).toBe(false);
+  });
+
+  it('is zero, and FSC-only, when credit covers the full price', () => {
+    expect(cashLegCents(30000, 30000)).toBe(0);
+    expect(isFscOnlyPurchase(30000, 30000)).toBe(true);
+  });
+
+  it('never goes negative even if credit somehow exceeds price', () => {
+    expect(cashLegCents(30000, 50000)).toBe(0);
+  });
+});
+
+describe('checkoutExpiresAtSeconds', () => {
+  const now = Date.parse('2026-08-23T12:00:00.000Z');
+
+  it('matches CREDIT_HOLD_MINUTES_FALLBACK to the live platform_config value (verified 2026-08-23)', () => {
+    expect(CREDIT_HOLD_MINUTES_FALLBACK).toBe(1440);
+  });
+
+  it('lands at roughly now + holdMinutes for a value inside Stripe bounds', () => {
+    const expires = checkoutExpiresAtSeconds(now, 120); // 2h hold
+    expect(expires).toBe(Math.floor(now / 1000) + 120 * 60);
+  });
+
+  it('never sets an expiry Stripe would reject as too soon (< 30 minutes out)', () => {
+    const expires = checkoutExpiresAtSeconds(now, 1); // absurdly short hold
+    expect(expires).toBeGreaterThanOrEqual(Math.floor(now / 1000) + 30 * 60);
+  });
+
+  it('stays under Stripe\'s 24h ceiling for the live 1440-minute (exactly 24h) config, with room to spare', () => {
+    const expires = checkoutExpiresAtSeconds(now, CREDIT_HOLD_MINUTES_FALLBACK);
+    const nowSeconds = Math.floor(now / 1000);
+    expect(expires).toBeGreaterThan(nowSeconds);
+    expect(expires).toBeLessThan(nowSeconds + 24 * 60 * 60);
+  });
+
+  it('clamps a hold far longer than 24h rather than asking Stripe for an expiry it will refuse', () => {
+    const expires = checkoutExpiresAtSeconds(now, 60 * 24 * 10); // 10 days
+    const nowSeconds = Math.floor(now / 1000);
+    expect(expires).toBeLessThan(nowSeconds + 24 * 60 * 60);
   });
 });

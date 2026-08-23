@@ -150,6 +150,64 @@ interface ProvenanceRow {
  * and if they have since let it go. card_provenance has no RLS in 001 and the
  * embedded card/sku reads are public, so anonymous visitors see the same list.
  */
+// ------------------------------------------------------------
+// VAULT INTAKE — pending_vault disclosure (023c), no contract export yet
+// ------------------------------------------------------------
+
+export interface VaultIntakeStatus {
+  status: 'awaiting_shipment' | 'in_transit' | 'received' | 'defaulted' | 'cancelled';
+  dueBy: Timestamptz;
+  carrier: string | null;
+  trackingNumber: string | null;
+  shippedAt: Timestamptz | null;
+}
+
+/**
+ * The open (or most recently closed) vault_intakes row for a card, if any.
+ * 023c_vault_custody.sql added `vault_intakes` after this contract's frozen
+ * surface was last extended — no `getVaultIntake` export exists in
+ * lib/api/contract.ts (grepped: zero matches for "vault" there). Read
+ * directly here, same pattern as getPublicProfileByHandle/getTradeHistory
+ * above: server-only, through the session client, never `users`.
+ *
+ * vault_intakes' own RLS (023c) is `consignor_id = self OR buyer_id = self OR
+ * admin` — this only ever returns a row for the card's own buyer (or its
+ * consignor, or an admin), which is exactly who the card page's pending_vault
+ * banner is for. A stranger gets null, same as "no intake" would.
+ */
+export async function getVaultIntakeForCard(cardId: UUID): Promise<VaultIntakeStatus | null> {
+  const supabase = await createServerSupabase();
+
+  const result = await supabase
+    .from('vault_intakes')
+    .select('status, due_by, carrier, tracking_number, shipped_at')
+    .eq('card_id', cardId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (result.error && result.error.code !== 'PGRST116') {
+    throw new Error(result.error.message.trim() || 'vault_intakes read failed');
+  }
+  if (!result.data) return null;
+
+  const row = result.data as {
+    status: VaultIntakeStatus['status'];
+    due_by: Timestamptz;
+    carrier: string | null;
+    tracking_number: string | null;
+    shipped_at: Timestamptz | null;
+  };
+
+  return {
+    status: row.status,
+    dueBy: row.due_by,
+    carrier: row.carrier,
+    trackingNumber: row.tracking_number,
+    shippedAt: row.shipped_at,
+  };
+}
+
 export async function getTradeHistory(ownerId: UUID): Promise<TradeEvent[]> {
   const supabase = await createServerSupabase();
 

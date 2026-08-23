@@ -8,11 +8,14 @@
  */
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getCard, getListing } from "@/lib/api/contract";
+import { getCard, getListing, getItem, getCreditAvailable, getPayoutMethodForUser } from "@/lib/api/contract";
+import type { CardStatus } from "@/lib/db/types";
 import {
   currentUserId,
   currentUserLevel,
   REDEMPTION_HANDLING_FEE_CENTS,
+  getVaultIntakeForCard,
+  type VaultIntakeStatus,
 } from "@/app/(market)/queries";
 import { cancelListingAction } from "@/app/(market)/actions";
 import { toCardWithReason, toListing, toSku } from "@/components/market/bridge";
@@ -22,9 +25,34 @@ import { BuyPanel } from "@/components/market/BuyPanel";
 import { ListForm } from "@/components/market/ListForm";
 import { RedeemForm } from "@/components/market/RedeemForm";
 import { ProvenanceChain } from "@/components/market/ProvenanceChain";
+import { Countdown } from "@/components/market/Countdown";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { formatFsc } from "@/components/card/format";
+
+/**
+ * 023a_card_status_pending_vault.sql added 'pending_vault' to the live
+ * `card_status` enum, but `CardStatus` in lib/db/types.ts (track/data's
+ * lane) still only lists 'active' | 'locked' | 'burned' | 'redeemed' — the
+ * mirror hasn't caught up. Filed in docs/handoff/market.md. Rather than a
+ * cast, this widens the TYPE the value is read as (CardStatus is a subtype
+ * of this union, so the assignment below needs no `as`), which is enough to
+ * compare against the real runtime value the database actually sends.
+ */
+type CardStatusWithVault = CardStatus | "pending_vault";
+
+/**
+ * A plain `someCardStatus === "pending_vault"` inline comparison still fails
+ * type-checking even after widening a variable to `CardStatusWithVault` —
+ * TypeScript's literal-comparability check (TS2367) narrows a `const` back to
+ * its initializer's literal type for that specific diagnostic, ignoring the
+ * wider declared annotation. Routing the comparison through a function
+ * parameter sidesteps it (a parameter's declared type is what's compared
+ * against, not the literal type of whatever was passed in) with no cast.
+ */
+function isPendingVault(status: CardStatusWithVault): boolean {
+  return status === "pending_vault";
+}
 
 export async function generateMetadata({
   params,
@@ -65,6 +93,28 @@ export default async function CardPage({
   const listing = detail.listing
     ? await getListing(detail.listing.id).catch(() => null)
     : null;
+
+  // Buyer-only reads. Skipped entirely for the owner and for signed-out
+  // visitors — neither can buy this listing, so there's nothing to fetch.
+  const isBuyerViewing = !isOwner && listing != null;
+  const [availableCreditCents, itemCustody] = await Promise.all([
+    isBuyerViewing && meId != null ? getCreditAvailable().catch(() => null) : null,
+    isBuyerViewing ? getItem(detail.item.id).catch(() => null) : null,
+  ]);
+  const firstSalePending = itemCustody?.custody === "seller";
+
+  // Seller-only read: how THEY will be paid, before they commit to listing.
+  // fn_payout_method_for_user is geography-derived and never a client choice
+  // (AGENT_RULES.md §5) — this is read-only disclosure, not a control.
+  const canListNow = isOwner && !listing && detail.status === "active";
+  const sellerPayoutMethod = canListNow
+    ? await getPayoutMethodForUser(detail.owner.id).catch(() => null)
+    : null;
+
+  const vaultIntake: VaultIntakeStatus | null =
+    isOwner && isPendingVault(detail.status)
+      ? await getVaultIntakeForCard(detail.id).catch(() => null)
+      : null;
 
   const card = toCardWithReason(detail);
   const sku = toSku(detail.sku);
@@ -136,9 +186,15 @@ export default async function CardPage({
           {isOwner ? (
             listing ? (
               <OwnerListingPanel listing={listing} />
+            ) : isPendingVault(detail.status) ? (
+              <PendingVaultPanel intake={vaultIntake} />
             ) : detail.status === "active" ? (
               <>
-                <ListForm cardId={detail.id} oracleValueCents={oracleCents} />
+                <ListForm
+                  cardId={detail.id}
+                  oracleValueCents={oracleCents}
+                  sellerPayoutMethod={sellerPayoutMethod}
+                />
                 <div>
                   <h2 className="mb-2 font-mono text-[10px] font-bold uppercase tracking-tight text-muted">
                     Redeem the physical card
@@ -170,6 +226,8 @@ export default async function CardPage({
               viewerId={meId}
               viewerLevel={viewerLevel}
               checkoutActive={sp.order === listing.id}
+              availableCreditCents={availableCreditCents}
+              firstSalePending={firstSalePending}
             />
           ) : (
             <Banner tone="info" title="Not on the market">
@@ -185,6 +243,53 @@ export default async function CardPage({
           )}
         </section>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The card's owner (the buyer of a first sale) sees this while the shoe is
+ * in transit to FlexSoar. Deliberately not a Banner tone="error" — this is
+ * an expected, temporary state (023c_vault_custody.sql), not a failure.
+ */
+function PendingVaultPanel({ intake }: { intake: VaultIntakeStatus | null }) {
+  return (
+    <div className="flex flex-col gap-3 border border-line bg-overlay p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone="info">Pending vault</Badge>
+        {intake && <Badge tone="info">{intake.status.replace("_", " ")}</Badge>}
+      </div>
+
+      <Banner tone="info" title="Yours — waiting on the vault">
+        This card is yours, but it&apos;s frozen until the physical shoe
+        reaches FlexSoar. It can&apos;t be resold, traded, or redeemed while
+        pending vault — that&apos;s not an error, it&apos;s the 48-hour window
+        every first sale goes through so no one after you is trusting a
+        stranger they&apos;ve never dealt with.
+      </Banner>
+
+      {intake && intake.status !== "received" && (
+        <div className="flex items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-tight text-muted">
+          <span>Seller must ship by</span>
+          <Countdown target={intake.dueBy} className="text-accent" />
+        </div>
+      )}
+
+      {intake?.trackingNumber ? (
+        <p className="font-mono text-[10px] tracking-tight text-muted">
+          Shipped via {intake.carrier ?? "carrier"} · tracking{" "}
+          {intake.trackingNumber}
+        </p>
+      ) : (
+        <p className="font-mono text-[10px] tracking-tight text-muted">
+          Not yet marked shipped by the seller.
+        </p>
+      )}
+
+      <p className="font-mono text-[9px] uppercase tracking-tight text-muted">
+        If the seller misses the deadline, this sale is cancelled and you are
+        refunded in full and in kind — no action needed from you.
+      </p>
     </div>
   );
 }

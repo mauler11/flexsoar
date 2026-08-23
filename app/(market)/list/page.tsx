@@ -7,8 +7,9 @@
  * without re-fetching.
  */
 import type { Metadata } from "next";
-import { getSkus } from "@/lib/api/contract";
+import { getSkus, getPayoutMethodForUser } from "@/lib/api/contract";
 import { getPayoutEligibilityAction } from "@/app/(market)/list/actions";
+import { currentUserId } from "@/app/(market)/queries";
 import { IntakeWizard } from "@/components/market/intake/IntakeWizard";
 
 export const metadata: Metadata = {
@@ -18,6 +19,14 @@ export const metadata: Metadata = {
 export default async function ListPage() {
   const skus = await getSkus({});
   const payoutEligibility = await getPayoutEligibilityAction();
+
+  // How THIS seller will actually be paid — geography-derived
+  // (fn_payout_method_for_user), never a choice. Read before they commit to
+  // a listing, not surfaced only after it sells.
+  const me = await currentUserId();
+  const sellerPayoutMethod = me
+    ? await getPayoutMethodForUser(me).catch(() => null)
+    : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -34,6 +43,7 @@ export default async function ListPage() {
         skus={skus}
         payoutEligibility={payoutEligibility}
         signedIn={payoutEligibility != null}
+        sellerPayoutMethod={sellerPayoutMethod}
       />
     </div>
   );
