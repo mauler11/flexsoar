@@ -26,7 +26,13 @@ import {
   skus,
   users,
 } from '../lib/mock/fixtures';
-import { TIER_BANDS, tierForPrice } from '../lib/domain/rarity';
+import {
+  TIER_BANDS,
+  tierForPrice,
+  conditionGradeBand,
+  publishedConditionLabel,
+} from '../lib/domain/rarity';
+import { formatFsc, formatUsd, formatMyr } from '../components/card/format';
 import {
   TRANSPARENT,
   paletteFromJson,
@@ -1297,5 +1303,51 @@ describe('checkoutExpiresAtSeconds', () => {
     const expires = checkoutExpiresAtSeconds(now, 60 * 24 * 10); // 10 days
     const nowSeconds = Math.floor(now / 1000);
     expect(expires).toBeLessThan(nowSeconds + 24 * 60 * 60);
+  });
+});
+
+describe('price vs FSC formatting (components/card/format.ts)', () => {
+  // The market-grid bug this pass fixed: a USD-cents price rendered through
+  // formatFsc() reads as "174.64 FSC" instead of "$174.64". Pin the two
+  // formatters apart so a call-site regression fails here first.
+  it('formatUsd renders a dollar-prefixed price, never the FSC suffix', () => {
+    const usd = formatUsd(17464);
+    expect(usd).toBe('$174.64');
+    expect(usd).not.toContain('FSC');
+  });
+
+  it('formatFsc renders the FSC suffix with no dollar sign — for an actual FSC amount, never a price', () => {
+    const fsc = formatFsc(46500);
+    expect(fsc).toBe('465.00 FSC');
+    expect(fsc).not.toContain('$');
+  });
+
+  it('formatMyr (retained for existing callers only, no new call sites) still converts at the fixed preview rate', () => {
+    expect(formatMyr(10000)).toBe('RM 420.00');
+  });
+});
+
+describe('publishedConditionLabel / conditionGradeBand (018-020 condition_grade)', () => {
+  it('maps every condition_grade to the matching FloatBand', () => {
+    expect(conditionGradeBand('factory_new')).toBe('FN');
+    expect(conditionGradeBand('minimal_wear')).toBe('MW');
+    expect(conditionGradeBand('field_tested')).toBe('FT');
+    expect(conditionGradeBand('well_worn')).toBe('WW');
+    expect(conditionGradeBand('battle_scarred')).toBe('BS');
+  });
+
+  it('prefers the DB-derived condition_grade over a re-derived float band', () => {
+    // float alone would band as FN (< 0.07); condition_grade must win since
+    // it is the trigger-derived source of truth, not a re-derivation.
+    expect(publishedConditionLabel(0.02, 'well_worn')).toBe('Well Worn');
+  });
+
+  it('falls back to the float-derived band when condition_grade is absent (pre-018 fixtures)', () => {
+    expect(publishedConditionLabel(0.062)).toBe('Factory New');
+  });
+
+  it('never leaks a numeric float into the published label', () => {
+    const label = publishedConditionLabel(0.319, 'field_tested');
+    expect(label).not.toMatch(/\d/);
   });
 });
