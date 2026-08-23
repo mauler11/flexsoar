@@ -39,6 +39,13 @@
  *     fn_purchase_card(p_listing_id, p_buyer_id, p_settlement_ref,
  *     p_credit_cents, p_hold_id) (purchaseCard/purchaseCardSplit) is the
  *     only settlement entry point now. No caller existed anywhere in app/**.
+ *     Also: 022b moves fn_expire_credit_holds()'s grant from `authenticated`
+ *     (021) to `service_role` only. expireCreditHolds() (a prior additive
+ *     export, in-place fix, not a new one) is switched from the session
+ *     client to createServiceSupabase() to match — it was calling a function
+ *     it no longer has execute on, and would have failed FORBIDDEN on every
+ *     call. Needed so the checkout-webhook wiring in this pass has a working
+ *     service-role path to sweep expired holds on checkout.session.expired.
  * along with their query/input types and new ContractErrorCode members.
  * Additive only: nothing that existed before behaves differently.
  *
@@ -1633,14 +1640,26 @@ export async function releaseCreditHold(holdId: UUID): Promise<void> {
  * the FSC it committed. fn_reserve_credit() already calls this internally
  * before checking a new reservation's balance, so this export exists for a
  * caller that wants to force the sweep on its own schedule (a maintenance
- * page, a scheduled job). Granted to `authenticated`, not scoped to the
- * caller's own holds — it sweeps every user's expired holds — so no session
- * identity is threaded through here.
+ * page, a scheduled job, the Stripe webhook on checkout.session.expired).
+ *
+ * SERVICE-ROLE. 021 granted this to `authenticated`, but 022b revoked it from
+ * `public`/`anon`/`authenticated` and granted it to `service_role` only —
+ * "a stranger cannot drop everyone else's in-flight checkout holds by calling
+ * it in a loop" (022b's own comment). This export used to call
+ * createServerSupabase() (the session client), which has held no grant on this
+ * function since 022b landed and would fail every call with FORBIDDEN;
+ * verified by reading 021_credit_holds.sql:537 against
+ * 022b_permissions_lockdown.sql:161-165 side by side. Fixed here rather than
+ * left broken, since the Stripe webhook (022b_permissions_lockdown.sql, and
+ * this migration is the reason webhooks need it at all) needs a working path
+ * to sweep expired holds on checkout.session.expired. Not scoped to the
+ * caller's own holds — it sweeps every user's expired holds — so no identity
+ * is threaded through here.
  *
  * @returns the number of holds expired.
  */
 export async function expireCreditHolds(): Promise<number> {
-  const supabase = await createServerSupabase();
+  const supabase = createServiceSupabase();
   const count = unwrap(
     await supabase.rpc('fn_expire_credit_holds'),
     'fn_expire_credit_holds',

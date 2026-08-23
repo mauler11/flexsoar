@@ -1024,3 +1024,167 @@ describe('credit holds (021)', () => {
     expect(hold.status).toBe('active');
   });
 });
+
+// ------------------------------------------------------------
+// STRIPE WEBHOOK — app/api/webhooks/stripe/route.ts
+// ------------------------------------------------------------
+//
+// Mirrors, not imports: importing route.ts pulls in Stripe/Supabase/next's
+// whole module graph (~14s to resolve, measured, against ~0.5s for this
+// entire file), so these reproduce its pure decision logic instead — same
+// convention as every describe block above, which mirrors a SQL RULE rather
+// than calling the real RPC.
+
+interface ParsedSettlementMetadata {
+  listingId: string;
+  buyerId: string;
+  creditCents: number;
+  holdId: string | null;
+}
+
+/** Mirrors parseSettlementMetadata() in route.ts. */
+const parseSettlementMetadata = (
+  metadata: Record<string, string | undefined>,
+): ParsedSettlementMetadata | { error: string } => {
+  const listingId = metadata['listing_id'];
+  const buyerId = metadata['buyer_id'];
+  if (!listingId || !buyerId) {
+    return {
+      error:
+        'payment intent has no listing_id/buyer_id metadata — set both when creating the ' +
+        'Checkout Session, or the sale cannot be attributed',
+    };
+  }
+
+  const rawCredit = metadata['credit_cents'];
+  let creditCents = 0;
+  if (rawCredit !== undefined && rawCredit !== '') {
+    const parsed = Number(rawCredit);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      return { error: `payment intent metadata has a malformed credit_cents value: ${rawCredit}` };
+    }
+    creditCents = parsed;
+  }
+
+  const rawHold = metadata['hold_id'];
+  const holdId = rawHold && rawHold.trim() !== '' ? rawHold : null;
+
+  return { listingId, buyerId, creditCents, holdId };
+};
+
+/**
+ * Mirrors the expectedCashCents clamp in handleCheckoutCompleted() — the same
+ * clamp fn_purchase_card_core itself applies to p_credit_cents
+ * (021_credit_holds.sql:274), reproduced here so a bogus above-price
+ * credit_cents cannot make the captured-amount check pass vacuously.
+ */
+const expectedCashCents = (priceCents: number, creditCents: number): number =>
+  Math.max(priceCents - Math.min(creditCents, priceCents), 0);
+
+type WebhookErrorCode =
+  | 'SELF_PURCHASE' | 'EARLY_ACCESS_LOCKED' | 'WRONG_STATUS' | 'NOT_FOUND'
+  | 'PAYOUT_MISMATCH' | 'INSUFFICIENT_CREDIT' | 'CREDIT_SETTLEMENT_DISABLED'
+  | 'CREDIT_PROVENANCE_REQUIRED' | 'CREDIT_HOLD_WRONG_USER'
+  | 'CREDIT_HOLD_WRONG_LISTING' | 'CREDIT_HOLD_INSUFFICIENT'
+  | 'SETTLEMENT_REF_REQUIRED' | 'CREDIT_HOLD_EXPIRED' | 'UNKNOWN';
+
+/**
+ * Mirrors isPermanentError() in route.ts. CREDIT_HOLD_EXPIRED is deliberately
+ * excluded — route.ts intercepts it before this check runs, because unlike
+ * every code here it means the buyer's cash already moved through Stripe and
+ * needs louder handling than a quiet acknowledge.
+ */
+const isPermanentError = (code: WebhookErrorCode): boolean =>
+  code === 'SELF_PURCHASE' ||
+  code === 'EARLY_ACCESS_LOCKED' ||
+  code === 'WRONG_STATUS' ||
+  code === 'NOT_FOUND' ||
+  code === 'PAYOUT_MISMATCH' ||
+  code === 'INSUFFICIENT_CREDIT' ||
+  code === 'CREDIT_SETTLEMENT_DISABLED' ||
+  code === 'CREDIT_PROVENANCE_REQUIRED' ||
+  code === 'CREDIT_HOLD_WRONG_USER' ||
+  code === 'CREDIT_HOLD_WRONG_LISTING' ||
+  code === 'CREDIT_HOLD_INSUFFICIENT' ||
+  code === 'SETTLEMENT_REF_REQUIRED';
+
+describe('stripe webhook metadata parsing (checkout.session.completed)', () => {
+  it('parses listing_id/buyer_id with credit_cents and hold_id absent as a pure-cash settlement', () => {
+    const parsed = parseSettlementMetadata({ listing_id: 'l1', buyer_id: 'u1' });
+    expect(parsed).toEqual({ listingId: 'l1', buyerId: 'u1', creditCents: 0, holdId: null });
+  });
+
+  it('rejects metadata missing listing_id or buyer_id', () => {
+    expect(parseSettlementMetadata({ buyer_id: 'u1' })).toHaveProperty('error');
+    expect(parseSettlementMetadata({ listing_id: 'l1' })).toHaveProperty('error');
+    expect(parseSettlementMetadata({})).toHaveProperty('error');
+  });
+
+  it('parses a split FSC+cash checkout carrying credit_cents and hold_id', () => {
+    const parsed = parseSettlementMetadata({
+      listing_id: 'l1', buyer_id: 'u1', credit_cents: '5000', hold_id: 'h1',
+    });
+    expect(parsed).toEqual({ listingId: 'l1', buyerId: 'u1', creditCents: 5000, holdId: 'h1' });
+  });
+
+  it('rejects a non-integer or negative credit_cents rather than passing it through', () => {
+    expect(
+      parseSettlementMetadata({ listing_id: 'l1', buyer_id: 'u1', credit_cents: 'abc' }),
+    ).toHaveProperty('error');
+    expect(
+      parseSettlementMetadata({ listing_id: 'l1', buyer_id: 'u1', credit_cents: '-1' }),
+    ).toHaveProperty('error');
+    expect(
+      parseSettlementMetadata({ listing_id: 'l1', buyer_id: 'u1', credit_cents: '12.5' }),
+    ).toHaveProperty('error');
+  });
+
+  it('treats a blank hold_id the same as an absent one', () => {
+    const parsed = parseSettlementMetadata({ listing_id: 'l1', buyer_id: 'u1', hold_id: '   ' });
+    expect(parsed).toEqual({ listingId: 'l1', buyerId: 'u1', creditCents: 0, holdId: null });
+  });
+});
+
+describe('stripe webhook cash-leg amount check', () => {
+  it('expects the full price in cash when credit_cents is 0', () => {
+    expect(expectedCashCents(30000, 0)).toBe(30000);
+  });
+
+  it('expects zero cash on an FSC-only settlement', () => {
+    expect(expectedCashCents(30000, 30000)).toBe(0);
+  });
+
+  it('expects the remainder on a split settlement', () => {
+    expect(expectedCashCents(30000, 5000)).toBe(25000);
+  });
+
+  it('clamps credit_cents to the price rather than going negative', () => {
+    // A caller sending more credit_cents than the price must never produce a
+    // negative expected-cash figure that a real Stripe capture could satisfy
+    // trivially — fn_purchase_card_core applies the identical clamp.
+    expect(expectedCashCents(30000, 99999)).toBe(0);
+  });
+});
+
+describe('stripe webhook error classification', () => {
+  it('treats every 021 FSC-leg refusal as permanent, not retried', () => {
+    const permanentCodes: WebhookErrorCode[] = [
+      'SELF_PURCHASE', 'EARLY_ACCESS_LOCKED', 'WRONG_STATUS', 'NOT_FOUND',
+      'INSUFFICIENT_CREDIT', 'CREDIT_SETTLEMENT_DISABLED',
+      'CREDIT_PROVENANCE_REQUIRED', 'CREDIT_HOLD_WRONG_USER',
+      'CREDIT_HOLD_WRONG_LISTING', 'CREDIT_HOLD_INSUFFICIENT',
+      'SETTLEMENT_REF_REQUIRED',
+    ];
+    for (const code of permanentCodes) {
+      expect(isPermanentError(code)).toBe(true);
+    }
+  });
+
+  it('does NOT classify CREDIT_HOLD_EXPIRED as an ordinary permanent error — it needs the loud path', () => {
+    expect(isPermanentError('CREDIT_HOLD_EXPIRED')).toBe(false);
+  });
+
+  it('lets an unmapped code fall through to a 500 retry rather than silently acknowledging', () => {
+    expect(isPermanentError('UNKNOWN')).toBe(false);
+  });
+});

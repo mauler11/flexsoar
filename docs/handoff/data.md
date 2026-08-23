@@ -12,6 +12,142 @@ with the credit-ledger and art_url work below.
 
 ## Open
 
+### 13. Checkout wired to split settlement — webhook now on checkout.session.completed/.expired; one grant gap found and fixed; one left as a genuine blocker for track/market
+
+Task: wire the checkout data layer to 019c/021/022b's split-settlement SQL,
+which `scripts/smoke_settlement.sql` already verifies live end to end.
+
+**STEP 1 audit — all five requested functions already had contract exports,
+verified by reading `lib/api/contract.ts` in full, not assumed:**
+`reserveCredit()` (`fn_reserve_credit`), `releaseCreditHold()`
+(`fn_release_credit_hold`), `getCreditAvailable()` (`fn_credit_available`),
+`getCreditHeld()` (`fn_credit_held`), `purchaseCardSplit()` (the 5-arg
+`fn_purchase_card`) — all landed in item 11 above, before this task. **STEP 2
+added nothing**, because nothing was missing. This is a genuine negative
+result, not a skipped step: every one of the eight `raise exception` strings
+this task asked me to re-verify (STEP 4) was also already mapped correctly in
+`lib/db/errors.ts`, checked character-for-character against
+`021_credit_holds.sql` and `019c_settlement.sql` as they exist in this
+worktree now (they didn't when item 11 was written — that pass worked from a
+live probe, not the file; both agree).
+
+**Bug found and fixed while verifying grants for STEP 3: `expireCreditHolds()`
+was calling a function it had no grant on.** 021 granted
+`fn_expire_credit_holds()` to `authenticated`; `022b_permissions_lockdown.sql`
+(lines 161/165) revokes that and grants it to `service_role` only — "a
+stranger cannot drop everyone else's in-flight checkout holds by calling it in
+a loop". The contract export was still calling `createServerSupabase()` (the
+session client), which has held zero grant on this RPC since 022b landed —
+every call would have failed FORBIDDEN. Fixed in place (it's a 021 additive
+export, not one of the 16 frozen signatures) to `createServiceSupabase()`.
+Verified by reading `021_credit_holds.sql:537` against
+`022b_permissions_lockdown.sql:161-165` side by side; not live-probed, since
+nothing here was ever callable to probe.
+
+**STEP 3, the webhook.** `app/api/webhooks/stripe/route.ts` no longer listens
+for `payment_intent.succeeded`; it now handles `checkout.session.completed`
+and `checkout.session.expired`, per the task. On completion it retrieves the
+real `PaymentIntent` (`stripe.paymentIntents.retrieve`) — never trusting
+`session.payment_status`, which reads `unpaid` even after
+`checkout.session.completed` for delayed payment methods, and checks
+`intent.status === 'succeeded'` before doing anything — reads `listing_id` /
+`buyer_id` / `credit_cents` / `hold_id` off `intent.metadata`, and settles
+through `purchaseCardSplit()` (the 5-arg RPC) with `intent.id` as
+`settlementRef` always, satisfying "a cash leg needs a non-empty
+settlement_ref" unconditionally since Checkout only reaches `succeeded` with a
+real intent id. Redelivery safety is unchanged and still two-layered:
+`findOrderBySettlementRef(intent.id)` before calling, plus 017's own
+idempotency inside `fn_purchase_card`.
+
+**`CREDIT_HOLD_EXPIRED` is NOT folded into the ordinary acknowledge-and-log
+path.** By the time this can fire, Stripe has already captured the buyer's
+cash — settlement not happening here means a charged buyer with no card and
+no FSC back (the hold flips to `expired`, not consumed). The webhook still
+returns 200 (retrying is futile — the hold's expiry is deterministic on every
+redelivery, verified by reading `fn_purchase_card_core`'s exception handling:
+an unhandled `raise exception` aborts the whole RPC transaction, so the
+`update ... set status = 'expired'` right before the raise does NOT persist
+either — the row is untouched, still `active` with a past `expires_at`, so a
+retry hits the identical raise every time), but logs it as a distinct
+`CRITICAL` block with every identifying field (payment intent, buyer, listing,
+hold id, amount, currency) and takes no automatic recovery action — no
+refund, no fresh hold, no forced retry — leaving it for a human. Exactly what
+the task asked for; said here explicitly since "log it loudly" has no
+executable definition otherwise.
+
+**STEP 3, `checkout.session.expired` — implemented, but with a real
+limitation, not silently worked around.** `fn_release_credit_hold(p_hold_id)`
+— the function that frees exactly one hold — is granted to `authenticated`
+only in both 021 and 022b; it was never granted to `service_role`, and its own
+ownership guard (`fn_current_user_id()` vs the hold's `user_id`) would refuse
+a service-role caller even if it were. The webhook has no session by
+construction, so **it cannot release a specific hold**. The only
+service-role-callable surface either migration leaves for this is
+`fn_expire_credit_holds()` — a global sweep of every hold whose `expires_at`
+has passed, not just the one this checkout abandoned. `handleCheckoutExpired`
+calls that (now that it's fixed, see above) and logs which hold it was
+targeting, but the sweep only actually frees that FSC once the hold's own
+`credit_hold_minutes` TTL (default 30 min, `platform_config`) has separately
+elapsed — it does nothing if the Stripe Checkout Session's own `expires_at`
+fires first. **Ask for track/market, when `createCheckoutAction` is extended
+to call `reserveCredit()` (per item 11's ask, still open — checkout is
+cash-only today, nothing calls `reserveCredit()` anywhere in `app/**`,
+verified by grep):** set the Checkout Session's `expires_at` no earlier than
+the hold's expiry (or shorter, and re-reserve on retry), and carry
+`credit_cents` / `hold_id` into `payment_intent_data.metadata` alongside the
+existing `listing_id` / `buyer_id`. **Ask for whoever next touches SQL:** the
+clean fix is granting `fn_release_credit_hold` to `service_role` with a
+provenance carve-out mirroring `fn_purchase_card_core`'s own pattern (trust a
+hold id without a session, since service-role has none), so
+`checkout.session.expired` can release the ONE hold that actually expired
+instead of sweeping globally. Not built here — `.sql` is human-only.
+
+**STEP 4 error mapping** — all eight raise strings the task listed were
+already correctly mapped in `lib/db/errors.ts` (item 11's earlier pass got
+these right against the applied files); re-verified each again here against
+`021_credit_holds.sql` as it exists in this worktree now, character for
+character: `insufficient FSC: balance %, requested %` (line 313),
+`credit hold % expired at %` (295), `credit hold % belongs to another user`
+(298), `credit hold % is for a different listing` (301),
+`credit hold % covers only % of % requested` (304-305),
+`FSC settlement is disabled` (278), `a cash leg of % cents requires a
+settlement_ref` (320-321), `spending FSC requires a session matching the
+buyer, or a credit hold` (308). No pattern changed.
+
+**`isPermanentError()` in the webhook** now also treats
+`INSUFFICIENT_CREDIT`, `CREDIT_SETTLEMENT_DISABLED`,
+`CREDIT_PROVENANCE_REQUIRED`, `CREDIT_HOLD_WRONG_USER`,
+`CREDIT_HOLD_WRONG_LISTING`, `CREDIT_HOLD_INSUFFICIENT` and
+`SETTLEMENT_REF_REQUIRED` as permanent (acknowledge, don't retry) — all six
+reproduce identically on redelivery, same reasoning as the pre-existing four.
+`CREDIT_HOLD_EXPIRED` is deliberately excluded from this list; see above.
+
+**STEP 5 tests.** `npm test`: **119 passing** (was 107). Twelve new tests,
+all model-level mirrors of `route.ts`'s pure decision logic (metadata
+parsing/validation, the cash-leg amount clamp, permanent-vs-retryable error
+classification) — same convention as every other `describe` block in this
+file, not calls into the real RPC or an import of `route.ts` itself. Tried
+importing `route.ts` directly first: it works, but costs ~14s just to resolve
+the Stripe/Supabase/Next module graph, against ~0.5s for this entire file
+today, so it was rejected in favour of the mirror pattern already established
+here. No new contract exports needed tests, because STEP 1/2 found none were
+added.
+
+`npx tsc --noEmit` clean, `npm run build` compiles (`Compiled successfully`,
+all 19 routes render including `/api/webhooks/stripe`), `npm test`: 119
+passing.
+
+**Not verified live:** the whole webhook rewrite, by necessity — a live
+webhook call needs a real Stripe event, a real signature, and a real
+settlement, which this session may not write to the live database
+(AGENT_RULES.md §2 — "never write to the live database"; STEP 8's own live
+probe requirement is for read/policy checks, and this is a write). Everything
+above was verified by reading the applied `.sql` files directly, plus `tsc`
+and `next build` passing. **The Stripe dashboard's webhook endpoint still
+needs its subscribed events changed** from `payment_intent.succeeded` to
+`checkout.session.completed` + `checkout.session.expired` — an operational
+step, not code, and outside what this track can do from here.
+
 ### 12. 022b `purchaseCardWithCredit` deletion, and two dead error mappings found while checking it
 
 `fn_purchase_card_with_credit(uuid, uuid)` is dropped by `022b_permissions_lockdown.sql`
