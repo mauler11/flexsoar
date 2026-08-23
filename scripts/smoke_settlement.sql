@@ -127,9 +127,12 @@ begin
   select v into v_sku   from _ids where k = 'sku';
   select v into v_admin from _ids where k = 'admin';
 
+  -- custody 'warehouse': these quadrants model RESALES of already-vaulted
+  -- stock, so no vault intake opens and the card goes straight to active.
+  -- The first-sale path is exercised separately in the VAULT section below.
   insert into items (sku_id, consignor_id, status, custody, custody_holder_id,
                      grade_source, submitted_payout, photos, asking_price_cents)
-  values (v_sku, p_seller, 'in_custody', 'seller', p_seller,
+  values (v_sku, p_seller, 'in_custody', 'warehouse', null,
           'seller_declared', p_payout, '[]'::jsonb, p_price)
   returning id into v_item;
 
@@ -245,7 +248,7 @@ begin
       where le.card_id = c.id and le.asset = 'card' and le.direction = 1
       order by le.id desc limit 1
     ) last_acq on true
-    where c.status in ('active', 'locked')
+    where c.status in ('active', 'locked', 'pending_vault')
       and last_acq.account_id is distinct from c.owner_id
   ) x;
   if v_bad is not null then
@@ -254,7 +257,9 @@ begin
       p_step, v_bad;
   end if;
 
-  -- 2e. a card the ledger says is gone must not still be live
+  -- 2e. a card the ledger says is gone must not still be live.
+  --     pending_vault counts as live: the holder owns it, it is simply frozen
+  --     until the physical shoe reaches the vault (023c).
   select string_agg(card_id::text, ', ') into v_bad
   from (
     select c.id as card_id, coalesce(sum(le.direction), 0) as net
@@ -262,7 +267,7 @@ begin
     left join ledger_entries le on le.card_id = c.id and le.asset = 'card'
     group by c.id, c.status
     having (coalesce(sum(le.direction), 0) = 0
-            and c.status in ('active', 'locked'))
+            and c.status in ('active', 'locked', 'pending_vault'))
         or (coalesce(sum(le.direction), 0) = 1
             and c.status in ('burned', 'redeemed'))
   ) x;
@@ -289,8 +294,11 @@ begin
 
   v_liability := fn_credit_liability();
 
+  -- A cancelled order's fee was reversed in the ledger, so counting its
+  -- fee_cents here would make the identity fail on every unwind.
   select coalesce(sum(fee_cents), 0) into v_commission
-  from orders where status <> 'pending';
+  from orders
+  where status not in ('pending', 'cancellation_pending', 'cancelled');
 
   if p_step = 'BASELINE' then
     delete from _base;
@@ -615,6 +623,224 @@ begin
   end;
 end $$;
 select pg_temp.assert_invariants('Q6 hold expiry');
+
+-- ---------------------------------------------------------------------------
+-- VAULT — first-sale custody, 023c
+--
+-- A helper that leaves the item in the consignor's custody, so a purchase is a
+-- genuine FIRST SALE and the vault trigger fires.
+-- ---------------------------------------------------------------------------
+create or replace function pg_temp.mk_unvaulted_listing(
+  p_seller uuid, p_price int, p_payout payout_method
+) returns uuid language plpgsql as $$
+declare
+  v_item uuid; v_card uuid; v_listing uuid; v_sku uuid; v_admin uuid;
+begin
+  select v into v_sku   from _ids where k = 'sku';
+  select v into v_admin from _ids where k = 'admin';
+
+  insert into items (sku_id, consignor_id, status, custody, custody_holder_id,
+                     grade_source, submitted_payout, photos, asking_price_cents)
+  values (v_sku, p_seller, 'in_custody', 'seller', p_seller,
+          'seller_declared', p_payout, '[]'::jsonb, p_price)
+  returning id into v_item;
+
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_admin::text, 'role', 'authenticated')::text, true);
+
+  perform fn_authenticate_item(v_item, 'smoke fixture');
+  perform fn_grade_item(v_item, 0.120, 'smoke fixture',
+                        0.120, 0.120, 0.120, 0.120, 0.120, 0.120);
+  v_card := fn_mint_card(v_item, p_seller);
+  v_listing := fn_list_card(v_card, p_seller, p_price);
+
+  perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
+
+  update listings
+     set payout_method = p_payout,
+         status        = 'public',
+         public_at     = now() - interval '1 hour'
+   where id = v_listing;
+
+  return v_listing;
+end $$;
+
+-- V1: a first sale freezes the card and opens the 48h clock
+do $$
+declare
+  v_listing uuid; v_order uuid; v_seller uuid; v_buyer uuid;
+  v_card uuid; v_intake uuid; v_status card_status;
+begin
+  select v into v_seller from _ids where k = 'seller_my';
+  select v into v_buyer  from _ids where k = 'buyer_a';
+
+  v_listing := pg_temp.mk_unvaulted_listing(v_seller, 22000, 'cash');
+  select card_id into v_card from listings where id = v_listing;
+
+  v_order := fn_purchase_card(v_listing, v_buyer, 'smoke_v1_ref', 0, null);
+  insert into _ids values ('vault_order', v_order), ('vault_card', v_card);
+
+  select status into v_status from cards where id = v_card;
+  if v_status <> 'pending_vault' then
+    raise exception 'V1: card is % after first sale, expected pending_vault',
+      v_status;
+  end if;
+  if (select owner_id from cards where id = v_card) <> v_buyer then
+    raise exception 'V1: ownership did not transfer';
+  end if;
+
+  select id into v_intake from vault_intakes where card_id = v_card;
+  if v_intake is null then
+    raise exception 'V1: no vault intake was opened';
+  end if;
+  if (select due_by from vault_intakes where id = v_intake) <= now() then
+    raise exception 'V1: intake due_by is not in the future';
+  end if;
+  insert into _ids values ('vault_intake', v_intake);
+
+  -- frozen: cannot be relisted
+  begin
+    perform fn_list_card(v_card, v_buyer, 25000);
+    raise exception 'V1: a pending_vault card was RELISTED';
+  exception when others then
+    if sqlerrm like '%was RELISTED%' then raise; end if;
+    raise notice 'V1 ok: relist refused (%)', sqlerrm;
+  end;
+
+  -- frozen: cannot be redeemed
+  begin
+    perform fn_redeem_card(v_card, v_buyer, '{"line1":"x"}'::jsonb, 1500);
+    raise exception 'V1: a pending_vault card was REDEEMED';
+  exception when others then
+    if sqlerrm like '%was REDEEMED%' then raise; end if;
+    raise notice 'V1 ok: redeem refused (%)', sqlerrm;
+  end;
+end $$;
+select pg_temp.assert_invariants('V1 first sale freezes card');
+
+-- V2: vaulting it in releases the card
+do $$
+declare
+  v_intake uuid; v_card uuid; v_admin uuid; v_status card_status;
+begin
+  select v into v_intake from _ids where k = 'vault_intake';
+  select v into v_card   from _ids where k = 'vault_card';
+  select v into v_admin  from _ids where k = 'admin';
+
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_admin::text, 'role', 'authenticated')::text, true);
+
+  perform fn_vault_receive(v_intake, 'smoke shelf A1', 'smoke');
+
+  perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
+
+  select status into v_status from cards where id = v_card;
+  if v_status <> 'active' then
+    raise exception 'V2: card is % after vault receive, expected active', v_status;
+  end if;
+  if (select custody from items where id = (select item_id from cards where id = v_card))
+     <> 'warehouse' then
+    raise exception 'V2: item custody did not move to warehouse';
+  end if;
+  if (select status from vault_intakes where id = v_intake) <> 'received' then
+    raise exception 'V2: intake was not marked received';
+  end if;
+  raise notice 'V2 ok: card released, item vaulted';
+end $$;
+select pg_temp.assert_invariants('V2 vault receive');
+
+-- V3: a default unwinds the sale completely
+do $$
+declare
+  v_listing uuid; v_order uuid; v_seller uuid; v_buyer uuid;
+  v_card uuid; v_intake uuid; v_admin uuid;
+  v_other uuid; v_txn uuid; v_status card_status;
+  v_cur_before bigint; v_cur_after bigint;
+begin
+  select v into v_seller from _ids where k = 'seller_my';
+  select v into v_buyer  from _ids where k = 'buyer_a';
+  select v into v_admin  from _ids where k = 'admin';
+
+  -- a second live listing from the same consignor, to prove the ban pulls it
+  v_other := pg_temp.mk_listing(v_seller, 19000, 'cash');
+
+  v_listing := pg_temp.mk_unvaulted_listing(v_seller, 27000, 'cash');
+  select card_id into v_card from listings where id = v_listing;
+  v_order := fn_purchase_card(v_listing, v_buyer, 'smoke_v3_ref', 0, null);
+  select id into v_intake from vault_intakes where card_id = v_card;
+
+  select coalesce(sum(amount_cents * direction), 0) into v_cur_before
+  from ledger_entries where is_platform and asset = 'currency';
+
+  -- backdate the clock: now() is frozen inside this transaction
+  update vault_intakes set due_by = now() - interval '1 hour' where id = v_intake;
+
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_admin::text, 'role', 'authenticated')::text, true);
+
+  perform fn_vault_mark_defaulted(v_intake, 'smoke: consignor went dark');
+
+  -- Drop back to postgres BEFORE measuring. A sum taken while impersonating is
+  -- RLS-filtered and is not comparable to one taken outside the role, which
+  -- would make untouched money look like it had moved.
+  perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
+
+  if (select status from orders where id = v_order) <> 'cancellation_pending' then
+    raise exception 'V3: order was not marked cancellation_pending';
+  end if;
+  -- step one must not move money
+  select coalesce(sum(amount_cents * direction), 0) into v_cur_after
+  from ledger_entries where is_platform and asset = 'currency';
+  if v_cur_after <> v_cur_before then
+    raise exception
+      'V3: marking a default moved money before the Stripe refund (% -> %)',
+      v_cur_before, v_cur_after;
+  end if;
+
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_admin::text, 'role', 'authenticated')::text, true);
+
+  v_txn := fn_confirm_sale_cancellation(v_order, 're_smoke_v3', true);
+
+  perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
+
+  select status into v_status from cards where id = v_card;
+  if v_status <> 'burned' then
+    raise exception 'V3: card is % after cancellation, expected burned', v_status;
+  end if;
+  if (select status from orders where id = v_order) <> 'cancelled' then
+    raise exception 'V3: order was not marked cancelled';
+  end if;
+  if (select payout_release_at from orders where id = v_order) is not null then
+    raise exception 'V3: the consignor payout was not cancelled';
+  end if;
+  if not (select is_restricted from users where id = v_seller) then
+    raise exception 'V3: the consignor was not banned';
+  end if;
+  if (select status from listings where id = v_other) <> 'cancelled' then
+    raise exception 'V3: the banned consignor''s other listing was not pulled';
+  end if;
+
+  -- the reversal must net to zero on its own, per asset class
+  if exists (
+    select 1 from ledger_entries
+    where txn_id = v_txn and asset <> 'card'
+    group by asset having coalesce(sum(amount_cents * direction), 0) <> 0
+  ) then
+    raise exception 'V3: the reversal transaction does not net to zero';
+  end if;
+
+  raise notice 'V3 ok: sale unwound, card burned, consignor banned, listing pulled';
+end $$;
+select pg_temp.assert_invariants('V3 vault default unwind');
 
 -- ---------------------------------------------------------------------------
 -- SOLVENCY + SWEEP CEILING
