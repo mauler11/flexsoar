@@ -1,0 +1,46 @@
+-- ============================================================================
+-- 024a_ledger_types_trades.sql
+--
+-- ENUM ADDITION ONLY. Separate file because `ALTER TYPE ... ADD VALUE` cannot
+-- be used by a statement in the same transaction that adds it. 024b uses these
+-- values; this must be committed first.
+--
+-- Trades settle any value imbalance in FSC. Those legs need their own entry
+-- types rather than reusing credit_sale_gross / credit_sale_net, because a
+-- trade is not a sale: it has no listing, no seller fee, no payout routing,
+-- and the FSC moves peer to peer rather than being issued against a purchase.
+-- Reusing the sale types would make "FSC paid out on sales" silently include
+-- money that was never a sale.
+--
+--   trade_credit_gross  the side that owes the difference, paying it
+--   trade_credit_net    the side that is owed it, receiving it
+--
+-- ALREADY PRESENT, no addition needed:
+--   trade_fee      the flat platform fee. Both legs carry this type - the
+--                  payer's (-1, is_platform false) and the platform's
+--                  (+1, is_platform true) - following the handling_fee
+--                  precedent. So `sum(amount_cents * direction) where
+--                  entry_type = 'trade_fee'` is ZERO by construction, and
+--                  trade revenue is the is_platform side only. Same shape as
+--                  the sale_fee lesson of 2026-08-22: an entry type is not a
+--                  revenue column.
+--   card_transfer  all four card legs of a swap.
+--
+-- RUN IN: Supabase SQL editor, "Run without RLS".
+-- Run this file COMPLETELY on its own, before 024b.
+-- ============================================================================
+
+alter type ledger_entry_type add value if not exists 'trade_credit_gross';
+alter type ledger_entry_type add value if not exists 'trade_credit_net';
+
+-- ---------------------------------------------------------------------------
+-- Verify before moving on to 024b:
+--
+--   select enumlabel
+--   from pg_enum e join pg_type t on t.oid = e.enumtypid
+--   where t.typname = 'ledger_entry_type'
+--     and enumlabel in ('trade_credit_gross','trade_credit_net','trade_fee')
+--   order by e.enumsortorder;
+--
+-- Expected: all three present.
+-- ---------------------------------------------------------------------------
