@@ -1,0 +1,50 @@
+-- ============================================================================
+-- 023a_card_status_pending_vault.sql
+--
+-- ENUM ADDITION ONLY. This file exists separately because
+-- `ALTER TYPE ... ADD VALUE` cannot be used by a statement in the same
+-- transaction that adds it. 023b uses this value; it must be committed first.
+--
+-- WHY A NEW VALUE RATHER THAN REUSING `locked`:
+-- `locked` already means "has a live listing" - tests/invariants.test.ts
+-- asserts "locks the card behind every live listing, and only those". A card
+-- awaiting vault-in is a different condition entirely: it has an owner, no
+-- listing, and must not transfer. Overloading `locked` would make the two
+-- indistinguishable and break that invariant.
+--
+-- THE STATE MACHINE this value belongs to (custody model, decided 2026-08-22):
+--   1. Consignor lists a shoe held at their own house.
+--   2. Buyer A buys it. Ownership transfers; the card goes PENDING_VAULT and
+--      the item goes `awaiting_seller_shipment`.
+--   3. Consignor is contractually obliged to ship to FlexSoar within 48h.
+--   4. On receipt and authentication the item goes `in_custody`, the card goes
+--      `active`, and it becomes freely tradeable.
+--   5. If the consignor does not ship: cancel, refund Buyer A in kind, burn
+--      the card, ban the consignor, pull their other live listings.
+--
+-- A pending_vault card MUST NOT be sellable, listable, tradeable or
+-- redeemable. That restriction is what bounds counterparty trust to a single
+-- 48-hour window with one KYC'd person, instead of spreading it across every
+-- future holder of the card. 023b enforces it; this file only adds the value.
+--
+-- NOTE: item_status already carries the two states this flow needs -
+-- `awaiting_seller_shipment` for the window and `in_custody` for vaulted -
+-- so no item_status change is required.
+--
+-- RUN IN: Supabase SQL editor, "Run without RLS".
+-- Run this file COMPLETELY on its own, before 023b. Do not paste it in the
+-- same editor tab as anything else.
+-- ============================================================================
+
+alter type card_status add value if not exists 'pending_vault';
+
+-- ---------------------------------------------------------------------------
+-- Verify before moving on to 023b:
+--
+--   select enumlabel
+--   from pg_enum e join pg_type t on t.oid = e.enumtypid
+--   where t.typname = 'card_status'
+--   order by e.enumsortorder;
+--
+-- Expected: active, locked, burned, redeemed, pending_vault
+-- ---------------------------------------------------------------------------
