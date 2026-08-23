@@ -294,11 +294,21 @@ begin
 
   v_liability := fn_credit_liability();
 
-  -- A cancelled order's fee was reversed in the ledger, so counting its
-  -- fee_cents here would make the identity fail on every unwind.
+  -- Commission has two independent sources now:
+  --   sales  -> orders.fee_cents
+  --   trades -> the platform leg of trade_credit_fee (and trade_fee once a
+  --             cash boot exists), which has no orders row at all.
+  -- Leaving trades out makes the identity fail by exactly the trade fee.
   select coalesce(sum(fee_cents), 0) into v_commission
   from orders
   where status not in ('pending', 'cancellation_pending', 'cancelled');
+
+  v_commission := v_commission + coalesce((
+    select sum(amount_cents * direction)
+      from ledger_entries
+     where is_platform
+       and entry_type in ('trade_credit_fee', 'trade_fee')
+  ), 0);
 
   if p_step = 'BASELINE' then
     delete from _base;
@@ -841,6 +851,357 @@ begin
   raise notice 'V3 ok: sale unwound, card burned, consignor banned, listing pulled';
 end $$;
 select pg_temp.assert_invariants('V3 vault default unwind');
+
+-- V4: cancelling an FSC-PAID sale.
+--     V3 only covered a cash sale, which is why 024e's mapping bug survived
+--     until the asset partition caught it. This is the path a non-Malaysian
+--     buyer actually takes.
+do $$
+declare
+  v_seller uuid; v_buyer uuid; v_listing uuid; v_card uuid;
+  v_order uuid; v_intake uuid; v_admin uuid; v_hold uuid; v_txn uuid;
+  v_price int := 6000; v_buyer_before bigint;
+begin
+  select v into v_seller from _ids where k = 'seller_my';
+  select v into v_buyer  from _ids where k = 'seller_us';   -- holds FSC
+  select v into v_admin  from _ids where k = 'admin';
+
+  v_buyer_before := fn_credit_balance(v_buyer);
+  if v_buyer_before < v_price then
+    raise exception 'V4: buyer holds % FSC, needs %', v_buyer_before, v_price;
+  end if;
+
+  v_listing := pg_temp.mk_unvaulted_listing(v_seller, v_price, 'cash');
+  select card_id into v_card from listings where id = v_listing;
+
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_buyer::text, 'role', 'authenticated')::text, true);
+  v_hold := fn_reserve_credit(v_listing, v_price);
+  perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
+
+  v_order := fn_purchase_card(v_listing, v_buyer, 'smoke_v4_ref', v_price, v_hold);
+
+  if (select credit_cents from orders where id = v_order) <> v_price then
+    raise exception 'V4: the sale did not settle in FSC';
+  end if;
+
+  select id into v_intake from vault_intakes where card_id = v_card;
+  update vault_intakes set due_by = now() - interval '1 hour' where id = v_intake;
+
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_admin::text, 'role', 'authenticated')::text, true);
+  perform fn_vault_mark_defaulted(v_intake, 'smoke: FSC-paid default');
+  -- no cash leg, so no Stripe refund reference is required
+  v_txn := fn_confirm_sale_cancellation(v_order, null, false);
+  perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
+
+  if fn_credit_balance(v_buyer) <> v_buyer_before then
+    raise exception 'V4: buyer FSC is %, expected the full % back',
+      fn_credit_balance(v_buyer), v_buyer_before;
+  end if;
+  if (select status from cards where id = v_card) <> 'burned' then
+    raise exception 'V4: the card was not burned';
+  end if;
+  if exists (
+    select 1 from ledger_entries
+    where txn_id = v_txn and asset <> 'card'
+    group by asset having coalesce(sum(amount_cents * direction), 0) <> 0
+  ) then
+    raise exception 'V4: the FSC reversal does not net to zero';
+  end if;
+  raise notice 'V4 ok: FSC-paid sale unwound, buyer made whole in FSC';
+end $$;
+select pg_temp.assert_invariants('V4 FSC-paid unwind');
+
+-- ---------------------------------------------------------------------------
+-- TRADES — 024b
+--
+-- Trades need cards that are active and NOT listed. mk_listing leaves the card
+-- 'locked', so this mints one and stops.
+-- ---------------------------------------------------------------------------
+create or replace function pg_temp.mk_card(
+  p_owner uuid, p_sku uuid, p_price int
+) returns uuid language plpgsql as $$
+declare v_item uuid; v_card uuid; v_admin uuid;
+begin
+  select v into v_admin from _ids where k = 'admin';
+
+  insert into items (sku_id, consignor_id, status, custody, custody_holder_id,
+                     grade_source, submitted_payout, photos, asking_price_cents)
+  values (p_sku, p_owner, 'in_custody', 'warehouse', null,
+          'seller_declared', 'cash', '[]'::jsonb, p_price)
+  returning id into v_item;
+
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_admin::text, 'role', 'authenticated')::text, true);
+
+  perform fn_authenticate_item(v_item, 'smoke fixture');
+  perform fn_grade_item(v_item, 0.120, 'smoke fixture',
+                        0.120, 0.120, 0.120, 0.120, 0.120, 0.120);
+  v_card := fn_mint_card(v_item, p_owner);
+
+  perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
+
+  return v_card;
+end $$;
+
+-- a second SKU priced higher, so a trade can be genuinely uneven
+do $$
+declare v_sku uuid; v_tag text := substr(replace(gen_random_uuid()::text,'-',''),1,8);
+begin
+  insert into skus (brand, model, colorway, size_us,
+                    retail_price_cents, market_price_cents, priced_at)
+  values ('SmokeBrand', 'SmokeModel HI '||v_tag, 'Test/High', 10.0,
+          24000, 33000, now())
+  returning id into v_sku;
+  insert into _ids values ('sku_hi', v_sku);
+end $$;
+
+-- T1: an even swap. No imbalance, initiator pays the flat fee.
+do $$
+declare
+  v_a uuid; v_b uuid; v_ia uuid; v_ib uuid;
+  v_sku uuid; v_offer uuid; v_txn uuid;
+  v_fee bigint; v_a_before bigint; v_pf_before bigint; v_pf_after bigint;
+begin
+  select v into v_ia  from _ids where k = 'seller_us';  -- initiator, holds FSC
+  select v into v_ib  from _ids where k = 'buyer_a';    -- recipient
+  select v into v_sku from _ids where k = 'sku';
+
+  v_a := pg_temp.mk_card(v_ia, v_sku, 30000);
+  v_b := pg_temp.mk_card(v_ib, v_sku, 30000);
+
+  v_fee := coalesce(fn_config_num('trade_fee_cents'), 0);
+  v_a_before := fn_credit_balance(v_ia);
+  select coalesce(sum(amount_cents * direction), 0) into v_pf_before
+  from ledger_entries where is_platform and asset = 'credit';
+
+  if v_a_before < v_fee then
+    raise exception 'T1: initiator holds % FSC, needs % for the fee',
+      v_a_before, v_fee;
+  end if;
+
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_ia::text, 'role', 'authenticated')::text, true);
+  v_offer := fn_create_trade_offer(v_a, v_b);
+  perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
+
+  if (select imbalance_cents from trade_offers where id = v_offer) <> 0 then
+    raise exception 'T1: same SKU and float should value equally, got imbalance %',
+      (select imbalance_cents from trade_offers where id = v_offer);
+  end if;
+  if (select payer_id from trade_offers where id = v_offer) <> v_ia then
+    raise exception 'T1: on a tie the initiator must pay the fee';
+  end if;
+  if (select hold_id from trade_offers where id = v_offer) is null then
+    raise exception 'T1: the fee was not reserved';
+  end if;
+
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_ib::text, 'role', 'authenticated')::text, true);
+  v_txn := fn_accept_trade_offer(v_offer);
+  perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
+
+  if (select owner_id from cards where id = v_a) <> v_ib then
+    raise exception 'T1: the offered card did not move';
+  end if;
+  if (select owner_id from cards where id = v_b) <> v_ia then
+    raise exception 'T1: the requested card did not move';
+  end if;
+  if fn_credit_balance(v_ia) <> v_a_before - v_fee then
+    raise exception 'T1: initiator FSC is %, expected %',
+      fn_credit_balance(v_ia), v_a_before - v_fee;
+  end if;
+
+  select coalesce(sum(amount_cents * direction), 0) into v_pf_after
+  from ledger_entries where is_platform and asset = 'credit';
+  if v_pf_after <> v_pf_before + v_fee then
+    raise exception 'T1: the platform did not collect the flat fee';
+  end if;
+
+  -- four card legs, pairing per card
+  if (select count(*) from ledger_entries
+       where txn_id = v_txn and asset = 'card') <> 4 then
+    raise exception 'T1: expected four card legs';
+  end if;
+  if (select status from credit_holds
+       where id = (select hold_id from trade_offers where id = v_offer)) <> 'consumed' then
+    raise exception 'T1: the hold was not consumed';
+  end if;
+  raise notice 'T1 ok: even swap, flat fee collected';
+end $$;
+select pg_temp.assert_invariants('T1 even swap');
+
+-- T2: uneven. The side receiving the higher-valued card pays the difference.
+do $$
+declare
+  v_ia uuid; v_ib uuid; v_lo uuid; v_hi uuid;
+  v_sku uuid; v_sku_hi uuid; v_offer uuid; v_txn uuid;
+  v_imb bigint; v_fee bigint; v_payer uuid;
+  v_ia_before bigint; v_ib_before bigint;
+begin
+  select v into v_ia     from _ids where k = 'seller_us';
+  select v into v_ib     from _ids where k = 'buyer_a';
+  select v into v_sku    from _ids where k = 'sku';
+  select v into v_sku_hi from _ids where k = 'sku_hi';
+
+  v_lo := pg_temp.mk_card(v_ia, v_sku,    30000);  -- initiator gives cheaper
+  v_hi := pg_temp.mk_card(v_ib, v_sku_hi, 33000);  -- and wants dearer
+
+  if fn_card_value_cents(v_hi) <= fn_card_value_cents(v_lo) then
+    raise exception 'T2: fixture SKUs did not produce an imbalance';
+  end if;
+
+  v_ia_before := fn_credit_balance(v_ia);
+  v_ib_before := fn_credit_balance(v_ib);
+
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_ia::text, 'role', 'authenticated')::text, true);
+  v_offer := fn_create_trade_offer(v_lo, v_hi);
+  perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
+
+  select imbalance_cents, fee_cents, payer_id
+    into v_imb, v_fee, v_payer
+  from trade_offers where id = v_offer;
+
+  if v_payer <> v_ia then
+    raise exception 'T2: the initiator receives the higher card and must pay';
+  end if;
+  if v_imb <> fn_card_value_cents(v_hi) - fn_card_value_cents(v_lo) then
+    raise exception 'T2: imbalance % does not match the value difference', v_imb;
+  end if;
+
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_ib::text, 'role', 'authenticated')::text, true);
+  v_txn := fn_accept_trade_offer(v_offer);
+  perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
+
+  if fn_credit_balance(v_ia) <> v_ia_before - v_imb - v_fee then
+    raise exception 'T2: payer FSC is %, expected %',
+      fn_credit_balance(v_ia), v_ia_before - v_imb - v_fee;
+  end if;
+  if fn_credit_balance(v_ib) <> v_ib_before + v_imb then
+    raise exception 'T2: the counterparty did not receive the imbalance';
+  end if;
+  raise notice 'T2 ok: imbalance % settled in FSC, fee %', v_imb, v_fee;
+end $$;
+select pg_temp.assert_invariants('T2 uneven swap');
+
+-- T3: a pending_vault card cannot be traded, on either side.
+--     This is the whole point of the custody model.
+do $$
+declare
+  v_seller uuid; v_buyer uuid; v_other uuid;
+  v_listing uuid; v_card uuid; v_own uuid; v_sku uuid;
+begin
+  select v into v_seller from _ids where k = 'seller_my';
+  select v into v_buyer  from _ids where k = 'buyer_b';
+  select v into v_other  from _ids where k = 'buyer_a';
+  select v into v_sku    from _ids where k = 'sku';
+
+  v_listing := pg_temp.mk_unvaulted_listing(v_seller, 21000, 'cash');
+  select card_id into v_card from listings where id = v_listing;
+  perform fn_purchase_card(v_listing, v_buyer, 'smoke_t3_ref', 0, null);
+
+  if (select status from cards where id = v_card) <> 'pending_vault' then
+    raise exception 'T3: fixture card is not pending_vault';
+  end if;
+
+  v_own := pg_temp.mk_card(v_other, v_sku, 30000);
+
+  -- offering a frozen card
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_buyer::text, 'role', 'authenticated')::text, true);
+  begin
+    perform fn_create_trade_offer(v_card, v_own);
+    raise exception 'T3: a pending_vault card was OFFERED';
+  exception when others then
+    if sqlerrm like '%was OFFERED%' then raise; end if;
+    raise notice 'T3 ok: offering a frozen card refused (%)', sqlerrm;
+  end;
+  perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
+
+  -- requesting a frozen card
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_other::text, 'role', 'authenticated')::text, true);
+  begin
+    perform fn_create_trade_offer(v_own, v_card);
+    raise exception 'T3: a pending_vault card was REQUESTED';
+  exception when others then
+    if sqlerrm like '%was REQUESTED%' then raise; end if;
+    raise notice 'T3 ok: requesting a frozen card refused (%)', sqlerrm;
+  end;
+  perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
+end $$;
+select pg_temp.assert_invariants('T3 frozen card refused');
+
+-- T4: declining releases the reservation rather than stranding it.
+do $$
+declare
+  v_ia uuid; v_ib uuid; v_a uuid; v_b uuid; v_sku uuid;
+  v_offer uuid; v_hold uuid; v_avail_before bigint;
+begin
+  select v into v_ia  from _ids where k = 'seller_us';
+  select v into v_ib  from _ids where k = 'buyer_a';
+  select v into v_sku from _ids where k = 'sku';
+
+  v_a := pg_temp.mk_card(v_ia, v_sku, 30000);
+  v_b := pg_temp.mk_card(v_ib, v_sku, 30000);
+  v_avail_before := fn_credit_available(v_ia);
+
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_ia::text, 'role', 'authenticated')::text, true);
+  v_offer := fn_create_trade_offer(v_a, v_b);
+  perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
+
+  select hold_id into v_hold from trade_offers where id = v_offer;
+  if fn_credit_available(v_ia) >= v_avail_before then
+    raise exception 'T4: the offer did not reduce available FSC';
+  end if;
+
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_ib::text, 'role', 'authenticated')::text, true);
+  perform fn_resolve_trade_offer(v_offer, 'declined');
+  perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
+
+  if (select status from trade_offers where id = v_offer) <> 'declined' then
+    raise exception 'T4: the offer was not declined';
+  end if;
+  if (select status from credit_holds where id = v_hold) <> 'released' then
+    raise exception 'T4: the hold was not released on decline';
+  end if;
+  if fn_credit_available(v_ia) <> v_avail_before then
+    raise exception 'T4: available FSC did not return to % (got %)',
+      v_avail_before, fn_credit_available(v_ia);
+  end if;
+  if (select owner_id from cards where id = v_a) <> v_ia then
+    raise exception 'T4: a declined offer moved a card';
+  end if;
+  raise notice 'T4 ok: decline released the hold, no cards moved';
+end $$;
+select pg_temp.assert_invariants('T4 decline releases hold');
 
 -- ---------------------------------------------------------------------------
 -- SOLVENCY + SWEEP CEILING
