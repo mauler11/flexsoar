@@ -75,7 +75,14 @@ export type ItemStatus =
   | 'released'
   | 'returned_to_consignor';
 
-export type CardStatus = 'active' | 'locked' | 'burned' | 'redeemed';
+/**
+ * 023a_card_status_pending_vault.sql added 'pending_vault': ownership has
+ * transferred but the physical shoe hasn't reached FlexSoar yet (first-sale
+ * custody model, 023c). Distinct from 'locked' (has a live listing) — a
+ * pending_vault card has no listing and must not transfer, list, trade or
+ * redeem until vault-in flips it to 'active'.
+ */
+export type CardStatus = 'active' | 'locked' | 'burned' | 'redeemed' | 'pending_vault';
 
 export type ListingStatus =
   | 'early_access'
@@ -188,6 +195,7 @@ export const CARD_STATUSES: readonly CardStatus[] = [
   'locked',
   'burned',
   'redeemed',
+  'pending_vault',
 ] as const;
 
 export const LISTING_STATUSES: readonly ListingStatus[] = [

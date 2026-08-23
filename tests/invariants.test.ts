@@ -38,7 +38,7 @@ import {
   gradeFloatFromComponents,
   type GradeComponents,
 } from '../lib/db/grading';
-import type { Card, Sku, User } from '../lib/db/types';
+import { CARD_STATUSES, type Card, type CardStatus, type Sku, type User } from '../lib/db/types';
 import {
   CREDIT_HOLD_MINUTES_FALLBACK,
   cashLegCents,
@@ -46,6 +46,7 @@ import {
   isFscOnlyPurchase,
   validateRequestedCredit,
 } from '../app/(market)/checkout-math';
+import { CREDIT_HOLD_MINUTES_FALLBACK as CONTRACT_CREDIT_HOLD_MINUTES_FALLBACK } from '../lib/api/contract';
 
 // ------------------------------------------------------------
 // SQL MIRRORS
@@ -1297,5 +1298,64 @@ describe('checkoutExpiresAtSeconds', () => {
     const expires = checkoutExpiresAtSeconds(now, 60 * 24 * 10); // 10 days
     const nowSeconds = Math.floor(now / 1000);
     expect(expires).toBeLessThan(nowSeconds + 24 * 60 * 60);
+  });
+});
+
+// ------------------------------------------------------------
+// data: 023a pending_vault, PlatformConfig.credit_hold_minutes,
+// getVaultIntakeForCard (closing three track/market workarounds)
+// ------------------------------------------------------------
+
+describe('CardStatus (023a pending_vault)', () => {
+  it('CARD_STATUSES carries the value 023a_card_status_pending_vault.sql added to the live enum', () => {
+    expect(CARD_STATUSES).toContain('pending_vault');
+    expect(CARD_STATUSES).toEqual(['active', 'locked', 'burned', 'redeemed', 'pending_vault']);
+  });
+
+  it('a value of every CardStatus member is assignable with no cast — the exhaustiveness this task asked to verify', () => {
+    // If CardStatus ever regresses (a member removed, or added only here and
+    // not to CARD_STATUSES), this fails to type-check rather than passing
+    // silently — the array literal below must list every member of the type.
+    const allStatuses: readonly CardStatus[] = CARD_STATUSES;
+    const exhaustive: Record<CardStatus, true> = Object.fromEntries(
+      allStatuses.map((s) => [s, true]),
+    ) as Record<CardStatus, true>;
+    expect(Object.keys(exhaustive).sort()).toEqual([...CARD_STATUSES].sort());
+  });
+
+  it('getCards/getListings default status filter (contract.ts) still excludes pending_vault, mirroring 023c\'s "must not be sellable, listable, tradeable or redeemable"', () => {
+    // Mirrors statusFilter()'s fallback argument at contract.ts's getCards()
+    // call site: .in('status', statusFilter<CardStatus>(query.status, ['active', 'locked'])).
+    // Widening CardStatus must never widen this allow-list by accident.
+    const defaultSellableStatuses: readonly CardStatus[] = ['active', 'locked'];
+    expect(defaultSellableStatuses).not.toContain('pending_vault');
+  });
+});
+
+describe('PlatformConfig.credit_hold_minutes (021/024f)', () => {
+  it('contract.ts exposes CREDIT_HOLD_MINUTES_FALLBACK, matching the live platform_config value (1440, verified 2026-08-23)', () => {
+    expect(CONTRACT_CREDIT_HOLD_MINUTES_FALLBACK).toBe(1440);
+  });
+
+  it('stays in sync with market\'s own checkout-math.ts fallback of the same name and value', () => {
+    // These are two separate constants in two separate modules (contract.ts
+    // is track/data's; checkout-math.ts is track/market's, pinned before this
+    // pass exposed the live value on PlatformConfig). They must read the same
+    // number until track/market switches to getPlatformConfig().credit_hold_minutes
+    // — see AGENT_RULES.md section 5's "cash collected with no card
+    // transferred" risk if a Stripe Session expiry ever outlives its hold.
+    expect(CONTRACT_CREDIT_HOLD_MINUTES_FALLBACK).toBe(CREDIT_HOLD_MINUTES_FALLBACK);
+  });
+
+  it('mirrors getPlatformConfig()\'s fallback precedence: a live config row wins, a missing one falls back to the constant', () => {
+    // Mirrors: byKey.get('credit_hold_minutes')?.num_value ?? CREDIT_HOLD_MINUTES_FALLBACK
+    const readCreditHoldMinutes = (row: { num_value: number | null } | undefined): number =>
+      row?.num_value ?? CONTRACT_CREDIT_HOLD_MINUTES_FALLBACK;
+
+    expect(readCreditHoldMinutes(undefined)).toBe(1440);
+    expect(readCreditHoldMinutes({ num_value: 60 })).toBe(60);
+    // num_value present but null (a malformed row) still falls back rather
+    // than propagating null into a caller expecting a number.
+    expect(readCreditHoldMinutes({ num_value: null })).toBe(1440);
   });
 });

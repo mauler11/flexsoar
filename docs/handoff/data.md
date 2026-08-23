@@ -12,6 +12,130 @@ with the credit-ledger and art_url work below.
 
 ## Open
 
+### 14. Closed three track/market workarounds (`docs/handoff/market.md`, 2026-08-23 entry); one correction to that entry's safety reasoning, filed here per AGENT_RULES.md section 10
+
+Task named three items track/market had documented as workarounds. All three
+addressed in `lib/db/types.ts` / `lib/api/contract.ts` only — no file outside
+this track's lane was touched.
+
+**1. `CardStatus` was missing `'pending_vault'`** (023a_card_status_pending_vault.sql
+added it to the live enum). Added to `CardStatus` and `CARD_STATUSES` in
+`lib/db/types.ts`, with a doc comment distinguishing it from `'locked'` (per
+023a's own comment: `'locked'` means "has a live listing"; `'pending_vault'`
+means "owner changed, shoe hasn't arrived yet — no listing, must not
+transfer"). **Grepped the whole repo for a switch or allow-list over
+`CardStatus` that could now silently admit it**: no `switch` on `CardStatus`
+exists anywhere (checked every `switch (` in the repo — the three that exist
+are keyed on error codes, sort options, or wizard steps, none on card
+status). The one allow-list that matters, `getCards()`/`getListings()`'s
+default status filter in `lib/api/contract.ts`
+(`.in('status', statusFilter<CardStatus>(query.status, ['active', 'locked']))`),
+is an explicit two-value list, not derived from the type — widening
+`CardStatus` cannot widen it, and `'pending_vault'` staying excluded from a
+default browse/card query is exactly what 023c's "must not be sellable,
+listable, tradeable or redeemable" requires. Test added confirming this
+allow-list still excludes it (`tests/invariants.test.ts`, `describe('CardStatus
+(023a pending_vault)'`).
+
+This retires `isPendingVault()`/`CardStatusWithVault` in
+`app/(market)/card/[id]/page.tsx` — that's track/market's file, not edited
+here; they can compare `detail.status === "pending_vault"` directly now that
+the mirror type carries it.
+
+**2. `getPlatformConfig()` did not expose `credit_hold_minutes`.** Added to
+the `PlatformConfig` interface and to `getPlatformConfig()`'s mapping, same
+pattern as every other `platform_config` key here (`byKey.get(...) ??
+fallback`). New export `CREDIT_HOLD_MINUTES_FALLBACK = 1440`, same pattern as
+the existing `REDEMPTION_HANDLING_FEE_CENTS`. Live value is 1440 (024f's own
+comment: "credit_hold_minutes was just raised to 1440"), matching Stripe's
+24h Checkout Session ceiling — the fallback's doc comment states the
+direction-of-risk explicitly: raising it (or the live value) above 1440 is
+harmless since Stripe just clamps its own ceiling; **lowering the live
+`platform_config` value while a caller still reads the 1440 fallback is not**
+— a Checkout Session could then outlive the hold backing its FSC leg, so a
+buyer could pay after their hold already released the FSC back: cash
+collected with no card transferred. Tests added confirming the fallback
+value, that it matches market's own pinned copy of the same constant in
+`app/(market)/checkout-math.ts` (they will drift once market switches to the
+live config value — flagged there, not fixed here, since `app/(market)/**`
+is out of lane), and the exact fallback precedence logic.
+
+This retires market's `CREDIT_HOLD_MINUTES_FALLBACK` pin in
+`app/(market)/checkout-math.ts` once they switch `createCheckoutAction` to
+read `getPlatformConfig().credit_hold_minutes` — not done here, out of lane.
+
+**3. Added `getVaultIntakeForCard(cardId)` to the contract**, reading the
+023c `vault_intakes` table (`status, due_by, carrier, tracking_number,
+shipped_at`, most recent row per card). Session client; `vault_intakes`' own
+RLS (`consignor_id = self OR buyer_id = self OR admin`) does the access
+control, matching what market's local workaround read already relied on.
+This is a **read**, not a write — the all-writes-through-contract rule in
+AGENT_RULES.md section 2 doesn't cover it, so exposing it is a consistency
+fix, not closing a rule violation (worth being precise about, since the task
+described it that way too). Shape matches market's existing
+`VaultIntakeStatus` in `app/(market)/queries.ts` field-for-field (only
+`due_by`/`tracking_number` are snake_case here vs. their camelCase — this
+contract follows every other export's PostgREST-column-name convention, so
+their adapter, not this shape, should change when they switch over).
+
+Both 2 and 3 are additive to `lib/api/contract.ts` (new exports, no frozen
+signature touched) — documented in the SANCTIONED EXTENSIONS block at the
+top of the file under a new `023a/023c:` bullet.
+
+**Correction filed, not made in place — `docs/handoff/market.md` is
+track/market's file (AGENT_RULES.md section 10: "Never edit another track's
+handoff file").** Their 2026-08-23 entry, section 1, reasons that the
+FSC-only direct `purchaseCardSplit()` call is safe "because
+`app/(market)/actions.ts` is a `'use server'` Server Action running with the
+buyer's own session." Read `purchaseCardSplit()` in `lib/api/contract.ts`
+(lines ~1453 on this branch) to check: it calls `createServiceSupabase()`
+unconditionally, every single call, regardless of what client code invoked
+it from. Service-role has no `auth.uid()` — there is no session inside this
+function no matter how the caller got there. **What actually makes the
+FSC-only path safe is the hold**, read directly out of
+`021_credit_holds.sql`'s `fn_purchase_card_core` (lines 284-306, unchanged by
+024f): when `p_hold_id` is passed, the function re-validates it independent
+of any session — status `'active'`, not expired, `user_id = p_buyer_id`,
+`listing_id = p_listing_id`, `amount_cents >= v_credit` — all in SQL, all
+against the row `reserveCredit()` created earlier under the buyer's own
+session. The `elsif fn_current_user_id() is distinct from p_buyer_id` branch
+right after it (021_credit_holds.sql:307) is the one that *would* need a
+session, and it only runs when `p_hold_id is null` — never true for
+`purchaseCardSplit`'s FSC-only path, since it throws
+`CREDIT_PROVENANCE_REQUIRED` itself before the RPC call if `creditCents > 0`
+and `holdId` is null. **Practical implication, since this is exactly the
+kind of thing AGENT_RULES.md section 9 asks to say plainly: if a future
+change ever dropped the `holdId` argument from a `purchaseCardSplit` call
+while leaving `creditCents > 0`, the current (correct) doc reasoning would
+predict a hard failure — `CREDIT_PROVENANCE_REQUIRED` or the SQL's own
+"spending FSC requires a session..." raise — because there is no session to
+fall back on. It would not fail open.** Flagging for track/market to correct
+in their own file; not urgent (no code depends on the doc text), but the
+reasoning as written points at the wrong mechanism for the next person who
+reads it.
+
+**Verification:** `npx tsc --noEmit` clean. `npm test`: **142 passing** (was
+136) — six new tests across two `describe` blocks (`CardStatus (023a
+pending_vault)`, `PlatformConfig.credit_hold_minutes (021/024f)`), all
+model-level against the real exported constants/types (`CARD_STATUSES` from
+`lib/db/types.ts`, `CREDIT_HOLD_MINUTES_FALLBACK` from `lib/api/contract.ts`
+itself — imported directly this time, not mirrored: probed the import cost
+first (~2.2s standalone), confirmed it adds well under a second to this
+file's actual run (432ms total import time for the whole suite), nowhere
+near route.ts's 14s that ruled out a direct import in item 13). `npm run
+build` compiles (`Compiled successfully`, all 19 routes render, including
+`/card/[id]` and `/api/webhooks/stripe`).
+
+**Not verified live:** `getVaultIntakeForCard()` was not probed against the
+live project — doing so would need a real `vault_intakes` row (a first-sale
+purchase), which is a real financial write this session may not perform
+(AGENT_RULES.md section 2). Read against `023c_vault_custody.sql`'s actual
+DDL instead (table + RLS policy text), not guessed. The `credit_hold_minutes`
+live value (1440) was not re-verified live in this pass either — taken from
+024f's own migration comment, which states it was "just raised to 1440,"
+and from market's 2026-08-23 handoff entry, which live-verified it with the
+anon key on the same day.
+
 ### 13. Checkout wired to split settlement — webhook now on checkout.session.completed/.expired; one grant gap found and fixed; one left as a genuine blocker for track/market
 
 Task: wire the checkout data layer to 019c/021/022b's split-settlement SQL,

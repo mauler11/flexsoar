@@ -46,6 +46,10 @@
  *     it no longer has execute on, and would have failed FORBIDDEN on every
  *     call. Needed so the checkout-webhook wiring in this pass has a working
  *     service-role path to sweep expired holds on checkout.session.expired.
+ *   023a/023c: credit_hold_minutes on PlatformConfig (CREDIT_HOLD_MINUTES_FALLBACK
+ *     for a database with no row); getVaultIntakeForCard, a new read of the
+ *     023c vault_intakes table (not a frozen-contract write, so this is
+ *     additive consistency, not a violation being closed).
  * along with their query/input types and new ContractErrorCode members.
  * Additive only: nothing that existed before behaves differently.
  *
@@ -1710,6 +1714,26 @@ export async function getPayoutMethodForUser(userId: UUID): Promise<DerivedPayou
  */
 export const REDEMPTION_HANDLING_FEE_CENTS: Cents = 1500;
 
+/**
+ * The credit-hold TTL, in minutes, when no platform_config row exists.
+ * 021 seeded this at 30; 024f raised the live value to 1440 (24h) so an
+ * abandoned hold outlasts Stripe's webhook retries. 1440 is also exactly
+ * Stripe Checkout's own expires_at ceiling — see
+ * checkoutExpiresAtSeconds()'s use of credit_hold_minutes in
+ * app/(market)/checkout-math.ts.
+ *
+ * DIRECTION OF RISK: raising this value (or the live config) beyond 1440 is
+ * harmless — Stripe just clamps the Session's expires_at at its own 24h
+ * ceiling regardless. LOWERING the live platform_config value while this
+ * fallback constant stays 1440 is not: a caller reading only the fallback
+ * would set a Checkout Session expiry that outlives the buyer's actual hold,
+ * so a Session could still be paid after its hold already released the FSC
+ * back — cash collected with no card transferred. Always prefer the live
+ * getPlatformConfig().credit_hold_minutes value; this constant exists only
+ * for a database with no platform_config row at all.
+ */
+export const CREDIT_HOLD_MINUTES_FALLBACK = 1440;
+
 /** The live platform_config rows that UI code can branch on. */
 export interface PlatformConfig {
   /** redemption_handling_fee_cents, USD cents charged to ship a redeemed item. */
@@ -1720,6 +1744,14 @@ export interface PlatformConfig {
   credit_payout_premium_bps: number;
   /** credit_purchase_min_cents — the smallest FSC top-up. */
   credit_purchase_min_cents: Cents;
+  /**
+   * credit_hold_minutes (021) — how long a reserveCredit() hold stays
+   * 'active' before fn_expire_credit_holds() can sweep it. Use this to bound
+   * a Stripe Checkout Session's expires_at so the Session cannot outlive the
+   * hold backing its FSC leg — see CREDIT_HOLD_MINUTES_FALLBACK's doc comment
+   * for why lowering the live value matters and raising it does not.
+   */
+  credit_hold_minutes: number;
   /**
    * show_numeric_float (018-020) — live-verified false. While false, the raw
    * numeric float and float_percentile must not be shown to a non-admin
@@ -1759,6 +1791,8 @@ export async function getPlatformConfig(): Promise<PlatformConfig> {
       byKey.get('credit_payout_premium_bps')?.num_value ?? 500,
     credit_purchase_min_cents:
       (byKey.get('credit_purchase_min_cents')?.num_value as Cents | undefined) ?? 500,
+    credit_hold_minutes:
+      byKey.get('credit_hold_minutes')?.num_value ?? CREDIT_HOLD_MINUTES_FALLBACK,
     show_numeric_float: byKey.get('show_numeric_float')?.bool_value ?? false,
   };
 }
@@ -3149,6 +3183,50 @@ export async function getPublicProfile(handle: string): Promise<PublicProfile | 
     ...row,
     rank_name: (rank.data as { name: string } | null)?.name ?? `Level ${row.level}`,
   };
+}
+
+/**
+ * One `vault_intakes` (023c) row for a card — the 48h window between a
+ * first-sale and the physical shoe reaching FlexSoar. This is a read, not a
+ * write; the all-writes-through-contract rule doesn't cover it, so exposing
+ * it is a consistency addition, not closing a violation.
+ */
+export interface VaultIntakeStatus {
+  status: 'awaiting_shipment' | 'in_transit' | 'received' | 'defaulted' | 'cancelled';
+  due_by: Timestamptz;
+  carrier: string | null;
+  tracking_number: string | null;
+  shipped_at: Timestamptz | null;
+}
+
+interface VaultIntakeRow {
+  status: VaultIntakeStatus['status'];
+  due_by: Timestamptz;
+  carrier: string | null;
+  tracking_number: string | null;
+  shipped_at: Timestamptz | null;
+}
+
+/**
+ * The open (or most recently closed) vault_intakes row for a card, if any.
+ * Session client — vault_intakes' own RLS (023c) is `consignor_id = self OR
+ * buyer_id = self OR admin`, so a stranger gets null, same as "no intake"
+ * would, and this function adds no access control of its own.
+ */
+export async function getVaultIntakeForCard(cardId: UUID): Promise<VaultIntakeStatus | null> {
+  const supabase = await createServerSupabase();
+
+  const result = await supabase
+    .from('vault_intakes')
+    .select('status, due_by, carrier, tracking_number, shipped_at')
+    .eq('card_id', cardId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (result.error && !isNoRows(result.error)) fail(result.error, 'vault_intakes');
+
+  return result.data as VaultIntakeRow | null;
 }
 
 /** Catalog search for the browse filters and the admin SKU screens. */
