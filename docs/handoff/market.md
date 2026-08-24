@@ -1,6 +1,108 @@
 # Handoff — track/market
 
-## 2026-08-24 — setCountry() wiring task: BLOCKED, the contract export the task cited does not exist on any branch
+## 2026-08-24 — setCountry() wiring: CLOSED. Re-verified against the re-landed contract, not trusted from the earlier draft
+
+The blocker below is cleared: `setCountry(countryCode)` is on `main` now
+(`grep -n "setCountry" lib/api/contract.ts` — present at L1768, `throws
+UNAUTHENTICATED, INVALID_COUNTRY_CODE`; `lib/db/errors.ts` maps both message
+patterns). Re-verified the signature and error codes against the current
+tree rather than trusting the draft below — the contract was rebuilt on the
+re-land, not just re-applied verbatim, and one assumption in the draft
+turned out to be wrong (see item 3).
+
+**1. Persist on diff (`app/(market)/list/actions.ts`,
+`submitListingIntakeAction`).** After the existing `isValidCountryCode`
+gate and before `submitListing(...)`: `const onFile = await getUser({ id: me
+})`; if `onFile?.country_code !== countryRaw`, call `setCountry(countryRaw)`.
+Skipped when unchanged, so a returning consignor resubmitting doesn't take a
+write every time.
+
+**2. Error handling.** `setCountry`'s `try/catch` maps `ContractError` with
+code `INVALID_COUNTRY_CODE` → `{ code: "COUNTRY_REQUIRED", ... }`, and
+`UNAUTHENTICATED` → the same `SIGN_IN_REQUIRED` shape the top of the action
+already returns for a signed-out caller. Also added a `COUNTRY_NOT_SET` case
+to `submitErrorMessage()` (see item 3 — it's a real, not hypothetical, code
+`submitListing` itself can throw).
+
+**3. Ordering — re-verification changed the reasoning, not the code.** The
+draft assumed `fn_submit_listing` never touches
+`fn_payout_method_for_user`, so ordering only mattered for the *later*
+`fn_list_card` call at relist time. **That assumption was wrong** — checked
+this pass by reading `fn_submit_listing`'s actual current body
+(`019c_settlement.sql:373-409`, the `create or replace` that supersedes
+013's original), not by re-grepping the same narrower file
+(`019b_payout_routing.sql`) the earlier blocked pass had checked. Line 408:
+`v_payout := fn_payout_method_for_user(v_user);`, unconditional, before the
+photo checks. So a seller with no country on file would have **this very
+submission** raise `COUNTRY_NOT_SET` — not just a later relist. The drafted
+code placement (`setCountry` before `submitListing`) was already correct
+positionally, but for a stronger reason than originally understood. Also
+confirmed `fn_list_card` itself calls `fn_payout_method_for_user` inline in
+its `listings` insert (`019c_settlement.sql:360`), backing item 4 below.
+
+Also worth flagging, found while reading `019c_settlement.sql` directly:
+`submitListing`'s doc comment in `contract.ts` (L2162-2163) still says cash
+settlement is "gated to proven sellers" and refuses with `UNPROVEN_SELLER`
+via `platform_config.cash_payout_min_fulfilments` — `019c`'s actual
+`fn_submit_listing` body has no such gate; its own comment says the gate
+"is gone." Doc drift in `contract.ts`, not something in this track's lane
+to fix, noted here since a future pass reading that doc comment would be
+working from a stale description of what `submitListing` can throw.
+
+**4. The relist gap — applied as drafted.** `listCardAction`
+(`app/(market)/actions.ts`) had zero country capture; a card owner who never
+went through `/list` (bought the card, never sold anything) would hit
+`fn_list_card`'s `COUNTRY_NOT_SET` raise with no field anywhere on
+`/card/[id]` to fix it. Fixed: `card/[id]/page.tsx` now reads the owner's
+`getUser({ id }).country_code` (distinct from the existing
+`getPayoutMethodForUser(...).catch(() => null)` read, which can't
+distinguish "no country" from any other read failure) and passes it to
+`ListForm` as `countryCode`. `ListForm` renders a required country `<select>`
+(same `COUNTRIES` list `PricePayout` uses) exactly when
+`!isValidCountryCode(countryCode)`, and includes `country_code` in the
+submitted form data only then. `listCardAction` calls `setCountry()` with it
+— only when present, so an owner who already has one on file never triggers
+an extra write — before `listCard()`.
+
+### Tests
+
+**168 passing (was 164, +4).** New `describe('ListForm — country picker on
+the relist path ...')`: `renderToStaticMarkup`, same convention as the
+`PricePayout` country tests above — no country on file renders the picker,
+an omitted `countryCode` prop behaves the same as `null`, a malformed
+on-file value (`'my'`, lowercase) still counts as unset, and a valid one
+(`'US'`) renders neither the picker nor its copy. Confirmed `ListForm` (which
+imports `listCardAction`, a `'use server'` action pulling in
+`next/headers`/`next/navigation`/`stripe`) is safe to import directly in this
+test file before relying on it — `lib/api/contract.ts` is already imported
+here (L57-58) with no issue, and a live run confirmed no import-time crash.
+
+`npx tsc --noEmit` clean. `npm run build` compiles (`Compiled successfully`,
+all 21 routes). `npx eslint` on every changed file: clean (the same two
+pre-existing warnings in `list/actions.ts`'s unrelated `fileSkuRequestAction`
+noted in the prior pass, still untouched here).
+
+**Not verified live:** none of this was probed against the live project —
+`setCountry`/`fn_set_country` and the `fn_list_card`/`fn_submit_listing`
+raises were confirmed by reading the applied SQL and the rebuilt contract
+directly, not by a live write (this track may not write to the live
+database, AGENT_RULES.md §2).
+
+### Files changed
+
+`app/(market)/list/actions.ts` (persist-on-diff + error handling in
+`submitListingIntakeAction`, `COUNTRY_NOT_SET` case in
+`submitErrorMessage`), `app/(market)/actions.ts` (`listCardAction` accepts
+and persists an optional `country_code`), `components/market/ListForm.tsx`
+(required country picker, gated on a new `countryCode` prop),
+`app/(market)/card/[id]/page.tsx` (reads and threads the owner's on-file
+country), `tests/invariants.test.ts` (appended one `describe` block, did not
+touch any existing block). No `.sql` file touched, no other edit to
+`lib/api/contract.ts` or `lib/db/**`.
+
+---
+
+## 2026-08-24 — setCountry() wiring task: BLOCKED, the contract export the task cited does not exist on any branch (superseded above — kept for the verification trail)
 
 Task handed to this pass: wire `setCountry(countryCode)` — described as shipped
 in `lib/api/contract.ts` by track/data commit `39f0efa`, backed by

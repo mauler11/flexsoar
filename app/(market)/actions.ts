@@ -32,11 +32,13 @@ import {
   reserveCredit,
   releaseCreditHold,
   purchaseCardSplit,
+  setCountry,
 } from '@/lib/api/contract';
 import type { ShippingAddress } from '@/lib/api/contract';
 import type { UUID } from '@/lib/db/types';
 import { safeNextPath } from '@/app/(auth)/paths';
 import { currentUserId, currentUserLevel, REDEMPTION_HANDLING_FEE_CENTS } from '@/app/(market)/queries';
+import { isValidCountryCode } from '@/components/market/intake/intake-config';
 import {
   CREDIT_HOLD_MINUTES_FALLBACK,
   cashLegCents,
@@ -92,6 +94,7 @@ async function siteOrigin(): Promise<string> {
 export async function listCardAction(formData: FormData): Promise<void> {
   const cardId = String(formData.get('card_id') ?? '');
   const priceCents = Number(formData.get('price_cents'));
+  const countryRaw = String(formData.get('country_code') ?? '').trim().toUpperCase();
   const backTo = cardPath(cardId);
 
   const me = await currentUserId();
@@ -117,6 +120,19 @@ export async function listCardAction(formData: FormData): Promise<void> {
     }
     if (detail.listing) {
       redirectWithError(backTo, 'card already has a live listing');
+    }
+
+    // fn_list_card calls fn_payout_method_for_user internally
+    // (019c_settlement.sql:360) and (025) raises COUNTRY_NOT_SET for a
+    // seller with none on file. ListForm only sends country_code when it
+    // rendered its own picker (the owner had none) — see its doc comment —
+    // so this write lands right before the call that needs it, and only
+    // when there was actually nothing on file.
+    if (countryRaw) {
+      if (!isValidCountryCode(countryRaw)) {
+        redirectWithError(backTo, 'select a valid country before listing');
+      }
+      await setCountry(countryRaw);
     }
 
     await listCard(cardId, me, priceCents);

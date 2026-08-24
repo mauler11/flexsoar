@@ -8,7 +8,7 @@
  */
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getCard, getListing, getItem, getCreditAvailable, getPayoutMethodForUser } from "@/lib/api/contract";
+import { getCard, getListing, getItem, getCreditAvailable, getPayoutMethodForUser, getUser } from "@/lib/api/contract";
 import type { CardStatus } from "@/lib/db/types";
 import {
   currentUserId,
@@ -110,6 +110,15 @@ export default async function CardPage({
   const sellerPayoutMethod = canListNow
     ? await getPayoutMethodForUser(detail.owner.id).catch(() => null)
     : null;
+  // fn_list_card calls fn_payout_method_for_user internally and (025) raises
+  // COUNTRY_NOT_SET for a seller with none on file. This screen is the only
+  // place a card the owner already holds (not one filed through the intake
+  // wizard) can be listed, so ListForm needs the on-file value directly —
+  // not just the derived payout method above, which the catch(() => null)
+  // above can't distinguish from any other read failure.
+  const ownerCountryCode = canListNow
+    ? (await getUser({ id: detail.owner.id }).catch(() => null))?.country_code ?? null
+    : null;
 
   const vaultIntake: VaultIntakeStatus | null =
     isOwner && isPendingVault(detail.status)
@@ -194,6 +203,7 @@ export default async function CardPage({
                   cardId={detail.id}
                   oracleValueCents={oracleCents}
                   sellerPayoutMethod={sellerPayoutMethod}
+                  countryCode={ownerCountryCode}
                 />
                 <div>
                   <h2 className="mb-2 font-mono text-[10px] font-bold uppercase tracking-tight text-muted">

@@ -59,6 +59,7 @@ import type { ListingSummary } from '../lib/api/contract';
 import { contractErrorCode } from '../lib/db/errors';
 import { MarketTile } from '../components/market/MarketTile';
 import { PricePayout } from '../components/market/intake/PricePayout';
+import { ListForm } from '../components/market/ListForm';
 import { COUNTRIES, isValidCountryCode } from '../components/market/intake/intake-config';
 
 // ------------------------------------------------------------
@@ -1677,5 +1678,46 @@ describe('PricePayout — country-driven payout disclosure (docs/handoff/market.
       }),
     );
     expect(html).not.toContain("You&#x27;ll be paid");
+  });
+});
+
+describe('ListForm — country picker on the relist path (docs/handoff/market.md, "the relist gap")', () => {
+  // fn_list_card calls fn_payout_method_for_user internally
+  // (019c_settlement.sql:360) and (025) now raises COUNTRY_NOT_SET for a
+  // seller with none on file. Unlike the intake wizard, relisting a card the
+  // owner already holds never asks for a country anywhere — this pins that
+  // ListForm renders a required picker exactly when the account has nothing
+  // valid on file, and stays out of the way otherwise.
+  const baseProps = {
+    cardId: 'card-1',
+    oracleValueCents: 20000,
+  };
+
+  it('no country on file: renders the required country picker', () => {
+    const html = renderToStaticMarkup(
+      createElement(ListForm, { ...baseProps, countryCode: null }),
+    );
+    expect(html).toContain('Your country');
+    expect(html).toContain('No country on file yet');
+  });
+
+  it('countryCode prop omitted entirely: still renders the picker (same as null)', () => {
+    const html = renderToStaticMarkup(createElement(ListForm, baseProps));
+    expect(html).toContain('No country on file yet');
+  });
+
+  it('a lowercase or otherwise malformed on-file code does not count as set: picker still renders', () => {
+    const html = renderToStaticMarkup(
+      createElement(ListForm, { ...baseProps, countryCode: 'my' }),
+    );
+    expect(html).toContain('No country on file yet');
+  });
+
+  it('a valid country already on file: no picker, nothing extra asked', () => {
+    const html = renderToStaticMarkup(
+      createElement(ListForm, { ...baseProps, countryCode: 'US' }),
+    );
+    expect(html).not.toContain('No country on file yet');
+    expect(html).not.toContain('Select your country');
   });
 });

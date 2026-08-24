@@ -17,6 +17,7 @@
 
 import {
   submitListing,
+  setCountry,
   getUser,
   ContractError,
 } from "@/lib/api/contract";
@@ -181,6 +182,12 @@ function submitErrorMessage(code: string, detail: string): string {
       return "Upload at least 4 photos first (they must be uploaded, not just selected).";
     case "INVALID_PHOTO_URL":
       return "One photo has an invalid URL — remove and re-upload it.";
+    case "COUNTRY_NOT_SET":
+      // Shouldn't fire in the normal path — setCountry() below lands before
+      // this call — but fn_submit_listing (019c) also calls
+      // fn_payout_method_for_user directly, so this is a real code it can
+      // raise, not a hypothetical one.
+      return "Select your country before submitting — it decides whether you're paid in cash or FSC.";
     default:
       return detail || "submission failed";
   }
@@ -262,20 +269,50 @@ export async function submitListingIntakeAction(
   // resolves a null users.country_code to 'credit' with no error anywhere, so
   // a seller who skips this is silently paid FSC instead of cash. Refused
   // server-side; the wizard's own required-field UI is convenience only.
-  //
-  // NOT YET PERSISTED to users.country_code: no contract export exists to
-  // write it, and users' self-update grant (007_profile_updates.sql) covers
-  // only `handle` — writing this column needs a track/data contract export
-  // plus a migration widening that grant (filed in docs/handoff/market.md).
-  // This check is real and not skippable, but until that lands it validates
-  // the seller made a real choice on THIS submission; it cannot make
-  // fn_payout_method_for_user resolve any differently for them yet.
   if (!isValidCountryCode(countryRaw)) {
     return {
       ok: false,
       code: "COUNTRY_REQUIRED",
       message: "Select your country before submitting — it decides whether you're paid in cash or FSC.",
     };
+  }
+
+  // Persist it — setCountry() (025's fn_set_country) is the write path
+  // docs/handoff/market.md was blocked on; it's landed now. Only write when
+  // it actually changed, so a returning consignor whose country is already
+  // on file doesn't take a write on every submission.
+  //
+  // MUST land before submitListing() below, and not only because of the
+  // later fn_list_card call at relist time: fn_submit_listing (019c) itself
+  // calls fn_payout_method_for_user(v_user) directly, so a seller with no
+  // country on file would have this very submission raise COUNTRY_NOT_SET,
+  // not just a later listing. Getting this backwards fails the submission
+  // that was supposed to fix it.
+  const onFile = await getUser({ id: me });
+  if (onFile?.country_code !== countryRaw) {
+    try {
+      await setCountry(countryRaw);
+    } catch (thrown) {
+      if (thrown instanceof ContractError && thrown.code === "INVALID_COUNTRY_CODE") {
+        return {
+          ok: false,
+          code: "COUNTRY_REQUIRED",
+          message: "That country code isn't valid — pick one from the list and try again.",
+        };
+      }
+      if (thrown instanceof ContractError && thrown.code === "UNAUTHENTICATED") {
+        return {
+          ok: false,
+          code: "SIGN_IN_REQUIRED",
+          message: "Sign in to submit your listing.",
+        };
+      }
+      return {
+        ok: false,
+        code: "SUBMIT_FAILED",
+        message: thrown instanceof Error ? thrown.message : "could not save your country",
+      };
+    }
   }
 
   try {

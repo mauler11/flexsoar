@@ -5,6 +5,17 @@
  * submitted as integer cents. The 15%-below-oracle warning is shown, and it
  * is exactly that — a warning. A below-oracle ask is a seller's prerogative
  * and fn_list_card accepts it; the warning makes the choice an informed one.
+ *
+ * Country: fn_list_card calls fn_payout_method_for_user internally (right in
+ * the listings insert, 019c_settlement.sql:360), which (025) now raises
+ * COUNTRY_NOT_SET for a seller with none on file instead of silently
+ * resolving to 'credit'. The self-serve intake wizard
+ * (components/market/intake/PricePayout.tsx) is where a NEW item's country
+ * gets asked and persisted — but relisting a card this owner already holds
+ * (bought it, or it predates 025) never goes through that wizard, so without
+ * this the owner would hit fn_list_card's raise with no field anywhere on
+ * this screen to fix it. `countryCode` (the account's country on file, or
+ * null) decides whether this picker renders at all.
  */
 "use client";
 
@@ -14,6 +25,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Banner } from "@/components/market/Banner";
 import { formatUsd } from "@/components/card/format";
+import { COUNTRIES, isValidCountryCode } from "@/components/market/intake/intake-config";
 
 export interface ListFormProps {
   cardId: string;
@@ -25,6 +37,13 @@ export interface ListFormProps {
    * omitted in that case rather than guessed at.
    */
   sellerPayoutMethod?: "cash" | "credit" | null;
+  /**
+   * The account's users.country_code on file, or null. Not valid ⇒ this form
+   * renders a required country picker and sends it along with the listing
+   * request; listCardAction persists it (setCountry) before calling
+   * fn_list_card. Already valid ⇒ no picker, nothing extra sent.
+   */
+  countryCode?: string | null;
 }
 
 function toCents(text: string): number | null {
@@ -38,10 +57,13 @@ export function ListForm({
   cardId,
   oracleValueCents,
   sellerPayoutMethod,
+  countryCode,
 }: ListFormProps) {
   const [price, setPrice] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const needsCountry = !isValidCountryCode(countryCode);
+  const [selectedCountry, setSelectedCountry] = useState("");
 
   const cents = toCents(price);
   const belowOracle =
@@ -53,10 +75,15 @@ export function ListForm({
       setError("Enter a price in FSC (whole cents, > 0).");
       return;
     }
+    if (needsCountry && !isValidCountryCode(selectedCountry)) {
+      setError("Select your country before listing — it decides whether you're paid in cash or FSC.");
+      return;
+    }
     setError(null);
     const data = new FormData();
     data.set("card_id", cardId);
     data.set("price_cents", String(value));
+    if (needsCountry) data.set("country_code", selectedCountry);
     startTransition(() => listCardAction(data));
   }
 
@@ -73,6 +100,37 @@ export function ListForm({
         <Banner tone="info" title="You'll be paid in cash">
           Your account routes to a cash bank payout.
         </Banner>
+      )}
+
+      {needsCountry && (
+        <div className="flex flex-col gap-1">
+          <span className="font-mono text-[10px] uppercase tracking-tight text-muted">
+            Your country
+          </span>
+          <select
+            aria-label="Your country"
+            value={selectedCountry}
+            onChange={(e) => {
+              setSelectedCountry(e.target.value);
+              if (e.target.value) setError(null);
+            }}
+            disabled={pending}
+            className="border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[12px] tracking-tight text-foreground"
+          >
+            <option value="" disabled>
+              Select your country…
+            </option>
+            {COUNTRIES.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <span className="font-mono text-[10px] tracking-tight text-muted">
+            No country on file yet — decides whether this sale pays you in
+            cash or FSC. Required to list.
+          </span>
+        </div>
       )}
 
       {oracleValueCents != null && (
@@ -112,7 +170,11 @@ export function ListForm({
         <Button
           type="button"
           size="sm"
-          disabled={pending || cents == null}
+          disabled={
+            pending ||
+            cents == null ||
+            (needsCountry && !isValidCountryCode(selectedCountry))
+          }
           onClick={submit}
         >
           {pending ? "Listing…" : "List card"}
