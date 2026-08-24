@@ -211,6 +211,13 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   // is buyer funds backing outstanding FSC'. Verified against the applied
   // migration file, now in this worktree.
   { pattern: /sweep of .+ exceeds unswept commission of/i, code: 'SWEEP_EXCEEDS_UNSWEPT' },
+
+  // 025_user_country.sql fn_payout_method_for_user — 'user % has no country
+  // on file, so their payout cannot be determined - set one before listing'.
+  // Called from inside fn_purchase_card_core (021_credit_holds.sql:325), so
+  // this can fire mid-settlement, after Stripe has already captured the
+  // buyer's card.
+  { pattern: /has no country on file/i, code: 'COUNTRY_NOT_SET' },
 ];
 
 /**

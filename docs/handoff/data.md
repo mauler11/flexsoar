@@ -12,6 +12,91 @@ with the credit-ledger and art_url work below.
 
 ## Open
 
+### 15. COUNTRY_NOT_SET given the same loud-path treatment as CREDIT_HOLD_EXPIRED in the Stripe webhook
+
+Own finding from a prior pass: `isPermanentError()` in
+`app/api/webhooks/stripe/route.ts` omitted `COUNTRY_NOT_SET`, so a settlement
+for a pre-025 listing whose seller has no country retried forever on a 500
+while the buyer's money sat captured. Root cause, read from the migration:
+025's `fn_payout_method_for_user` now raises instead of defaulting NULL to
+`'credit'`, and `fn_purchase_card_core` calls it mid-settlement
+(`021_credit_holds.sql:325`), so the raise happens **after** Stripe has
+already captured the card, inside the same transaction `purchaseCardSplit()`
+awaits.
+
+**The code didn't exist yet.** `COUNTRY_NOT_SET` was not a member of
+`ContractErrorCode` and had no `lib/db/errors.ts` message rule — the raise
+fell through to `UNKNOWN`, which explains why it wasn't already in
+`isPermanentError()`'s list (it isn't now either, deliberately) but also
+wasn't caught by anything else — a bare `UNKNOWN` hit the generic 500 branch.
+
+**Changes:**
+- `lib/api/contract.ts` — added `'COUNTRY_NOT_SET'` to `ContractErrorCode`,
+  doc comment citing 025 and the `fn_purchase_card_core` call site.
+- `lib/db/errors.ts` — added a `MESSAGE_RULES` entry matching
+  `/has no country on file/i` → `COUNTRY_NOT_SET`.
+- `app/api/webhooks/stripe/route.ts` — added `isCountryNotSet()`, mirroring
+  `isCreditHoldExpired()`: intercepted in the catch block *before*
+  `isPermanentError()`, logs `console.error` CRITICAL with payment_intent,
+  listing_id, buyer_id, and now seller_id (hoisted `listing` out of the `try`
+  so the `catch` can still read `listing.seller_id` — it's only reachable
+  after `findListingForSettlement` succeeds, so it's always populated by the
+  time this branch runs), then acknowledges 200 `recorded: false` so Stripe
+  stops retrying. No forced retry, no refund — same "leave it for a human"
+  posture as the credit-hold-expired branch.
+
+**What an operator does when they see this log — spelled out because the fix
+is out-of-band and there is no button for it:**
+1. Get the seller to set a country. This **must** be the seller acting
+   themselves — `fn_set_country` is self-service by construction (`update
+   users set country_code = ... where id = v_user`, `v_user :=
+   fn_current_user_id()`), and there is no admin-callable equivalent. An
+   operator cannot do this step on the seller's behalf.
+2. Once set, **the settlement must be replayed, and this codebase has no
+   in-app way to do that.** No script, no admin action, nothing under
+   `app/admin/**` touches `purchaseCardSplit` or settlement replay (checked:
+   the only three call sites of `purchaseCardSplit` in the repo are
+   `app/(market)/actions.ts`, `app/api/webhooks/stripe/route.ts` itself, and
+   its definition in `lib/api/contract.ts`). The only real path is Stripe's
+   own event-resend feature — dashboard "Resend" on the original
+   `checkout.session.completed` event for that `payment_intent`, or the
+   equivalent API call — which re-delivers the event to this same webhook.
+   With the country now set, `fn_payout_method_for_user` resolves normally,
+   `findOrderBySettlementRef` still finds no order for that
+   `payment_intent.id`, and `purchaseCardSplit` completes on the replay. This
+   is a genuine gap: filing it here rather than building a replay script,
+   since scripting a live settlement write is exactly the kind of "test
+   purchase against the project is a real purchase" action AGENT_RULES.md
+   section 2 rules out for an agent to do unprompted — a human should decide
+   whether an admin-side replay tool is worth building.
+
+**Tests:** added `tests/invariants.test.ts` — `COUNTRY_NOT_SET error mapping
+(025)` (imports the real `contractErrorCode()` from `lib/db/errors.ts`
+directly rather than mirroring it; that module's only dependency on
+`lib/api/contract.ts` is a type-only import that erases at compile time, and
+`lib/api/contract.ts` is already loaded in this suite via
+`CREDIT_HOLD_MINUTES_FALLBACK`, so there was no import-cost question like
+item 13's route.ts case) and a new case in `stripe webhook error
+classification` asserting `COUNTRY_NOT_SET` is excluded from the
+`isPermanentError()` mirror, same shape as the existing `CREDIT_HOLD_EXPIRED`
+case.
+
+**Verification:** `npx tsc --noEmit` clean. `npm test`: **161 passing** (was
+158 before this pass — the task description's stated baseline of 162 did not
+match what this worktree actually ran before these changes; noting the
+discrepancy rather than the target number). `npm run build` compiles
+(`Compiled successfully`, all 19 routes render, including
+`/api/webhooks/stripe`). `graphify update .` run after the edits.
+
+**Not verified live:** could not reproduce the actual raise against the live
+project (would require a real listing whose seller has a NULL country_code
+post-025, which 025's own migration comment says no longer exists for any
+user who lists after it ran — reproducing it needs a pre-025 in-flight
+listing, which this pass did not have). The message-pattern match
+(`/has no country on file/i`) is taken verbatim from
+`025_user_country.sql`'s `raise exception` text, not independently confirmed
+against a live Postgres error.
+
 ### 14. Closed three track/market workarounds (`docs/handoff/market.md`, 2026-08-23 entry); one correction to that entry's safety reasoning, filed here per AGENT_RULES.md section 10
 
 Task named three items track/market had documented as workarounds. All three

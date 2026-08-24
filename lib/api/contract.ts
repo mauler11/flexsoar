@@ -267,6 +267,18 @@ export type ContractErrorCode =
    * this settlement is asking to spend.
    */
   | 'CREDIT_HOLD_INSUFFICIENT'
+  /**
+   * 025_user_country.sql fn_payout_method_for_user — 'user % has no country
+   * on file, so their payout cannot be determined - set one before listing'.
+   * Reachable from settlement itself: fn_purchase_card_core
+   * (021_credit_holds.sql:325) calls fn_payout_method_for_user(seller_id)
+   * inside the transaction, so a pre-025 listing whose seller never set a
+   * country raises this mid-settlement, after the buyer's card has already
+   * been charged through Stripe. Same shape as CREDIT_HOLD_EXPIRED — not
+   * swallowed into isPermanentError()'s quiet acknowledge, see the call site
+   * in app/api/webhooks/stripe/route.ts.
+   */
+  | 'COUNTRY_NOT_SET'
   | 'UNKNOWN';
 
 export class ContractError extends Error {

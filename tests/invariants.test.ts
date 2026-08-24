@@ -56,6 +56,7 @@ import {
 } from '../app/(market)/checkout-math';
 import { CREDIT_HOLD_MINUTES_FALLBACK as CONTRACT_CREDIT_HOLD_MINUTES_FALLBACK } from '../lib/api/contract';
 import type { ListingSummary } from '../lib/api/contract';
+import { contractErrorCode } from '../lib/db/errors';
 import { MarketTile } from '../components/market/MarketTile';
 import { PricePayout } from '../components/market/intake/PricePayout';
 import { COUNTRIES, isValidCountryCode } from '../components/market/intake/intake-config';
@@ -1106,13 +1107,14 @@ type WebhookErrorCode =
   | 'PAYOUT_MISMATCH' | 'INSUFFICIENT_CREDIT' | 'CREDIT_SETTLEMENT_DISABLED'
   | 'CREDIT_PROVENANCE_REQUIRED' | 'CREDIT_HOLD_WRONG_USER'
   | 'CREDIT_HOLD_WRONG_LISTING' | 'CREDIT_HOLD_INSUFFICIENT'
-  | 'SETTLEMENT_REF_REQUIRED' | 'CREDIT_HOLD_EXPIRED' | 'UNKNOWN';
+  | 'SETTLEMENT_REF_REQUIRED' | 'CREDIT_HOLD_EXPIRED' | 'COUNTRY_NOT_SET' | 'UNKNOWN';
 
 /**
- * Mirrors isPermanentError() in route.ts. CREDIT_HOLD_EXPIRED is deliberately
- * excluded — route.ts intercepts it before this check runs, because unlike
- * every code here it means the buyer's cash already moved through Stripe and
- * needs louder handling than a quiet acknowledge.
+ * Mirrors isPermanentError() in route.ts. CREDIT_HOLD_EXPIRED and
+ * COUNTRY_NOT_SET are deliberately excluded — route.ts intercepts both
+ * before this check runs, because unlike every code here they mean the
+ * buyer's cash already moved through Stripe and need louder handling than a
+ * quiet acknowledge.
  */
 const isPermanentError = (code: WebhookErrorCode): boolean =>
   code === 'SELF_PURCHASE' ||
@@ -1204,8 +1206,36 @@ describe('stripe webhook error classification', () => {
     expect(isPermanentError('CREDIT_HOLD_EXPIRED')).toBe(false);
   });
 
+  it('does NOT classify COUNTRY_NOT_SET as an ordinary permanent error — it needs the loud path (025)', () => {
+    expect(isPermanentError('COUNTRY_NOT_SET')).toBe(false);
+  });
+
   it('lets an unmapped code fall through to a 500 retry rather than silently acknowledging', () => {
     expect(isPermanentError('UNKNOWN')).toBe(false);
+  });
+});
+
+/**
+ * 025_user_country.sql fn_payout_method_for_user, raised from inside
+ * fn_purchase_card_core (021_credit_holds.sql:325) — a settlement for a
+ * seller with no country on file fails mid-transaction, after Stripe has
+ * already captured the buyer's card. Tests the real contractErrorCode()
+ * mapping (lib/db/errors.ts), not a mirror — that module has no next/server,
+ * Stripe, or Supabase runtime cost of its own (its only dependency on
+ * lib/api/contract.ts is a type-only import, erased at compile time), and
+ * lib/api/contract.ts is already loaded in this suite (CREDIT_HOLD_MINUTES_FALLBACK
+ * above), so importing it directly carries no meaningful extra cost.
+ */
+describe('COUNTRY_NOT_SET error mapping (025)', () => {
+  it('maps fn_payout_method_for_user\'s no-country raise to COUNTRY_NOT_SET', () => {
+    const message =
+      'user 11111111-1111-1111-1111-111111111111 has no country on file, so their payout ' +
+      'cannot be determined - set one before listing';
+    expect(contractErrorCode({ message })).toBe('COUNTRY_NOT_SET');
+  });
+
+  it('does not confuse an unrelated "not found" message for COUNTRY_NOT_SET', () => {
+    expect(contractErrorCode({ message: 'listing abc not found' })).toBe('NOT_FOUND');
   });
 });
 

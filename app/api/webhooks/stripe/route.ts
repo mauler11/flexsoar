@@ -59,6 +59,7 @@ import {
 import {
   findListingForSettlement,
   findOrderBySettlementRef,
+  type ListingForSettlement,
 } from '@/lib/db/settlement';
 
 /** The two Checkout Session events this route understands. Everything else is acknowledged and dropped. */
@@ -75,10 +76,11 @@ const SETTLEMENT_CURRENCY = 'usd';
  * database state that triggered them do not change between Stripe retries —
  * so none of these should be handed back to Stripe's retry loop.
  *
- * CREDIT_HOLD_EXPIRED is deliberately NOT included here even though it is
- * just as non-retryable: it means the buyer's cash has already moved through
- * Stripe and this settlement did not happen, which needs louder handling than
- * a quiet acknowledge. See isCreditHoldExpired() and its call site below.
+ * CREDIT_HOLD_EXPIRED and COUNTRY_NOT_SET are deliberately NOT included here
+ * even though both are just as non-retryable: each means the buyer's cash has
+ * already moved through Stripe and this settlement did not happen, which
+ * needs louder handling than a quiet acknowledge. See isCreditHoldExpired(),
+ * isCountryNotSet(), and their call sites below.
  */
 function isPermanentError(thrown: unknown): boolean {
   if (!(thrown instanceof ContractError)) return false;
@@ -109,6 +111,21 @@ function isPermanentError(thrown: unknown): boolean {
  */
 function isCreditHoldExpired(thrown: unknown): thrown is ContractError {
   return thrown instanceof ContractError && thrown.code === 'CREDIT_HOLD_EXPIRED';
+}
+
+/**
+ * 025_user_country.sql fn_payout_method_for_user, raised from inside
+ * fn_purchase_card_core (021_credit_holds.sql:325) — the seller has no
+ * country on file, so their payout method cannot be resolved. Fires only
+ * from the checkout.session.completed branch, after Stripe has already
+ * captured the buyer's card, and it is a permanent condition (retrying will
+ * keep hitting the same missing column) — but it is NOT a quiet
+ * isPermanentError() acknowledge, same reasoning as isCreditHoldExpired()
+ * above: the buyer's cash already moved and no order was recorded, so this
+ * needs the loud path, not a buried log line. See the call site.
+ */
+function isCountryNotSet(thrown: unknown): thrown is ContractError {
+  return thrown instanceof ContractError && thrown.code === 'COUNTRY_NOT_SET';
 }
 
 /** 200 + a reason. The event is understood and will never become actionable. */
@@ -212,6 +229,11 @@ async function handleCheckoutCompleted(
   }
   const { listingId, buyerId, creditCents, holdId } = parsed;
 
+  // Hoisted out of the try block so the catch below can still name the
+  // seller in the COUNTRY_NOT_SET log — that error can only be thrown after
+  // this is populated, but TS does not know that from inside the catch.
+  let listing: ListingForSettlement | null = null;
+
   try {
     // Stripe delivers at-least-once. If this intent is already recorded, the
     // work is done — say so rather than letting fn_purchase_card raise on a
@@ -226,7 +248,7 @@ async function handleCheckoutCompleted(
       );
     }
 
-    const listing = await findListingForSettlement(listingId);
+    listing = await findListingForSettlement(listingId);
     if (!listing) {
       return acknowledge('no such listing', { listingId, paymentIntent: intent.id });
     }
@@ -296,6 +318,54 @@ async function handleCheckoutCompleted(
           reason:
             'credit hold expired after payment was captured — buyer charged, no card ' +
             'delivered, requires manual reconciliation',
+          paymentIntent: intent.id,
+        },
+        { status: 200 },
+      );
+    }
+
+    if (isCountryNotSet(thrown)) {
+      // Same shape as CREDIT_HOLD_EXPIRED above: the buyer has been charged
+      // through Stripe and this settlement did NOT happen, because
+      // fn_purchase_card_core could not resolve the seller's payout method.
+      // Retrying will not help — the seller's country is out-of-band from
+      // this webhook and cannot fix itself between deliveries — so
+      // acknowledge to stop Stripe's retry loop, but make this impossible to
+      // miss and leave the order for a human to reconcile. Recovery: the
+      // seller sets their country (self-service only — fn_set_country
+      // updates exactly the caller's own row, so no admin surface can do
+      // this on their behalf), and then the settlement must be replayed —
+      // this codebase has no in-app replay for a settlement that failed
+      // after Stripe capture, so that means resending this payment intent's
+      // checkout.session.completed event from the Stripe dashboard or API.
+      const detail = {
+        paymentIntent: intent.id,
+        listingId,
+        buyerId,
+        sellerId: listing?.seller_id ?? 'unknown — listing lookup did not complete before this error',
+        creditCents,
+        holdId,
+        amountReceived: intent.amount_received,
+        currency: intent.currency,
+      };
+      console.error(
+        '[stripe-webhook] CRITICAL — SELLER COUNTRY NOT SET AFTER PAYMENT CAPTURED. ' +
+          'Buyer was charged and holds no card. Manual reconciliation required: seller must ' +
+          'set a country, then this payment intent\'s checkout.session.completed event must ' +
+          'be replayed from Stripe.',
+        detail,
+      );
+      console.error(
+        `[stripe-webhook] CRITICAL — payment_intent=${intent.id} buyer=${buyerId} ` +
+          `seller=${detail.sellerId} listing=${listingId}: ${thrown.message}`,
+      );
+      return NextResponse.json(
+        {
+          received: true,
+          recorded: false,
+          reason:
+            'seller has no country on file — buyer charged, no card delivered, requires ' +
+            'manual reconciliation',
           paymentIntent: intent.id,
         },
         { status: 200 },
