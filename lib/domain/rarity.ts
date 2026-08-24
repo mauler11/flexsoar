@@ -11,7 +11,7 @@
  * red; `tier` still drives value bands and trade-up eligibility.
  */
 
-import type { Cents, FloatValue, Tier } from '@/lib/db/types';
+import type { Cents, ConditionGrade, FloatValue, Tier } from '@/lib/db/types';
 
 // ------------------------------------------------------------
 // TIERS — mirrors the tier_bands rows inserted by 001_schema.sql
@@ -147,4 +147,35 @@ export function floatBandLabel(float: FloatValue): string {
 /** Always 3 decimals, matching numeric(4,3). '0.062', never '0.06'. */
 export function formatFloat(float: FloatValue): string {
   return float.toFixed(3);
+}
+
+/**
+ * `public.condition_grade` (018-020, trigger-derived) -> the same FloatBand
+ * key these display bands already use. The boundaries agree (see
+ * docs/handoff/admin.md item 5), so this is a relabelling, not a second
+ * source of truth.
+ */
+const CONDITION_GRADE_BANDS: Record<ConditionGrade, FloatBand> = {
+  factory_new: 'FN',
+  minimal_wear: 'MW',
+  field_tested: 'FT',
+  well_worn: 'WW',
+  battle_scarred: 'BS',
+};
+
+export function conditionGradeBand(grade: ConditionGrade): FloatBand {
+  return CONDITION_GRADE_BANDS[grade];
+}
+
+/**
+ * The published grade name — 'Factory New' .. 'Battle-Scarred' — for a card.
+ * Prefers the DB-derived `condition_grade` when present; falls back to
+ * deriving the band from the raw float for rows that predate 018-020 (e.g.
+ * lib/mock fixtures). This is the ONLY thing that may render while
+ * platform_config.show_numeric_float is false — no numeric float, no
+ * percentile alongside it.
+ */
+export function publishedConditionLabel(float: FloatValue, grade?: ConditionGrade | null): string {
+  const band = grade ? conditionGradeBand(grade) : floatBand(float);
+  return floatBandSpec(band).label;
 }

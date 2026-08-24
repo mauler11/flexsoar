@@ -27,7 +27,7 @@ import { CardTile } from "@/components/card/CardTile";
 import { FloatBar } from "@/components/card/FloatBar";
 import { Sprite } from "@/components/card/Sprite";
 import { TierBadge } from "@/components/card/TierBadge";
-import { formatFsc, formatMyr } from "@/components/card/format";
+import { formatUsd } from "@/components/card/format";
 import { oracleValueCents } from "@/components/card/value";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -197,7 +197,7 @@ export default function StyleguidePage() {
               <div className="text-2xl font-bold uppercase tracking-tight">
                 Air Jordan 1 Retro High OG
               </div>
-              <div className="text-lg font-bold tracking-tight">1280.00 FSC</div>
+              <div className="text-lg font-bold tracking-tight">$1,280.00</div>
               <div className="text-[12px] tracking-tight text-muted">
                 Chicago Lost and Found · US 10.5
               </div>
@@ -311,7 +311,7 @@ export default function StyleguidePage() {
         {/* ------------------------------------------------------------ */}
         <Section
           title="Card detail (hero)"
-          subtitle="Full-width frame, sprite at scale, percentile badge, mint number, price in FSC with the ringgit conversion beneath. Oracle fair value is always shown beside an ask."
+          subtitle="Full-width frame, sprite at scale, condition badge, mint number, price in USD. Oracle fair value is always shown beside an ask. The second card demos showNumericFloat=true — the numeric gradient bar + percentile, gated behind platform_config.show_numeric_float (live-verified false today)."
         >
           <div className="flex flex-col gap-6">
             <CardDetail
@@ -324,6 +324,7 @@ export default function StyleguidePage() {
               sku={skuById(cards[3].sku_id)!}
               listing={activeListingForCard(cards[3].id)}
               priceCents={activeListingForCard(cards[3].id)?.price_cents ?? null}
+              showNumericFloat
             />
           </div>
         </Section>
@@ -427,7 +428,7 @@ export default function StyleguidePage() {
                     </Td>
                     <Td className="text-muted">{owner.handle}</Td>
                     <Td className="text-right">
-                      {value != null ? formatFsc(value) : "—"}
+                      {value != null ? formatUsd(value) : "—"}
                     </Td>
                   </Tr>
                 );
@@ -488,8 +489,9 @@ export default function StyleguidePage() {
             tier — the red 1 OF 1 ribbon sits on top of tier 5, never instead of it.
           </div>
           <div className="mt-1">
-            All prices are FSC (1 FSC = 1 USD). Ringgit conversions shown here use a fixed
-            display rate of {formatMyr(10000)} to {formatFsc(10000)} and are display only.
+            All prices are USD — the marketplace&apos;s unit of account. FSC is
+            earned-only store credit (1 FSC = 1 USD internally) and is never a
+            price; ringgit is never shown anywhere on the platform.
           </div>
         </footer>
       </main>
