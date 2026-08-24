@@ -50,6 +50,11 @@
  *     for a database with no row); getVaultIntakeForCard, a new read of the
  *     023c vault_intakes table (not a frozen-contract write, so this is
  *     additive consistency, not a violation being closed).
+ *   025: setCountry (fn_set_country — session client only, writes exactly the
+ *     caller's own users.country_code, no p_user argument exists to write
+ *     anyone else's); new ContractErrorCode member INVALID_COUNTRY_CODE.
+ *     COUNTRY_NOT_SET (fn_payout_method_for_user's raise) landed earlier,
+ *     ef83d6d — not re-added here.
  * along with their query/input types and new ContractErrorCode members.
  * Additive only: nothing that existed before behaves differently.
  *
@@ -279,6 +284,15 @@ export type ContractErrorCode =
    * in app/api/webhooks/stripe/route.ts.
    */
   | 'COUNTRY_NOT_SET'
+  /**
+   * 025_user_country.sql fn_set_country — 'country must be a two-letter ISO
+   * country code, got %'. p_country, upper-cased and trimmed, does not match
+   * `^[A-Z]{2}$`. Shape-only validation (025's own comment: not checked
+   * against a table of real codes, since cash_payout_countries already
+   * decides the only thing the platform acts on) — a syntactically valid but
+   * unrecognised code is accepted and simply resolves to 'credit' payout.
+   */
+  | 'INVALID_COUNTRY_CODE'
   | 'UNKNOWN';
 
 export class ContractError extends Error {
@@ -1689,9 +1703,17 @@ export async function expireCreditHolds(): Promise<number> {
  *
  * The AUTHORITATIVE answer to "how will this seller be paid": 'cash' when
  * `users.country_code` is in `cash_payout_countries` (currently MY only),
- * 'credit' otherwise — including when country_code is null. Live-verified
- * (2026-08-21): a MY user resolves 'cash', a null-country user and an
- * unrecognised user id both resolve 'credit'.
+ * 'credit' otherwise. Live-verified pre-025 (2026-08-21): a MY user resolved
+ * 'cash', a null-country user and an unrecognised user id both resolved
+ * 'credit'.
+ *
+ * SUPERSEDED by 025_user_country.sql, live now: a null or empty
+ * country_code no longer resolves to 'credit' — it RAISES (mapped to
+ * COUNTRY_NOT_SET, see ContractErrorCode). NULL meant "we do not know",
+ * which 025's own comment distinguishes from "not Malaysian"; conflating the
+ * two was the bug it closes. An unrecognised-but-present code (not in
+ * `cash_payout_countries`) still resolves to 'credit' as before — only the
+ * null/empty case changed.
  *
  * NEVER let a client supply a payout method and use it for routing —
  * `listings.payout_method` is a cached DISPLAY value only, not a source of
@@ -1704,6 +1726,8 @@ export async function expireCreditHolds(): Promise<number> {
  * an authenticated session, and service-role alike, since it is a query
  * over a user id the caller supplies, not the caller's own identity. Runs on
  * the session client for consistency with the rest of the read surface.
+ *
+ * @throws COUNTRY_NOT_SET (025) when p_user's country_code is null or empty.
  */
 export async function getPayoutMethodForUser(userId: UUID): Promise<DerivedPayoutMethod> {
   const supabase = await createServerSupabase();
@@ -1711,6 +1735,43 @@ export async function getPayoutMethodForUser(userId: UUID): Promise<DerivedPayou
     await supabase.rpc('fn_payout_method_for_user', { p_user: userId }),
     'fn_payout_method_for_user',
   ) as DerivedPayoutMethod;
+}
+
+/**
+ * fn_set_country(p_country) -> void
+ *
+ * Self-service: sets the CALLING session's own `users.country_code`, and
+ * nobody else's — 025_user_country.sql derives the row to update from
+ * `fn_current_user_id()` inside the function; there is no `p_user`
+ * argument, so this cannot write on another user's behalf no matter what
+ * client code calls it from. SESSION CLIENT ONLY, never service-role: a
+ * service-role call has no `auth.uid()`, so `fn_current_user_id()` resolves
+ * null and the function raises 'sign in to set your country' rather than
+ * silently writing nothing or writing the wrong row.
+ *
+ * Deliberately one column. 025's own comment: widening the `users` update
+ * grant to arbitrary columns would let a client set `is_admin`, `level`,
+ * `portfolio_value_cents`, or `is_restricted` — this function exists
+ * specifically so the grant stays narrow.
+ *
+ * `p_country` is validated in SQL against ISO 3166-1 alpha-2 SHAPE only
+ * (upper-cased, trimmed, `^[A-Z]{2}$`) — not against a table of real
+ * country codes, since `cash_payout_countries` already decides the only
+ * thing the platform acts on (see getPayoutMethodForUser's doc comment).
+ *
+ * @throws UNAUTHENTICATED (no session — requireCurrentUserId() below stops
+ *   a genuinely anonymous caller before the RPC; a session with no matching
+ *   `users` row still reaches SQL and gets the same code via 025's own
+ *   'sign in to set your country' raise), INVALID_COUNTRY_CODE (not
+ *   two letters after upper/trim).
+ */
+export async function setCountry(countryCode: string): Promise<void> {
+  await requireCurrentUserId();
+  const supabase = await createServerSupabase();
+  unwrap(
+    await supabase.rpc('fn_set_country', { p_country: countryCode }),
+    'fn_set_country',
+  );
 }
 
 /**

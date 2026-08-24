@@ -12,6 +12,94 @@ with the credit-ledger and art_url work below.
 
 ## Open
 
+### 16. Re-landed setCountry() — lost to a worktree reset as `39f0efa`, rebuilt against current main; track/market has a ready wiring plan waiting on this
+
+`39f0efa` shipped this once; the commit is unreachable (an earlier pass's
+worktree got reset back to main's tip before it merged — confirmed via
+`git branch -a --contains 39f0efa` and this branch's own reflog, both empty/
+consistent with track/market's 2026-08-24 handoff entry in
+`docs/handoff/market.md`, which independently discovered and documented the
+same loss when it went looking for `setCountry()` and found nothing). Not
+recovered from the dangling commit — rebuilt from scratch against this
+branch's current `lib/api/contract.ts`/`lib/db/errors.ts`, per instruction.
+
+**Pre-flight note:** this worktree was 2 commits behind `main`
+(`733a9b4`/`abd1875`) when this pass started — AGENT_RULES.md §0 says stop
+for a reset in that situation. Checked what was actually behind first: both
+commits add only `docs/handoff/market.md` (track/market's own writeup of the
+blocked wiring task above) — no `.sql`, no `lib/api/contract.ts`, nothing
+that could make this pass's work stale. Flagged to the human and given the
+go-ahead to proceed without a reset rather than stopping the pass; noting it
+here per §12 ("anything you found that is wrong but outside your lane" — this
+isn't exactly that, but it's a process deviation worth a paper trail).
+
+**Changes, all additive to `lib/api/contract.ts` per the SANCTIONED
+EXTENSIONS block (new 025 bullet added there):**
+
+- `setCountry(countryCode: string): Promise<void>` — session client only,
+  calls `requireCurrentUserId()` first (client-side UNAUTHENTICATED for a
+  genuinely anonymous caller) then `fn_set_country(p_country)`. No `p_user`
+  argument exists on the SQL side, so this can only ever write the caller's
+  own `users.country_code` — verified by reading `025_user_country.sql`
+  directly (`v_user := fn_current_user_id(); ... update users set
+  country_code = v_code where id = v_user`), not assumed from the name.
+  Never service-role: a service-role call has no `auth.uid()`, so
+  `fn_current_user_id()` is null and the RPC itself would raise 'sign in to
+  set your country' — this export doesn't special-case that, it just never
+  calls the service client to begin with, same posture as every other
+  session-scoped mutation in this file.
+- `ContractErrorCode` gained `INVALID_COUNTRY_CODE` (the ISO-shape raise).
+  `COUNTRY_NOT_SET` was **not** re-added — it already landed in `ef83d6d`
+  (item 15 above) and this pass double-checked (`grep -n COUNTRY_NOT_SET`)
+  before touching either file.
+- `lib/db/errors.ts` — two new `MESSAGE_RULES`, both regexes read directly
+  from `025_user_country.sql`'s `raise exception` text, not guessed:
+  `/country must be a two-letter ISO country code/i` → `INVALID_COUNTRY_CODE`,
+  and `/sign in to set your country/i` → the **existing** `UNAUTHENTICATED`
+  code (same pattern as `fn_reserve_credit`'s `'sign in to reserve FSC'` and
+  `fn_submit_listing`'s `'sign in to list an item'` — a new code was not
+  needed here, just a new pattern matching an existing one).
+- Fixed an adjacent doc-drift bug while in the file: `getPayoutMethodForUser`'s
+  comment still said a null country "resolves to 'credit'" — true pre-025,
+  false now (025 makes it raise, mapped to `COUNTRY_NOT_SET`). Updated in
+  place since it directly contradicted the `COUNTRY_NOT_SET` doc comment two
+  members above it in the same file. Not one of the three requested items,
+  but in-lane and adjacent enough to fix rather than leave misleading.
+
+**Test:** `fn_payout_method_for_user`'s local mirror (`derivePayoutMethod`,
+`tests/invariants.test.ts`) asserted `null`/`undefined` → `'credit'` — 025
+made that wrong (same bug the migration itself closes: real signups leave
+`country_code` NULL, and every launch consignor is Malaysian, so they'd all
+have been paid FSC with no error). Changed the mirror to throw on
+null/empty, split the one test into two (MY→cash/SG,US→credit stays; a new
+one asserts the throw on null/undefined/empty-string), kept `derivePayoutMethod`
+rather than deleting it, per instruction. Added two more tests exercising the
+real `contractErrorCode()` (not a mirror, same reasoning as item 15's
+`COUNTRY_NOT_SET` tests — `lib/db/errors.ts`'s only dependency on
+`lib/api/contract.ts` is a type-only import) for both new message rules.
+
+**Consumer, not built here:** `docs/handoff/market.md`'s 2026-08-24 entry has
+a fully drafted (dry-run-verified against `39f0efa`, then reverted) wiring
+plan for `app/(market)/list/actions.ts` and `app/(market)/actions.ts` —
+call `setCountry()` from `submitListingIntakeAction`, and thread a country
+picker into `ListForm`'s relist path (`listCardAction`, which has no country
+input today and would otherwise dead-end a re-lister who never went through
+intake with raw SQL text in `?error=`). Both files are `app/(market)/**`,
+outside this track's lane — filed here so whoever picks up track/market next
+knows the export they were blocked on now exists.
+
+**Verification:** `npx tsc --noEmit` clean. `npm test`: **164 passing** (was
+161 at the start of this pass). `npm run build` compiles (`Compiled
+successfully`, all 19 routes render). `graphify update .` run after the
+edits.
+
+**Not verified live:** `setCountry()` was not called against the live
+project (would be a real write to a real user's row — AGENT_RULES.md §2).
+The two new message-pattern matches are taken verbatim from
+`025_user_country.sql`'s `raise exception` text, same caveat as item 15's
+`COUNTRY_NOT_SET` pattern — not independently confirmed against a live
+Postgres error.
+
 ### 15. COUNTRY_NOT_SET given the same loud-path treatment as CREDIT_HOLD_EXPIRED in the Stripe webhook
 
 Own finding from a prior pass: `isPermanentError()` in

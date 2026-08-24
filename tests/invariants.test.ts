@@ -137,14 +137,25 @@ const splitSettlement = (
 };
 
 /**
- * fn_payout_method_for_user (018-020). cash_payout_countries live-verified
- * against the project (2026-08-21): exactly one row, country_code 'MY'.
- * Decoupled from HOW the buyer paid — splitSettlement() above never looks at
- * the seller, and this never looks at the buyer's payment method.
+ * fn_payout_method_for_user (018-020, raise behaviour updated by 025).
+ * cash_payout_countries live-verified against the project (2026-08-21):
+ * exactly one row, country_code 'MY'. Decoupled from HOW the buyer paid —
+ * splitSettlement() above never looks at the seller, and this never looks at
+ * the buyer's payment method.
+ *
+ * 025_user_country.sql changed what a null/empty country_code does: it used
+ * to resolve to 'credit' (the bug 025 closes — see that migration's own
+ * comment), now it RAISES 'user % has no country on file...' instead, mapped
+ * to COUNTRY_NOT_SET in lib/db/errors.ts. A recognised-but-not-cash code
+ * (e.g. 'SG', 'US') is unaffected — that path still resolves to 'credit'.
  */
 const CASH_PAYOUT_COUNTRIES = ['MY'];
-const derivePayoutMethod = (countryCode: string | null | undefined): 'cash' | 'credit' =>
-  countryCode && CASH_PAYOUT_COUNTRIES.includes(countryCode) ? 'cash' : 'credit';
+const derivePayoutMethod = (countryCode: string | null | undefined): 'cash' | 'credit' => {
+  if (!countryCode || countryCode.trim() === '') {
+    throw new Error('user has no country on file, so their payout cannot be determined');
+  }
+  return CASH_PAYOUT_COUNTRIES.includes(countryCode) ? 'cash' : 'credit';
+};
 
 /**
  * ledger_entries' append-only invariant: entries sharing a txn_id must net to
@@ -765,12 +776,21 @@ describe('fn_purchase_card_core split settlement', () => {
 });
 
 describe('fn_payout_method_for_user', () => {
-  it('resolves MY to cash and everything else — including null — to credit', () => {
+  it('resolves MY to cash and other recognised codes to credit', () => {
     expect(derivePayoutMethod('MY')).toBe('cash');
     expect(derivePayoutMethod('SG')).toBe('credit');
     expect(derivePayoutMethod('US')).toBe('credit');
-    expect(derivePayoutMethod(null)).toBe('credit');
-    expect(derivePayoutMethod(undefined)).toBe('credit');
+  });
+
+  it('RAISES on null or empty country rather than silently resolving to credit (025)', () => {
+    // 025_user_country.sql: NULL meant "we do not know", which used to be
+    // conflated with "not Malaysian" and defaulted to 'credit' — every
+    // launch consignor is Malaysian and a real signup leaves country_code
+    // NULL, so they would all have been paid in FSC with no error anywhere.
+    // Fixed by raising instead.
+    expect(() => derivePayoutMethod(null)).toThrow(/has no country on file/);
+    expect(() => derivePayoutMethod(undefined)).toThrow(/has no country on file/);
+    expect(() => derivePayoutMethod('')).toThrow(/has no country on file/);
   });
 });
 
@@ -1236,6 +1256,22 @@ describe('COUNTRY_NOT_SET error mapping (025)', () => {
 
   it('does not confuse an unrelated "not found" message for COUNTRY_NOT_SET', () => {
     expect(contractErrorCode({ message: 'listing abc not found' })).toBe('NOT_FOUND');
+  });
+});
+
+/**
+ * 025_user_country.sql fn_set_country's two raises — setCountry()'s own
+ * error surface (lib/api/contract.ts), separate from the settlement-side
+ * COUNTRY_NOT_SET above. Same real-mapping-function approach as that block.
+ */
+describe('setCountry() error mapping (025)', () => {
+  it('maps the ISO-shape raise to INVALID_COUNTRY_CODE', () => {
+    const message = 'country must be a two-letter ISO country code, got usa';
+    expect(contractErrorCode({ message })).toBe('INVALID_COUNTRY_CODE');
+  });
+
+  it('maps the no-session raise to UNAUTHENTICATED, same as every other "sign in to" raise', () => {
+    expect(contractErrorCode({ message: 'sign in to set your country' })).toBe('UNAUTHENTICATED');
   });
 });
 

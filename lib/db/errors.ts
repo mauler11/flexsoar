@@ -218,6 +218,17 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   // this can fire mid-settlement, after Stripe has already captured the
   // buyer's card.
   { pattern: /has no country on file/i, code: 'COUNTRY_NOT_SET' },
+
+  // 025_user_country.sql fn_set_country — 'sign in to set your country', no
+  // signed-in users row (fn_current_user_id() is null), same shape as
+  // fn_reserve_credit's 'sign in to reserve FSC' rule above: reachable when
+  // an auth session exists but has no matching `users` row, since
+  // setCountry() in lib/api/contract.ts already stops a genuinely anonymous
+  // caller before this RPC is ever called.
+  { pattern: /sign in to set your country/i, code: 'UNAUTHENTICATED' },
+  // fn_set_country — 'country must be a two-letter ISO country code, got %'.
+  // p_country, upper-cased and trimmed, fails `^[A-Z]{2}$`.
+  { pattern: /country must be a two-letter ISO country code/i, code: 'INVALID_COUNTRY_CODE' },
 ];
 
 /**
