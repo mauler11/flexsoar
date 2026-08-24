@@ -20,7 +20,7 @@
 
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getUser } from "@/lib/api/contract";
-import type { Timestamptz, UUID } from "@/lib/db/types";
+import type { ItemStatus, Timestamptz, UUID } from "@/lib/db/types";
 
 /**
  * The redemption handling fee. fn_redeem_card takes the fee as an argument and
@@ -29,15 +29,6 @@ import type { Timestamptz, UUID } from "@/lib/db/types";
  * docs/handoff/market.md item 4.
  */
 export const REDEMPTION_HANDLING_FEE_CENTS = 1500;
-
-/**
- * Cash on /list unlocks after this many completed fulfilments. Mirrors the
- * seeded platform_config row `cash_payout_min_fulfilments` (013 seeds 2); the
- * contract doesn't expose that config key, so this local constant powers the
- * UI gate while fn_submit_listing remains the authoritative check (partial
- * M4). The live count is users.fulfilments_completed.
- */
-export const CASH_PAYOUT_MIN_FULFILMENTS = 2;
 
 /**
  * The signed-in caller's `users.id`, or null when anonymous. `users.id` equals
@@ -96,6 +87,79 @@ export async function getCashPayoutCountryCodes(): Promise<string[]> {
   return ((rows.data as { country_code: string }[] | null) ?? []).map((row) =>
     row.country_code.toUpperCase(),
   );
+}
+
+// ------------------------------------------------------------
+// SUBMITTED ITEMS — /dashboard's "Submissions" section, no contract export
+// ------------------------------------------------------------
+
+export interface SubmittedItem {
+  id: UUID;
+  status: ItemStatus;
+  askingPriceCents: number | null;
+  floatValue: number | null;
+  createdAt: Timestamptz;
+  sku: { brand: string; model: string; colorway: string; size_us: number };
+}
+
+interface SubmittedItemRow {
+  id: UUID;
+  status: ItemStatus;
+  asking_price_cents: number | null;
+  float_value: number | null;
+  created_at: Timestamptz;
+  sku: { brand: string; model: string; colorway: string; size_us: number } | null;
+}
+
+/**
+ * Every item this user has ever submitted (consignor_id = them), newest
+ * first — the self-serve `/list` wizard's `submitListing()` (013/019c) never
+ * sets `items.consignment_id`, so `getConsignments({ consignorId })` (the
+ * contract's own export, driving /dashboard's old "Submissions" section)
+ * never returns them: nothing writes the `consignments` table at all
+ * (grepped every migration for "insert into consignments": zero hits). A
+ * seller who submits through /list had no way to see it was recorded.
+ *
+ * No contract export covers "my items" either — `getItems()`'s `ItemsQuery`
+ * has no consignor/holder filter, only `status`/`consignmentId`/
+ * `graded`/`authenticated` (lib/api/contract.ts), and it paginates
+ * `created_at` ascending across every RLS-visible row (including every
+ * other seller's public listings), so an unfiltered call could push a
+ * seller's own newest submission off the first page entirely — not a
+ * reliable "my submissions" read. This queries `items` directly instead,
+ * scoped to `consignor_id = userId` so pagination never comes into it.
+ * `items_consignor_read` (004_rls_and_grants.sql) already grants exactly
+ * this — `consignor_id = fn_current_user_id()` — so a caller can only ever
+ * read their own rows here, same guarantee the frozen contract's reads rely
+ * on. Same established pattern as this file's other workaround reads:
+ * server-only, session client, never `users`.
+ */
+export async function getMySubmittedItems(userId: UUID): Promise<SubmittedItem[]> {
+  const supabase = await createServerSupabase();
+
+  const rows = await supabase
+    .from("items")
+    .select(
+      "id, status, asking_price_cents, float_value, created_at, " +
+        "sku:skus(brand, model, colorway, size_us)",
+    )
+    .eq("consignor_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (rows.error) throw new Error(rows.error.message.trim() || "items read failed");
+
+  return ((rows.data as unknown as SubmittedItemRow[] | null) ?? [])
+    .filter((row): row is SubmittedItemRow & { sku: NonNullable<SubmittedItemRow["sku"]> } =>
+      row.sku != null,
+    )
+    .map((row) => ({
+      id: row.id,
+      status: row.status,
+      askingPriceCents: row.asking_price_cents,
+      floatValue: row.float_value,
+      createdAt: row.created_at,
+      sku: row.sku,
+    }));
 }
 
 // ------------------------------------------------------------

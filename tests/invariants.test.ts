@@ -60,7 +60,11 @@ import { contractErrorCode } from '../lib/db/errors';
 import { MarketTile } from '../components/market/MarketTile';
 import { PricePayout } from '../components/market/intake/PricePayout';
 import { ListForm } from '../components/market/ListForm';
-import { COUNTRIES, isValidCountryCode } from '../components/market/intake/intake-config';
+import {
+  COUNTRIES,
+  derivePayoutPreview,
+  isValidCountryCode,
+} from '../components/market/intake/intake-config';
 
 // ------------------------------------------------------------
 // SQL MIRRORS
@@ -1624,9 +1628,6 @@ describe('PricePayout — country-driven payout disclosure (docs/handoff/market.
     declaredFloat: null,
     priceCents: null,
     onPriceChange: () => {},
-    payout: null,
-    onPayoutChange: () => {},
-    eligibility: null,
     onCountryChange: () => {},
   };
 
@@ -1678,6 +1679,72 @@ describe('PricePayout — country-driven payout disclosure (docs/handoff/market.
       }),
     );
     expect(html).not.toContain("You&#x27;ll be paid");
+  });
+
+  // The fulfilment gate (cash_payout_min_fulfilments) is gone from the SQL
+  // (019c_settlement.sql's own comment: "The cash_payout_min_fulfilments gate
+  // is gone") — it rationed nothing real. This pins that the UI never asks a
+  // seller to unlock cash, and never renders a payout TOGGLE at all: payout
+  // is geography, not a choice (AGENT_RULES.md section 5), so fn_submit_listing
+  // (019c) computes it itself and discards whatever this step would have sent.
+  it('never mentions fulfilments/unlocking, and renders no payout toggle button', () => {
+    const html = renderToStaticMarkup(
+      createElement(PricePayout, {
+        ...baseProps,
+        countryCode: 'US',
+        sellerPayoutMethod: null,
+        cashPayoutCountryCodes: ['MY'],
+      }),
+    );
+    expect(html.toLowerCase()).not.toContain('fulfilment');
+    expect(html.toLowerCase()).not.toContain('unlock');
+    // No clickable credit/cash buttons — a <button> element anywhere would
+    // mean this is still presented as a choice, not a read-only fact.
+    expect(html).not.toContain('<button');
+  });
+
+  it('the read-only payout indicator agrees with the disclosure banner above it, for both cash and credit', () => {
+    const cashHtml = renderToStaticMarkup(
+      createElement(PricePayout, {
+        ...baseProps,
+        countryCode: 'MY',
+        sellerPayoutMethod: null,
+        cashPayoutCountryCodes: ['MY'],
+      }),
+    );
+    expect(cashHtml).toContain("You&#x27;ll be paid in cash");
+    expect(cashHtml).toMatch(/>cash</);
+
+    const creditHtml = renderToStaticMarkup(
+      createElement(PricePayout, {
+        ...baseProps,
+        countryCode: 'US',
+        sellerPayoutMethod: null,
+        cashPayoutCountryCodes: ['MY'],
+      }),
+    );
+    expect(creditHtml).toContain("You&#x27;ll be paid in FSC, not cash");
+    expect(creditHtml).toMatch(/>credit</);
+  });
+});
+
+describe('derivePayoutPreview (intake-config)', () => {
+  // Pure mirror of fn_payout_method_for_user's own cash_payout_countries
+  // membership check (019b) — the single source of truth PricePayout's
+  // read-only indicator and IntakeWizard's submitted payout_method both use,
+  // so the two can never disagree with each other.
+  it('resolves cash/credit off a valid country, ignoring any stale sellerPayoutMethod', () => {
+    expect(derivePayoutPreview('MY', ['MY'])).toBe('cash');
+    expect(derivePayoutPreview('US', ['MY'])).toBe('credit');
+    expect(derivePayoutPreview('MY', ['MY'], 'credit')).toBe('cash');
+    expect(derivePayoutPreview('US', ['MY'], 'cash')).toBe('credit');
+  });
+
+  it('falls back to sellerPayoutMethod only when no valid country is selected', () => {
+    expect(derivePayoutPreview(null, ['MY'], 'cash')).toBe('cash');
+    expect(derivePayoutPreview('', ['MY'], 'credit')).toBe('credit');
+    expect(derivePayoutPreview('zz', ['MY'], 'cash')).toBe('cash');
+    expect(derivePayoutPreview(null, ['MY'])).toBeNull();
   });
 });
 

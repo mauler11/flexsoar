@@ -1,5 +1,156 @@
 # Handoff — track/market
 
+## 2026-08-25 — Payout UI stopped contradicting the database; dashboard Submissions was silently empty, fixed
+
+Task: the /list step 4 payout toggle and the "cash unlocks at N fulfilments"
+copy described a gate that no longer exists in SQL, and the /dashboard
+"CASH PAYOUT GATE" panel claimed `fn_submit_listing` "enforces the real
+gate" — also false. Also asked to confirm a submitted item actually shows up
+under /dashboard's Submissions with its status.
+
+**Verified directly against `019c_settlement.sql` before touching anything**
+(AGENT_RULES.md section 8): `fn_submit_listing`'s current body (lines
+373-438, superseding 013's original) has no `cash_payout_min_fulfilments`
+check at all — its own comment says so ("The cash_payout_min_fulfilments
+gate is gone... Payout is now a Stripe corridor fact"). It also accepts
+`p_payout` and immediately overwrites it: `v_payout :=
+fn_payout_method_for_user(v_user);`, unconditional, before the value is ever
+used. This matches this file's own prior entry (item 3 under the
+`setCountry()` note) flagging the same drift in `contract.ts`'s doc comment
+— not fixed here, `lib/api/contract.ts` is track/data's file, not this
+track's to edit.
+
+### 1 & 2. Removed the fulfilment gate from the UI; payout is now a read-only indicator
+
+`components/market/intake/PricePayout.tsx`: deleted the credit/cash toggle
+`<Button>` pair and the `eligibility`/`cashEligible` disabled-state and
+copy entirely. Replaced with a read-only `<div>` showing whichever method
+`derivePayoutPreview()` (new, `intake-config.ts`) resolves from the
+selected country — the exact same computation the disclosure banner above
+it already used, now pulled into one shared function so the banner and the
+indicator can never disagree. `payout_method` is still sent in the submit
+form (`IntakeWizard.tsx`'s `doSubmit`) purely for signature compatibility
+with `submitListing()`'s frozen `PayoutMethod` argument — commented at both
+the wizard's `doSubmit` and `list/actions.ts`'s validation that
+`fn_submit_listing` discards it server-side.
+
+Removed the now-dead client-side gate entirely: `CASH_PAYOUT_MIN_FULFILMENTS`
+(`app/(market)/queries.ts`), `PayoutEligibility`/`getPayoutEligibilityAction`
+(`app/(market)/list/actions.ts`), the `payoutEligibility` prop threaded
+through `list/page.tsx` -> `IntakeWizard` -> `PricePayout`, the "Cash gate"
+review-step `Detail` row, and the `UNPROVEN_SELLER` -> "needs more completed
+fulfilments" error copy (the SQL doesn't raise it via this path anymore, so
+this was dead code describing a removed gate; `UNPROVEN_SELLER` itself is
+still a valid `ContractErrorCode` per `contract.ts`, untouched, in case
+another surface still uses it).
+
+### 3. Dashboard's false "CASH PAYOUT GATE" panel — removed
+
+`app/(market)/dashboard/page.tsx`: deleted the panel claiming
+"fn_submit_listing enforces the real gate; this meter mirrors it." Also
+fixed the header subtitle ("...fulfilments" -> "...redemptions") and the
+footer note (dropped the "payout ledger (M4)" mention — M4 isn't partial
+anymore, the gate it was tracking is gone, not pending).
+
+### 4. Dashboard Submissions was ALWAYS empty for self-serve items — real bug, fixed
+
+Checked live rather than assumed (AGENT_RULES.md section 8): the
+"Submissions" section read `getConsignments({ consignorId: me })`, but
+`submitListing()` (013/019c) never sets `items.consignment_id`, and
+**nothing in any migration ever writes the `consignments` table** (grepped
+every file for `insert into consignments`: zero hits). So `getConsignments`
+always returns `[]` for every self-serve seller — the section has been
+dead since the self-serve wizard shipped. Live-verified: signed in as the
+account that already had a real `pending_review` submission (Nike Air Max
+1, submitted through `/list` in an earlier pass) — before this fix,
+`/dashboard` read "No submissions yet." After, it shows the row with its
+real status. Screenshot-equivalent transcript: "SUBMISSIONS (1) — Nike Air
+Max 1 · Seed Grey · US 10 · pending_review · submitted Aug 24, 11:46 PM ·
+$180.00."
+
+Fix: new `getMySubmittedItems(userId)` in `app/(market)/queries.ts`, the
+same established "workaround read" pattern this file already uses
+elsewhere (server-only, session client, never `users`) — no contract export
+covers this either: `getItems()`'s `ItemsQuery` has no consignor/holder
+filter (only `status`/`consignmentId`/`graded`/`authenticated`), and it
+paginates `created_at` ascending across every RLS-visible row including
+every other seller's public listings, so an unfiltered `getItems({})` call
+plus client-side filtering could push a seller's own newest submission off
+page one entirely on a growing marketplace — not reliable. Queries `items`
+directly with `.eq('consignor_id', userId)`, which `items_consignor_read`
+(004_rls_and_grants.sql: `consignor_id = fn_current_user_id()`) already
+grants, so a caller can only ever read their own rows — same guarantee the
+frozen contract's own reads rely on. `/dashboard`'s Submissions section now
+renders this instead of `consignments`, one row per item: shoe, `status`
+(covers `pending_review`, `awaiting_seller_shipment`, `in_custody`,
+`minted`, etc. — every `ItemStatus` value, not a filtered subset), submit
+date, asking price.
+
+**Found but NOT fixed, flagging rather than expanding scope:** "Held items"
+(the section below Submissions) has the identical root-cause bug — it
+flattens `items` out of `getConsignment(c.id).items` for each consignment,
+which is also always `[]` for the same reason. Once a self-serve item is
+approved (`in_custody`) it will show correctly in the new Submissions list
+(status `in_custody`) but will never appear in "Held items" until that
+section is rewired the same way. Not touched here since the task named
+Submissions specifically and this is a separate section; filing it here so
+it isn't rediscovered from scratch.
+
+### Tests
+
+**172 passing (was 168, +4).** New `describe('PricePayout — ...')`
+additions (never mentions "fulfilment"/"unlock", renders no `<button>`,
+and the read-only indicator text agrees with the disclosure banner for both
+cash and credit) plus a new `describe('derivePayoutPreview
+(intake-config)', ...)` pinning the shared helper directly (valid country
+wins over a stale `sellerPayoutMethod`; falls back to it only pre-country;
+`null` with neither). No test added for `getMySubmittedItems` itself —
+consistent with this file's existing convention that the raw
+`createServerSupabase()` workaround reads (`getCashPayoutCountryCodes`,
+`getVaultIntakeForCard`, `getPublicProfileByHandle`) aren't unit-tested
+here either; verified live instead (see item 4 above).
+
+`npx tsc --noEmit` clean. `npm run build` compiles (`Compiled successfully`,
+same 21 routes). `npx eslint` on every changed file: clean, zero warnings
+(the two pre-existing `list/actions.ts` warnings in the unrelated
+`fileSkuRequestAction` are untouched, same ones noted in every prior entry).
+
+**Live-verified** (read-only aside from the dashboard render, which is a
+GET): `/list` (200) and `/dashboard` (200) both render clean via
+`npm run dev` against the live project, signed in as an existing account.
+The Submissions fix above was confirmed against real data, not fixture
+data. **Not verified live:** clicking all the way through `/list` step 4 to
+see `PricePayout`'s new read-only indicator in the browser — doing so past
+the photo step would require a real R2 upload, which this track avoids for
+the same reason live checkout/purchase clicks are avoided in prior entries
+(a real write to a shared resource for a smoke test). Covered instead by
+the new render tests above, which assert the exact same markup directly.
+
+**Found, outside this task, not fixed:** `GET /` 500s live right now —
+`getListings()` -> `fn_current_user_id` -> `permission denied for function
+fn_current_user_id` (`42501`). Unrelated to anything in this pass (`/`,
+`getListings`, and `fn_current_user_id` were not touched), looks like a
+live grants issue. Not filed as a numbered item since it's not this
+pass's scope, but flagging since it blocks the browse grid entirely.
+
+### Files changed
+
+`components/market/intake/PricePayout.tsx` (toggle -> read-only indicator,
+removed eligibility/fulfilment copy, doc-comment drift fixed while in the
+file), `components/market/intake/IntakeWizard.tsx` (`derivedPayout` replaces
+`payout` state, `payoutEligibility` removed throughout, review-step "Cash
+gate" row removed), `components/market/intake/intake-config.ts` (new
+`derivePayoutPreview`), `app/(market)/list/actions.ts` (removed
+`PayoutEligibility`/`getPayoutEligibilityAction`, dead `UNPROVEN_SELLER`
+copy, added the signature-compatibility comment), `app/(market)/list/page.tsx`
+(dropped the eligibility fetch, `signedIn` now `me != null`),
+`app/(market)/queries.ts` (removed `CASH_PAYOUT_MIN_FULFILMENTS`, added
+`getMySubmittedItems`), `app/(market)/dashboard/page.tsx` (removed the false
+gate panel, Submissions now reads real items), `tests/invariants.test.ts`
+(updated the existing `PricePayout` block for the new props, appended two
+new describe blocks, did not touch any other track's block). No `.sql` file
+touched, no edit to `lib/api/contract.ts`.
+
 ## 2026-08-24 — setCountry() wiring: CLOSED. Re-verified against the re-landed contract, not trusted from the earlier draft
 
 The blocker below is cleared: `setCountry(countryCode)` is on `main` now
