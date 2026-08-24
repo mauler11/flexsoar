@@ -1,5 +1,134 @@
 # Handoff — track/market
 
+## 2026-08-24 — setCountry() wiring task: BLOCKED, the contract export the task cited does not exist on any branch
+
+Task handed to this pass: wire `setCountry(countryCode)` — described as shipped
+in `lib/api/contract.ts` by track/data commit `39f0efa`, backed by
+`fn_set_country` in migration 025 — into `submitListingIntakeAction`
+(item 1), handle `INVALID_COUNTRY_CODE`/`UNAUTHENTICATED` (item 2), order the
+write before any `fn_list_card` call (item 3), and audit every other path
+that reaches `listCard()` (item 4). The task also stated the test count was
+at 162.
+
+**Verified before writing any wiring code (AGENT_RULES.md §8), and the
+premise doesn't hold:**
+
+- `grep -c "setCountry" lib/api/contract.ts` → **0**. No `setCountry`,
+  `INVALID_COUNTRY_CODE`, or `COUNTRY_NOT_SET` anywhere in `lib/`, on this
+  branch, right now.
+- Migration `025_user_country.sql` **is** present and live in this worktree
+  (`fn_set_country`, and `fn_payout_method_for_user` raising instead of
+  falling through to `'credit'` on a null country) — the SQL half of this
+  landed.
+- `39f0efa` exists as a commit object (`git show 39f0efa` resolves it — it
+  adds exactly the `setCountry()` export, `INVALID_COUNTRY_CODE`/
+  `COUNTRY_NOT_SET` codes, and error-string mappings the task describes) but
+  **is not reachable from any branch** — `git merge-base --is-ancestor
+  39f0efa HEAD` fails, and `git branch -a --contains 39f0efa` lists nothing.
+- `track/data`'s own reflog explains why: `track/data@{1}: commit: track/data:
+  expose fn_set_country, map 025's new payout raise...` (that's `39f0efa`)
+  is **immediately followed** by `track/data@{0}: reset: moving to main` —
+  i.e. `track/data` committed this, then was reset back to `main`'s tip
+  (`2387377`, the migration-only commit) before this task started.
+  `git diff HEAD track/data -- lib/api/contract.ts` is empty: track/data's
+  current branch tip has no `setCountry` either. Every worktree
+  (`flexsoar`, `-admin`, `-data`, `-design`, `-market`) sits at `2387377`
+  per `git worktree list`.
+- `npm test` baseline right now: **158 passing**, not 162 — consistent with
+  this file's own previous entry ("158 passing (was 152, +6)") and with
+  `39f0efa`'s test additions (81 lines to `tests/invariants.test.ts`,
+  per that commit's diffstat) being part of what got reset out.
+
+Per AGENT_RULES.md §1/§2: this track does not write `lib/api/contract.ts` or
+`lib/db/errors.ts` (also missing the country error-string mappings —
+checked, zero `country`/`COUNTRY` hits) under any circumstances, "additive
+exports" included — "only track/data writes that file at all." I drafted the
+full wiring against a checked-out copy of `39f0efa`'s contract.ts to confirm
+it would actually close this, then reverted all four files
+(`app/(market)/list/actions.ts`, `app/(market)/actions.ts`,
+`components/market/ListForm.tsx`, `app/(market)/card/[id]/page.tsx`) rather
+than commit code that fails `tsc --noEmit` against what's actually on this
+branch. Per §9 ("push back... a refused task with a clear explanation is a
+good outcome. Implementing something you believe is wrong, correctly, is the
+worst one") and §11 (never commit past a failing `tsc`), this is filed
+instead of implemented.
+
+**Ask, for whoever owns `track/data`:** land `setCountry()` /
+`INVALID_COUNTRY_CODE` / `COUNTRY_NOT_SET` for real this time — either
+re-apply `39f0efa` onto `track/data`'s current tip, or redo the equivalent
+export against 025 as it stands today (its shape matches what's in the
+migration file: `fn_set_country(p_country text)`, session client, no
+user-id argument, raising `INVALID_COUNTRY_CODE` on a non-2-letter code and
+`UNAUTHENTICATED` — mapped from `'sign in to set your country'` — on no
+session; plus the `COUNTRY_NOT_SET` mapping for `fn_payout_method_for_user`'s
+new raise, since that fires inside `fn_list_card` and `fn_purchase_card_core`
+too, not just a direct read).
+
+**Exact plan ready to apply the moment it lands** (drafted and dry-run
+against `39f0efa`'s contract.ts before reverting, so this is not a guess):
+
+1. `app/(market)/list/actions.ts` — import `setCountry` alongside the
+   existing `getUser`/`ContractError` imports. In
+   `submitListingIntakeAction`, right after the existing
+   `isValidCountryCode(countryRaw)` gate and before the `submitListing(...)`
+   call: `const onFile = await getUser({ id: me })`; if
+   `onFile?.country_code !== countryRaw`, call `setCountry(countryRaw)`
+   inside a `try/catch` — on `ContractError` with code
+   `INVALID_COUNTRY_CODE` return `{ ok: false, code: "COUNTRY_REQUIRED", ... }`,
+   on `UNAUTHENTICATED` return the same `SIGN_IN_REQUIRED` shape the top of
+   the function already uses, otherwise fall through to a generic
+   `SUBMIT_FAILED`. Skipping the call when unchanged avoids a write on every
+   resubmission by a returning consignor.
+2. This naturally satisfies the ordering item (3): `submitListing` (013)
+   never calls `fn_payout_method_for_user` itself (grepped every migration
+   that defines or calls it — only `019c_settlement.sql`,
+   `021_credit_holds.sql`, and `fn_list_card`/`fn_purchase_card_core` per
+   `39f0efa`'s own contract.ts comment). The only path from this item to a
+   `fn_list_card` call is later, after admin review and minting, through
+   `listCardAction` (`app/(market)/actions.ts`) — by which point this
+   submission has already run and persisted the country. No explicit
+   re-ordering needed beyond "call `setCountry` before returning `ok: true`."
+3. **Item 4 finding — real gap, in this track's lane, same blocker:**
+   `listCardAction` (`app/(market)/actions.ts:92`) is the **other** path to
+   `fn_list_card` — the "relist a card you already own" flow from the card
+   detail page (`ListForm.tsx`), distinct from the intake wizard. It takes
+   no country input at all today. A card owner who never went through
+   `/list` (e.g. bought the card from someone else, never sold anything) has
+   no country on file and **no field anywhere on `/card/[id]` to set one** —
+   `getPayoutMethodForUser(detail.owner.id).catch(() => null)` on that page
+   already swallows the raise into `null` (just skips the payout banner,
+   harmless), but `listCardAction`'s own `listCard()` call has no such
+   guard, so it would hit `fn_list_card`'s new `COUNTRY_NOT_SET` raise and
+   dead-end the seller with only the raw SQL text in `?error=`. Drafted fix
+   (dry-run passed `tsc`, reverted with everything else): thread the owner's
+   `getUser({ id: detail.owner.id }).country_code` into `ListForm` as a new
+   `countryCode` prop; when it's not `isValidCountryCode`, `ListForm` renders
+   a required country `<select>` (same `COUNTRIES` list PricePayout.tsx
+   already uses) and sends `country_code` in the form data; `listCardAction`
+   calls `setCountry()` with it — only when present, so an owner who already
+   has one on file never triggers an extra write — before `listCard()`. No
+   other `listCard()` callers exist repo-wide (grepped).
+
+**Not verified live:** none of the above was probed against the live
+project — no code changed, so there was nothing to run.
+
+### Tests
+
+Unchanged: **158 passing** (baseline, not 162 as the task stated — see
+above). No code was committed this pass, so nothing to add tests for yet;
+the drafted `ListForm` picker (item 4 above) would get the same
+`renderToStaticMarkup` coverage the existing `PricePayout` country tests use,
+once it can actually be wired to something real.
+
+`npx tsc --noEmit` clean (nothing changed). `git status` clean — all four
+draft-edited files (`app/(market)/list/actions.ts`, `app/(market)/actions.ts`,
+`components/market/ListForm.tsx`, `app/(market)/card/[id]/page.tsx`) were
+reverted with `git checkout --`, not committed.
+
+### Files changed
+
+None — this entry only. `docs/handoff/market.md` (this note).
+
 ## 2026-08-24 — Country capture on the listing wizard (payout-routing bug) — UI/validation done; BLOCKING ask for track/data on the actual write
 
 Task: capture the seller's country before they can list, since a confirmed
