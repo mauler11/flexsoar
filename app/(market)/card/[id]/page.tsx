@@ -28,7 +28,7 @@ import { ProvenanceChain } from "@/components/market/ProvenanceChain";
 import { Countdown } from "@/components/market/Countdown";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { formatFsc } from "@/components/card/format";
+import { formatUsd } from "@/components/card/format";
 
 /**
  * 023a_card_status_pending_vault.sql added 'pending_vault' to the live
@@ -165,7 +165,7 @@ export default async function CardPage({
                 <div className="flex items-baseline justify-between font-mono text-[10px] uppercase tracking-tight text-muted">
                   <span>Oracle fair value</span>
                   <span className="text-foreground">
-                    {formatFsc(oracleCents)}
+                    {formatUsd(oracleCents)}
                   </span>
                 </div>
               )}
@@ -315,12 +315,12 @@ function OwnerListingPanel({
       <div className="flex items-baseline justify-between font-mono text-[10px] uppercase tracking-tight text-muted">
         <span>Ask</span>
         <span className="text-lg font-bold tracking-tight text-foreground">
-          {formatFsc(listing.price_cents)}
+          {formatUsd(listing.price_cents)}
         </span>
       </div>
       {listing.oracle_value_cents != null && (
         <p className="font-mono text-[10px] tracking-tight text-muted">
-          Oracle fair value {formatFsc(listing.oracle_value_cents)}
+          Oracle fair value {formatUsd(listing.oracle_value_cents)}
         </p>
       )}
 
@@ -328,9 +328,9 @@ function OwnerListingPanel({
         <div className="flex flex-col gap-1 border border-line px-2 py-1.5 font-mono text-[10px] tracking-tight text-muted">
           <span>Order {listing.order.id.slice(0, 8)}… · {listing.order.status}</span>
           <span>
-            Gross {formatFsc(listing.order.gross_cents)} · fee{" "}
-            {formatFsc(listing.order.fee_cents)} · net{" "}
-            {formatFsc(listing.order.net_cents)}
+            Gross {formatUsd(listing.order.gross_cents)} · fee{" "}
+            {formatUsd(listing.order.fee_cents)} · net{" "}
+            {formatUsd(listing.order.net_cents)}
           </span>
         </div>
       )}

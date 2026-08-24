@@ -10,13 +10,13 @@
  */
 
 /**
- * The live `platform_config.credit_hold_minutes` value (verified live,
- * 2026-08-23: 1440). Not exposed by `getPlatformConfig()` — it only returns
- * `redemption_handling_fee_cents` / `credit_payout_enabled` /
- * `credit_payout_premium_bps` / `credit_purchase_min_cents` /
- * `show_numeric_float`. Filed in docs/handoff/market.md asking track/data to
- * add it; this fallback mirrors the existing `REDEMPTION_HANDLING_FEE_CENTS`
- * pattern in lib/api/contract.ts until then.
+ * Fallback for `platform_config.credit_hold_minutes` when a live
+ * `getPlatformConfig()` read fails. `getPlatformConfig()` now exposes
+ * `credit_hold_minutes` directly (docs/handoff/data.md item 14) — actions.ts
+ * reads that live value first and only falls back to this constant on a
+ * failed read, never on a live value that happens to be lower. Matches the
+ * live value at the time this was pinned (verified 2026-08-23: 1440), same
+ * pattern as `REDEMPTION_HANDLING_FEE_CENTS` in lib/api/contract.ts.
  */
 export const CREDIT_HOLD_MINUTES_FALLBACK = 1440;
 

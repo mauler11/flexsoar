@@ -15,6 +15,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 import {
   cardProvenance,
@@ -53,6 +55,8 @@ import {
   validateRequestedCredit,
 } from '../app/(market)/checkout-math';
 import { CREDIT_HOLD_MINUTES_FALLBACK as CONTRACT_CREDIT_HOLD_MINUTES_FALLBACK } from '../lib/api/contract';
+import type { ListingSummary } from '../lib/api/contract';
+import { MarketTile } from '../components/market/MarketTile';
 
 // ------------------------------------------------------------
 // SQL MIRRORS
@@ -1413,5 +1417,84 @@ describe('publishedConditionLabel / conditionGradeBand (018-020 condition_grade)
   it('never leaks a numeric float into the published label', () => {
     const label = publishedConditionLabel(0.319, 'field_tested');
     expect(label).not.toMatch(/\d/);
+  });
+});
+
+describe('MarketTile -> CardTile showNumericFloat wiring (docs/handoff/design.md item 4 ask)', () => {
+  // MarketTile never threaded showNumericFloat to CardTile, so the grid
+  // always rendered CardTile's safe default (badge-only) regardless of the
+  // live platform_config.show_numeric_float value. app/(market)/page.tsx and
+  // app/(market)/u/[handle]/page.tsx now read getPlatformConfig() and pass
+  // it down; this pins the prop actually reaching CardTile through the
+  // adapter, not just that MarketTile compiles.
+  const baseListing: ListingSummary = {
+    id: 'listing-1',
+    card_id: 'card-1',
+    seller_id: 'seller-1',
+    price_cents: 21000,
+    status: 'public',
+    early_access_level: 0,
+    public_at: '2026-01-01T00:00:00Z',
+    oracle_value_cents: 21000,
+    created_at: '2026-01-01T00:00:00Z',
+    sold_at: null,
+    seller: {
+      id: 'seller-1',
+      handle: 'seller',
+      level: 1,
+      xp_total: 0,
+      portfolio_value_cents: 0,
+      is_admin: false,
+      is_consignor: false,
+      created_at: '2026-01-01T00:00:00Z',
+    },
+    card: {
+      id: 'card-1',
+      sku_id: 'sku-1',
+      item_id: 'item-1',
+      owner_id: 'seller-1',
+      float_value: 0.062,
+      float_percentile: 12.5,
+      tier: 2,
+      is_exceptional: false,
+      mint_number: 1,
+      status: 'active',
+      minted_at: '2026-01-01T00:00:00Z',
+      condition_grade: 'factory_new',
+      sku: {
+        id: 'sku-1',
+        brand: 'Nike',
+        model: 'Test',
+        colorway: 'Black',
+        size_us: 10,
+        market_price_cents: 21000,
+        sprite_key: null,
+        palette: null,
+        art_url: null,
+      },
+      listing: null,
+    },
+  };
+
+  it('omitting the prop (unwired caller) renders the safe named-badge default, no numeric float', () => {
+    const html = renderToStaticMarkup(createElement(MarketTile, { listing: baseListing }));
+    expect(html).toContain('Factory New');
+    expect(html).not.toContain('PCT');
+  });
+
+  it('showNumericFloat=false forwards through to CardTile explicitly', () => {
+    const html = renderToStaticMarkup(
+      createElement(MarketTile, { listing: baseListing, showNumericFloat: false }),
+    );
+    expect(html).toContain('Factory New');
+    expect(html).not.toContain('PCT');
+  });
+
+  it('showNumericFloat=true (the live config value once an admin flips it) reaches CardTile through MarketTile', () => {
+    const html = renderToStaticMarkup(
+      createElement(MarketTile, { listing: baseListing, showNumericFloat: true }),
+    );
+    expect(html).toContain('PCT');
+    expect(html).not.toContain('Factory New');
   });
 });

@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getListingForOrderAction } from "@/app/(market)/actions";
 import { Button } from "@/components/ui/Button";
 import { Banner } from "@/components/market/Banner";
-import { formatFsc } from "@/components/card/format";
+import { formatUsd } from "@/components/card/format";
 
 type Phase = "waiting" | "polling" | "settled" | "refused" | "lost";
 
@@ -76,7 +76,7 @@ export function OrderPoll({ listingId, cardId, priceCents }: OrderPollProps) {
             Your payment was recorded. {orderId ? `Order ${orderId.slice(0, 8)}…` : ""}
           </Banner>
           <div className="font-mono text-[10px] uppercase tracking-tight text-muted">
-            Paid {formatFsc(priceCents)} · the card is now yours
+            Paid {formatUsd(priceCents)} · the card is now yours
           </div>
           <Button href={`/card/${cardId}`} size="sm">
             View card

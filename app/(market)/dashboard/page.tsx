@@ -29,7 +29,7 @@ import type { ItemSummary } from "@/lib/api/contract";
 import { currentUserId, CASH_PAYOUT_MIN_FULFILMENTS } from "@/app/(market)/queries";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { formatFsc } from "@/components/card/format";
+import { formatUsd } from "@/components/card/format";
 
 export const metadata: Metadata = {
   title: "Dashboard — FlexSoar Market",
@@ -164,7 +164,7 @@ export default async function DashboardPage() {
                   submit {fmtDate(c.submitted_at)}
                 </span>
                 <span className="shrink-0 text-muted">
-                  {c.intake_fee_cents > 0 ? formatFsc(c.intake_fee_cents) : "no fee"}
+                  {c.intake_fee_cents > 0 ? formatUsd(c.intake_fee_cents) : "no fee"}
                 </span>
               </div>
             ))}

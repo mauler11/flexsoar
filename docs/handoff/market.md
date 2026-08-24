@@ -1,5 +1,107 @@
 # Handoff — track/market
 
+## 2026-08-24 — Closed docs/handoff/design.md item 3 (price-in-FSC formatting), showNumericFloat wiring, live credit_hold_minutes
+
+Task: finish the price-formatting fix track/design filed as item 3 in
+`docs/handoff/design.md`, plus two smaller asks in the same doc's item 4.
+
+### 1. `formatFsc()` → `formatUsd()`, 18 call sites
+
+design's audit said "roughly 18" and asked this be re-verified against the
+current tree rather than trusted — re-counted by grep before touching
+anything: exactly 18 `formatFsc()` call sites in `components/market/**` /
+`app/(market)/**` were formatting a USD-cents price (listing price, oracle
+value, sale gross/fee/net, redemption/handling fee, reserve price, intake
+fee, trade-history price), not an actual FSC amount. All 18 fixed, one-line
+swaps, listed in design's item 3 (their line numbers shifted slightly since
+that entry was written, but every site named there was found and fixed):
+`BuyPanel.tsx` (listing price, oracle value — the other three `formatFsc`
+calls in that file are real FSC amounts and are untouched), `ListForm.tsx`,
+`IntakeWizard.tsx`, `PricePayout.tsx` (×2), `OrderPoll.tsx`,
+`ProvenanceChain.tsx`, `SkuPicker.tsx`, `RedeemForm.tsx`,
+`card/[id]/page.tsx` (×6), `dashboard/page.tsx`, `u/[handle]/page.tsx`.
+
+### 2. `formatMyr()` — both remaining call sites removed
+
+`BuyPanel.tsx:129` and `ListForm.tsx:82` were the only two production
+callers left repo-wide (grepped after the fix; `tests/invariants.test.ts`
+still calls it directly to test the function itself, which is not a
+production caller). **Zero production callers of `formatMyr()` remain** —
+`components/card/format.ts` (track/design's lane) is not touched here, but
+the export can now be deleted; nothing outside `format.ts` and its own test
+references it.
+
+### 3. `MarketTile` → `CardTile` `showNumericFloat` wiring
+
+`MarketTile.tsx` gained an optional `showNumericFloat` prop, forwarded
+straight to `CardTile` (defaults to `undefined`, which `CardTile`'s own
+default of `false` already covers — no behavior change for an unwired
+caller). Wired from `getPlatformConfig().show_numeric_float`
+(`lib/api/contract.ts`, exposed per `docs/handoff/data.md` item 14) in both
+places that render a grid of `MarketTile`s: `app/(market)/page.tsx` (the ask
+in design's item 4) and `app/(market)/u/[handle]/page.tsx` (same component,
+same bug, not separately asked for but fixed for the same reason). Live
+value is `false` today, so nothing visually changes until an admin flips the
+flag — verified with three new tests (see below) that actually assert the
+prop reaches `CardTile`, not just that the file compiles.
+
+### 4. `checkout-math.ts` / `actions.ts` — `credit_hold_minutes` now read live
+
+`getPlatformConfig()` exposes `credit_hold_minutes` now (`docs/handoff/data.md`
+item 14). `createCheckoutAction` (`app/(market)/actions.ts`) reads it live
+and falls back to `CREDIT_HOLD_MINUTES_FALLBACK` only when the
+`getPlatformConfig()` call itself fails — never on a live value that is
+simply lower, which is exactly the direction that must take effect
+immediately (a hardcoded 1440 with a *lowered* live config would let a
+Stripe Checkout Session outlive the FSC hold backing it — cash collected
+with no card transferred, per the risk note in the task and in
+`docs/handoff/data.md` item 14). `CREDIT_HOLD_MINUTES_FALLBACK` itself is
+untouched in `checkout-math.ts` (still `1440`) — the existing test in
+`tests/invariants.test.ts` pinning it against `contract.ts`'s copy of the
+same constant still holds, since only the *usage* in `actions.ts` changed,
+not the constant's value.
+
+### Tests
+
+`tests/invariants.test.ts`: **152 passing (was 149, +3)**. New
+`describe('MarketTile -> CardTile showNumericFloat wiring ...')` block
+renders `MarketTile` with `renderToStaticMarkup` (no jsdom in this project —
+static markup is enough to assert on): omitting the prop and passing
+`false` both render the named condition badge with no `PCT`/numeric float;
+passing `true` renders the numeric float and no named badge. This is the
+first committed component-render test in this file (prior passes only
+model-level tests); used `react-dom/server` + `React.createElement` since
+the file is `.ts`, not `.tsx`, so no JSX. Did not add tests for the
+`formatFsc`→`formatUsd` swaps or the `credit_hold_minutes` live-read — the
+former is already pinned by design's existing "formatUsd/formatFsc render
+distinctly" test at the function level, and the latter lives inside a
+`'use server'` action that imports `next/headers`/Stripe/Supabase (same
+reasoning `docs/handoff/data.md` item 13 gives for not importing
+`route.ts` directly in tests — the module-graph cost, not a judgment call
+made here).
+
+`npx tsc --noEmit` clean. `npm run build` compiles (`Compiled successfully`,
+all 21 routes render — up from 19 in the last checkout pass, the extra two
+are admin routes merged in from another track since then). `npx eslint` on
+every changed file: clean, zero warnings.
+
+**Not verified live:** the visual effect of `show_numeric_float` actually
+flipping true in the live `platform_config` table — the live value is
+`false` (per `docs/handoff/data.md`), so there's no live state to click
+through that shows the numeric-float branch; covered instead by the new
+render tests above, which exercise both branches directly.
+
+### Files changed
+
+`components/market/BuyPanel.tsx`, `ListForm.tsx`, `OrderPoll.tsx`,
+`ProvenanceChain.tsx`, `RedeemForm.tsx`, `MarketTile.tsx`,
+`intake/IntakeWizard.tsx`, `intake/PricePayout.tsx`, `intake/SkuPicker.tsx`;
+`app/(market)/page.tsx`, `u/[handle]/page.tsx`, `card/[id]/page.tsx`,
+`dashboard/page.tsx`, `actions.ts`, `checkout-math.ts` (doc comment only, no
+behavioral change); `tests/invariants.test.ts` (appended one describe
+block, did not touch any existing block). No `.sql` file touched, no edit
+to `app/api/webhooks/**`, `lib/api/contract.ts`, or `components/card/**`.
+
 ## 2026-08-23 — FSC-aware checkout, two disclosures, pending_vault on the card page
 
 Task: wire the UI to the split-settlement data layer track/data finished in

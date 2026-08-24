@@ -13,9 +13,16 @@ import { Countdown } from "@/components/market/Countdown";
 
 export interface MarketTileProps {
   listing: ListingSummary;
+  /**
+   * Mirrors getPlatformConfig().show_numeric_float — forwarded straight to
+   * CardTile, which already defaults to false (the safe, live-verified
+   * value) when omitted. See CardTile's own doc comment for why the default
+   * matters: every float is a seller's self-assessment at launch.
+   */
+  showNumericFloat?: boolean;
 }
 
-export function MarketTile({ listing }: MarketTileProps) {
+export function MarketTile({ listing, showNumericFloat }: MarketTileProps) {
   const card = toCard(listing.card);
   const sku = toSku(listing.card.sku);
   const listingForCard = toSummaryListing(listing.card, listing.seller_id);
@@ -29,6 +36,7 @@ export function MarketTile({ listing }: MarketTileProps) {
         priceCents={listing.price_cents}
         listing={listingForCard}
         href={`/card/${listing.card_id}`}
+        showNumericFloat={showNumericFloat}
       />
       {early && (
         <div className="flex items-center justify-between gap-2 border border-accent/50 bg-overlay px-2 py-1 font-mono text-[9px] uppercase tracking-tight text-accent">

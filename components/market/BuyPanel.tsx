@@ -20,7 +20,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Banner } from "@/components/market/Banner";
 import { Countdown } from "@/components/market/Countdown";
 import { OrderPoll } from "@/components/market/OrderPoll";
-import { formatFsc, formatMyr, formatUsd } from "@/components/card/format";
+import { formatFsc, formatUsd } from "@/components/card/format";
 
 export interface BuyPanelListing {
   id: string;
@@ -123,16 +123,13 @@ export function BuyPanel({
 
       <div>
         <div className="text-2xl font-bold tracking-tight">
-          {formatFsc(listing.priceCents)}
-        </div>
-        <div className="font-mono text-[11px] tracking-tight text-muted">
-          {formatMyr(listing.priceCents)}
+          {formatUsd(listing.priceCents)}
         </div>
       </div>
 
       {listing.oracleValueCents != null && (
         <p className="font-mono text-[10px] tracking-tight text-muted">
-          Oracle fair value {formatFsc(listing.oracleValueCents)}
+          Oracle fair value {formatUsd(listing.oracleValueCents)}
         </p>
       )}
 

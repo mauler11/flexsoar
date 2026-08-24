@@ -13,7 +13,7 @@ import { listCardAction } from "@/app/(market)/actions";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Banner } from "@/components/market/Banner";
-import { formatFsc, formatMyr } from "@/components/card/format";
+import { formatUsd } from "@/components/card/format";
 
 export interface ListFormProps {
   cardId: string;
@@ -79,7 +79,7 @@ export function ListForm({
         <div className="flex items-baseline justify-between font-mono text-[10px] uppercase tracking-tight text-muted">
           <span>Oracle fair value</span>
           <span className="text-foreground">
-            {formatFsc(oracleValueCents)} <span className="text-muted">{formatMyr(oracleValueCents)}</span>
+            {formatUsd(oracleValueCents)}
           </span>
         </div>
       )}

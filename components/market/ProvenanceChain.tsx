@@ -7,7 +7,7 @@
  * terminal "MINTED" node reads as the card's birth.
  */
 import type { ProvenanceEntry } from "@/lib/api/contract";
-import { formatFsc } from "@/components/card/format";
+import { formatUsd } from "@/components/card/format";
 
 export interface ProvenanceChainProps {
   provenance: ProvenanceEntry[];
@@ -43,7 +43,7 @@ export function ProvenanceChain({ provenance }: ProvenanceChainProps) {
                 LV {entry.owner_level}
               </span>
               {entry.price_cents != null && (
-                <span className="text-foreground">{formatFsc(entry.price_cents)}</span>
+                <span className="text-foreground">{formatUsd(entry.price_cents)}</span>
               )}
               {released && (
                 <span className="text-[10px] text-muted">→ sold {released}</span>

@@ -28,6 +28,7 @@ import {
   cancelListing,
   redeemCard,
   getCreditAvailable,
+  getPlatformConfig,
   reserveCredit,
   releaseCreditHold,
   purchaseCardSplit,
@@ -291,10 +292,15 @@ export async function createCheckoutAction(
 
   // A session that outlives its FSC hold means cash could be collected after
   // the hold has already freed the buyer's FSC back out from under it —
-  // "cash collected with no card transferred." credit_hold_minutes isn't on
-  // getPlatformConfig() yet (filed in docs/handoff/market.md); the fallback
-  // mirrors the live value (1440, verified 2026-08-23).
-  const expiresAtSeconds = checkoutExpiresAtSeconds(now, CREDIT_HOLD_MINUTES_FALLBACK);
+  // "cash collected with no card transferred." getPlatformConfig() now
+  // exposes credit_hold_minutes (docs/handoff/data.md item 14); read it live
+  // and fall back to the pinned constant only if that read itself fails —
+  // never on a lowered live value, which is exactly the direction that must
+  // take effect immediately.
+  const holdMinutes =
+    (await getPlatformConfig().catch(() => null))?.credit_hold_minutes ??
+    CREDIT_HOLD_MINUTES_FALLBACK;
+  const expiresAtSeconds = checkoutExpiresAtSeconds(now, holdMinutes);
 
   try {
     const stripe = new Stripe(apiKey);

@@ -16,7 +16,7 @@
 
 import type { Sku } from "@/lib/db/types";
 import { floatMultiplier } from "@/components/card/value";
-import { formatFsc, formatUsd } from "@/components/card/format";
+import { formatUsd } from "@/components/card/format";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Banner } from "@/components/market/Banner";
@@ -83,12 +83,7 @@ export function PricePayout({
             Oracle reference value (deadstock)
           </span>
           <span className="font-mono text-[13px] font-bold tracking-tight text-accent">
-            {oracle != null ? formatFsc(oracle) : "unpriced"}
-            {oracle != null && (
-              <span className="ml-1 text-[9px] font-normal text-muted">
-                {formatUsd(oracle)}
-              </span>
-            )}
+            {oracle != null ? formatUsd(oracle) : "unpriced"}
           </span>
         </div>
         {estimate != null && (
@@ -97,7 +92,7 @@ export function PricePayout({
               At your self-declared condition
             </span>
             <span className="font-mono text-[11px] font-bold tracking-tight text-foreground">
-              ≈ {formatFsc(estimate)}
+              ≈ {formatUsd(estimate)}
             </span>
           </div>
         )}

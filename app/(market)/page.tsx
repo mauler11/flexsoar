@@ -7,7 +7,7 @@
  * feeds the card links.
  */
 import type { Metadata } from "next";
-import { getListings, getSkus } from "@/lib/api/contract";
+import { getListings, getPlatformConfig, getSkus } from "@/lib/api/contract";
 import type { ListingSort, ListingsQuery } from "@/lib/api/contract";
 import type { Tier } from "@/lib/db/types";
 import { currentUserId } from "@/app/(market)/queries";
@@ -64,9 +64,10 @@ export default async function BrowsePage({
   if (sizeUs != null && Number.isFinite(sizeUs)) query.sizeUs = sizeUs;
   if (tier.length) query.tier = tier as Tier[];
 
-  const [listings, skus] = await Promise.all([
+  const [listings, skus, platformConfig] = await Promise.all([
     getListings(query),
     getSkus({ limit: 400 }),
+    getPlatformConfig(),
   ]);
 
   const brands = [...new Set(skus.map((s) => s.brand))].sort();
@@ -124,7 +125,11 @@ export default async function BrowsePage({
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {listings.map((listing) => (
-            <MarketTile key={listing.id} listing={listing} />
+            <MarketTile
+              key={listing.id}
+              listing={listing}
+              showNumericFloat={platformConfig.show_numeric_float}
+            />
           ))}
         </div>
       )}

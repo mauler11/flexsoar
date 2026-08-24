@@ -8,7 +8,7 @@
  */
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getListings } from "@/lib/api/contract";
+import { getListings, getPlatformConfig } from "@/lib/api/contract";
 import {
   currentUserId,
   getPublicProfileByHandle,
@@ -16,7 +16,7 @@ import {
 } from "@/app/(market)/queries";
 import { MarketTile } from "@/components/market/MarketTile";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { formatFsc, formatUsd } from "@/components/card/format";
+import { formatUsd } from "@/components/card/format";
 
 export async function generateMetadata({
   params,
@@ -41,9 +41,10 @@ export default async function ProfilePage({
   const profile = await getPublicProfileByHandle(handle);
   if (!profile) notFound();
 
-  const [live, trades] = await Promise.all([
+  const [live, trades, platformConfig] = await Promise.all([
     getListings({ sellerId: profile.id, viewerId: viewerId ?? undefined }),
     getTradeHistory(profile.id),
+    getPlatformConfig(),
   ]);
 
   const joined = profile.created_at.slice(0, 10);
@@ -91,7 +92,11 @@ export default async function ProfilePage({
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
             {live.map((listing) => (
-              <MarketTile key={listing.id} listing={listing} />
+              <MarketTile
+                key={listing.id}
+                listing={listing}
+                showNumericFloat={platformConfig.show_numeric_float}
+              />
             ))}
           </div>
         )}
@@ -139,7 +144,7 @@ export default async function ProfilePage({
                       {trade.releasedAt ? trade.releasedAt.slice(0, 10) : "—"}
                     </td>
                     <td className="px-2 py-1.5 text-right">
-                      {trade.priceCents != null ? formatFsc(trade.priceCents) : "—"}
+                      {trade.priceCents != null ? formatUsd(trade.priceCents) : "—"}
                     </td>
                   </tr>
                 ))}
