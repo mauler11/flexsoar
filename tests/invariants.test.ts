@@ -57,6 +57,8 @@ import {
 import { CREDIT_HOLD_MINUTES_FALLBACK as CONTRACT_CREDIT_HOLD_MINUTES_FALLBACK } from '../lib/api/contract';
 import type { ListingSummary } from '../lib/api/contract';
 import { MarketTile } from '../components/market/MarketTile';
+import { PricePayout } from '../components/market/intake/PricePayout';
+import { COUNTRIES, isValidCountryCode } from '../components/market/intake/intake-config';
 
 // ------------------------------------------------------------
 // SQL MIRRORS
@@ -1496,5 +1498,118 @@ describe('MarketTile -> CardTile showNumericFloat wiring (docs/handoff/design.md
     );
     expect(html).toContain('PCT');
     expect(html).not.toContain('Factory New');
+  });
+});
+
+describe('intake-config.isValidCountryCode / COUNTRIES', () => {
+  it('accepts exactly the listed codes; rejects blank, lowercase, and unknown input', () => {
+    expect(isValidCountryCode('MY')).toBe(true);
+    expect(isValidCountryCode('US')).toBe(true);
+    // Lowercase must not pass here — the server re-uppercases before calling
+    // this (app/(market)/list/actions.ts), so the guard itself staying strict
+    // is what makes that re-uppercase load-bearing rather than decorative.
+    expect(isValidCountryCode('my')).toBe(false);
+    expect(isValidCountryCode('')).toBe(false);
+    expect(isValidCountryCode(null)).toBe(false);
+    expect(isValidCountryCode(undefined)).toBe(false);
+    expect(isValidCountryCode('ZZ')).toBe(false);
+  });
+
+  it('every COUNTRIES entry is a unique two-letter uppercase code, and MY is a real (non-default) choice among them', () => {
+    const codes = COUNTRIES.map((c) => c.code);
+    expect(new Set(codes).size).toBe(codes.length);
+    for (const code of codes) {
+      expect(code).toMatch(/^[A-Z]{2}$/);
+    }
+    expect(codes).toContain('MY');
+  });
+});
+
+describe('PricePayout — country-driven payout disclosure (docs/handoff/market.md, capture-country task)', () => {
+  // fn_payout_method_for_user resolves a null users.country_code to 'credit'
+  // silently — every launch consignor is Malaysian and gets exactly that null
+  // from a real signup, so they were being paid FSC instead of cash with no
+  // error anywhere. This pins that the wizard's country step actually reacts:
+  // once a country is picked, ITS resolution wins over whatever payout method
+  // is already on file, using the live cash_payout_countries membership list
+  // (not a hardcoded guess) — same predicate 019b's fn_payout_method_for_user
+  // runs in SQL.
+  const baseSku: Sku = {
+    id: 'sku-1',
+    brand: 'Nike',
+    model: 'Test',
+    colorway: 'Black',
+    size_us: 10,
+    retail_price_cents: 15000,
+    market_price_cents: 21000,
+    price_confidence: 0.9,
+    priced_at: '2026-01-01T00:00:00Z',
+    demand_score: 50,
+    sprite_key: null,
+    palette: null,
+    art_url: null,
+    mint_cap: null,
+    created_at: '2026-01-01T00:00:00Z',
+  };
+
+  const baseProps = {
+    sku: baseSku,
+    declaredFloat: null,
+    priceCents: null,
+    onPriceChange: () => {},
+    payout: null,
+    onPayoutChange: () => {},
+    eligibility: null,
+    onCountryChange: () => {},
+  };
+
+  it('no country picked yet: falls back to the account-on-file sellerPayoutMethod', () => {
+    const html = renderToStaticMarkup(
+      createElement(PricePayout, {
+        ...baseProps,
+        countryCode: null,
+        sellerPayoutMethod: 'cash',
+        cashPayoutCountryCodes: ['MY'],
+      }),
+    );
+    expect(html).toContain("You&#x27;ll be paid in cash");
+  });
+
+  it('picking a cash-eligible country overrides a stale credit sellerPayoutMethod', () => {
+    const html = renderToStaticMarkup(
+      createElement(PricePayout, {
+        ...baseProps,
+        countryCode: 'MY',
+        sellerPayoutMethod: 'credit',
+        cashPayoutCountryCodes: ['MY'],
+      }),
+    );
+    expect(html).toContain("You&#x27;ll be paid in cash");
+  });
+
+  it('picking a non-cash-eligible country shows the FSC disclosure, with the plain-language store-credit copy, overriding a stale cash sellerPayoutMethod', () => {
+    const html = renderToStaticMarkup(
+      createElement(PricePayout, {
+        ...baseProps,
+        countryCode: 'US',
+        sellerPayoutMethod: 'cash',
+        cashPayoutCountryCodes: ['MY'],
+      }),
+    );
+    expect(html).toContain("You&#x27;ll be paid in FSC, not cash");
+    expect(html).toContain('1 FSC = 1 USD');
+    expect(html).toContain('cannot be cashed out to a bank');
+  });
+
+  it('no country picked and no sellerPayoutMethod on file: shows neither disclosure banner', () => {
+    const html = renderToStaticMarkup(
+      createElement(PricePayout, {
+        ...baseProps,
+        countryCode: null,
+        sellerPayoutMethod: null,
+        cashPayoutCountryCodes: [],
+      }),
+    );
+    expect(html).not.toContain("You&#x27;ll be paid");
   });
 });

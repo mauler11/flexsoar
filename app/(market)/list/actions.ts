@@ -26,6 +26,7 @@ import { currentUserId, CASH_PAYOUT_MIN_FULFILMENTS } from "@/app/(market)/queri
 import { signUploadUrl } from "@/lib/r2/sign";
 import {
   REQUIRED_PHOTO_COUNT,
+  isValidCountryCode,
   type IntakePhoto,
   type PayoutMethod,
 } from "@/components/market/intake/intake-config";
@@ -202,6 +203,7 @@ export async function submitListingIntakeAction(
   const componentsRaw = String(formData.get("components") ?? "");
   const reserveRaw = String(formData.get("reserve_price_cents") ?? "");
   const payoutRaw = String(formData.get("payout_method") ?? "");
+  const countryRaw = String(formData.get("country_code") ?? "").trim().toUpperCase();
   const notes = String(formData.get("notes") ?? "").trim().slice(0, 1000);
 
   if (!/^[0-9a-f-]{36}$/i.test(skuId)) {
@@ -255,6 +257,26 @@ export async function submitListingIntakeAction(
     return { ok: false, code: "INVALID", message: "Choose a payout method." };
   }
   const payoutMethod = payoutRaw as PayoutMethod;
+
+  // Capture country before a consignor can list — fn_payout_method_for_user
+  // resolves a null users.country_code to 'credit' with no error anywhere, so
+  // a seller who skips this is silently paid FSC instead of cash. Refused
+  // server-side; the wizard's own required-field UI is convenience only.
+  //
+  // NOT YET PERSISTED to users.country_code: no contract export exists to
+  // write it, and users' self-update grant (007_profile_updates.sql) covers
+  // only `handle` — writing this column needs a track/data contract export
+  // plus a migration widening that grant (filed in docs/handoff/market.md).
+  // This check is real and not skippable, but until that lands it validates
+  // the seller made a real choice on THIS submission; it cannot make
+  // fn_payout_method_for_user resolve any differently for them yet.
+  if (!isValidCountryCode(countryRaw)) {
+    return {
+      ok: false,
+      code: "COUNTRY_REQUIRED",
+      message: "Select your country before submitting — it decides whether you're paid in cash or FSC.",
+    };
+  }
 
   try {
     const itemId = await submitListing({

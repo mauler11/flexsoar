@@ -1,5 +1,134 @@
 # Handoff — track/market
 
+## 2026-08-24 — Country capture on the listing wizard (payout-routing bug) — UI/validation done; BLOCKING ask for track/data on the actual write
+
+Task: capture the seller's country before they can list, since a confirmed
+live bug (2026-08-22) showed a real signup leaves `users.country_code` NULL,
+`fn_payout_method_for_user` silently resolves that to `'credit'`, and every
+launch consignor is Malaysian — so every one of them was being paid FSC
+instead of cash with no error anywhere.
+
+### What's built, fully in this track's lane
+
+1. **`components/market/intake/intake-config.ts`** — `COUNTRIES` (a real ISO
+   3166-1 alpha-2 list, ~195 entries) and `isValidCountryCode()`. `MY` is one
+   entry among many, not a default — the picker's placeholder option is not
+   itself a valid value, so a seller must make a real choice.
+2. **`app/(market)/queries.ts`** — `getCashPayoutCountryCodes()`, a new local
+   read (same established pattern as this file's other workaround reads:
+   server-only, session client, never `users`) over `cash_payout_countries`,
+   which 019b already grants `select` to `anon, authenticated`. It mirrors
+   `fn_payout_method_for_user`'s exact membership predicate
+   (`upper(btrim(country_code))` against the table), so the UI's live preview
+   is authoritative-equivalent, not a guess.
+3. **`components/market/intake/PricePayout.tsx`** — a required country
+   `<select>` (Step 4). The existing seller-payout disclosure banner now
+   reacts to whichever country is currently selected (via
+   `cashPayoutCountryCodes` above), overriding the stale `sellerPayoutMethod`
+   the moment a different country is picked — a seller sees the real cash/FSC
+   outcome before they submit, not after. FSC copy now states plainly: store
+   credit, 1 FSC = 1 USD, earned by selling, spendable on FlexSoar, cannot be
+   cashed out to a bank, and names the Stripe corridor as the reason.
+4. **`components/market/intake/IntakeWizard.tsx`** — country state threaded
+   through, pre-filled from `initialCountryCode` (the account's current
+   `users.country_code`, so a returning consignor is not asked twice), and
+   required to advance past Step 4 (`canNext`) — client-side convenience only.
+5. **`app/(market)/list/actions.ts`** — `submitListingIntakeAction` refuses
+   server-side (`COUNTRY_REQUIRED`) when the submitted country isn't one of
+   `COUNTRIES`. This is the real gate; the client requirement above is
+   belt-and-braces, same convention as every other check in this action.
+6. **`app/(market)/list/page.tsx`** — fetches the account's existing
+   `country_code` (`getUser`, already-frozen contract export, self-read is
+   RLS-covered) and the live `cash_payout_countries` set, passes both down.
+
+### BLOCKING — this does not yet WRITE `users.country_code`, so the bug is only front-doored, not closed
+
+Verified directly against the applied migrations before writing anything
+(AGENT_RULES.md §8): **no path exists, anywhere, for a seller to persist their
+own country.**
+
+- `lib/api/contract.ts` has no update/write export touching `users` at all
+  (grepped: zero `.update(` calls on the `users` table anywhere in the file).
+  `getPayoutMethodForUser` and `getUser` are reads only.
+- `007_profile_updates.sql:51-52` — `revoke update on users from
+  authenticated; grant update (handle) on users to authenticated;` — the
+  self-update RLS policy (`users_self_update`, same file) permits the row, but
+  the column-level grant permits **only `handle`**. No later migration
+  (checked every file through `024f`) widens it. A raw
+  `.update({ country_code })` from a session would be refused at the grant
+  layer (42501) even though the row-level policy would allow it — verified by
+  reading the grant statement directly, not assumed.
+
+Per AGENT_RULES.md §1/§2, this track does not touch `lib/api/contract.ts`,
+does not call `supabase.from(...).update(...)` outside track/data, and does
+not write `.sql`. All three would be required to close this for real, so none
+were done — filed here instead, per §9 ("push back... a refused task with a
+clear explanation is a good outcome").
+
+**Ask, for whoever owns `lib/api/contract.ts` + a migration:**
+
+1. A migration widening the grant: `grant update (handle, country_code) on
+   users to authenticated;`, plus a CHECK constraint validating the ISO-2
+   shape (`country_code ~ '^[A-Z]{2}$'` or similar) so a client can't write
+   garbage into a column `fn_payout_method_for_user` trusts.
+2. A contract export, e.g. `updateUserCountry(countryCode: string):
+   Promise<void>`, session client, deriving the row from `auth.uid()` the same
+   way `handle`'s self-update already does.
+
+Once both land, wiring is small: `submitListingIntakeAction` already validates
+and has the value in hand (`countryRaw`) right where the `COUNTRY_REQUIRED`
+check is now — add one `await updateUserCountry(countryRaw)` call there,
+before `submitListing(...)`, and this closes end-to-end. Flagged in code
+comments at both call sites (`PricePayout.tsx`'s file doc comment,
+`list/actions.ts`'s check) so whoever wires it finds the exact spot.
+
+**Practical state until then:** the wizard now always asks, validates, and
+shows the seller the correct preview for whatever country they pick — real
+forward progress, and no submission can skip the question. But
+`fn_payout_method_for_user` still resolves off whatever is already in
+`users.country_code` (null, for every current consignor), so the actual
+payout routing bug is not fixed by this pass alone — only the front door is.
+Said plainly rather than left to be discovered at payout time.
+
+### Tests
+
+`tests/invariants.test.ts`: **158 passing (was 152, +6)**. New
+`describe('intake-config.isValidCountryCode / COUNTRIES', ...)` (guard
+correctness, no dupes, all-uppercase-two-letter shape, `MY` present but not
+special-cased) and `describe('PricePayout — country-driven payout disclosure
+...', ...)` (renders `PricePayout` via `renderToStaticMarkup`, same convention
+as the `MarketTile` block above: no country picked falls back to the
+account's saved `sellerPayoutMethod`; picking a cash-eligible country
+overrides a stale `credit` value; picking a non-eligible country shows the
+FSC copy and overrides a stale `cash` value; neither banner renders with
+nothing to go on yet).
+
+`npx tsc --noEmit` clean. `npm run build` compiles (`Compiled successfully`,
+all 21 routes render). `npx eslint` on every changed file: clean (two
+pre-existing warnings in `list/actions.ts`'s unrelated `fileSkuRequestAction`,
+untouched by this pass — `colorway`/`notes` unused, predates this task).
+
+**Not verified live:** `getCashPayoutCountryCodes()` was not probed against
+the live project (would need the anon/session key mid-session; read instead
+directly against `019b_payout_routing.sql`'s DDL and grant statements, which
+are unambiguous). The self-update grant gap above was verified by reading
+`007_profile_updates.sql` and every later migration file directly, not by
+attempting a live write (this session may not write to the live database,
+AGENT_RULES.md §2, and a 42501 from a doomed write would prove nothing a
+grep didn't already show).
+
+### Files changed
+
+`components/market/intake/intake-config.ts` (new `COUNTRIES`,
+`isValidCountryCode`), `PricePayout.tsx` (country select, live disclosure,
+FSC copy), `IntakeWizard.tsx` (country state, gating, review row);
+`app/(market)/queries.ts` (new `getCashPayoutCountryCodes`),
+`app/(market)/list/actions.ts` (server-side `COUNTRY_REQUIRED` check),
+`app/(market)/list/page.tsx` (fetch + thread the two new reads);
+`tests/invariants.test.ts` (appended two describe blocks, did not touch any
+existing block). No `.sql` file touched, no edit to `lib/api/contract.ts` or
+`components/card/**`.
+
 ## 2026-08-24 — Closed docs/handoff/design.md item 3 (price-in-FSC formatting), showNumericFloat wiring, live credit_hold_minutes
 
 Task: finish the price-formatting fix track/design filed as item 3 in

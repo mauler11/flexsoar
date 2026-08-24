@@ -66,6 +66,39 @@ export async function currentUserLevel(): Promise<number | null> {
 }
 
 // ------------------------------------------------------------
+// CASH-PAYOUT COUNTRIES — pending a contract export, filed in
+// docs/handoff/market.md
+// ------------------------------------------------------------
+
+/**
+ * Every country whose sellers are paid in cash — mirrors exactly the
+ * membership check `fn_payout_method_for_user` runs against
+ * `cash_payout_countries` (019b: `c.country_code = upper(btrim(u.country_code))`),
+ * so a code returned here resolves 'cash' for real, not a guess. No contract
+ * export exists for this table yet (grepped `contract.ts`: zero hits for
+ * "cash_payout_countries"), so this is a direct, server-only, read-only
+ * workaround in the established pattern of this file's other reads —
+ * `cash_payout_countries` is granted `select` to `anon, authenticated` (019b),
+ * so this is not a privilege escalation, and it never touches `users`.
+ *
+ * Used ONLY to preview payout method for a country the seller has just
+ * picked in the listing wizard, before it is (or can be) saved — see
+ * docs/handoff/market.md for why saving it is still blocked.
+ */
+export async function getCashPayoutCountryCodes(): Promise<string[]> {
+  const supabase = await createServerSupabase();
+
+  const rows = await supabase.from('cash_payout_countries').select('country_code');
+  if (rows.error) {
+    throw new Error(rows.error.message.trim() || 'cash_payout_countries read failed');
+  }
+
+  return ((rows.data as { country_code: string }[] | null) ?? []).map((row) =>
+    row.country_code.toUpperCase(),
+  );
+}
+
+// ------------------------------------------------------------
 // WORKAROUND READS — pending getPublicProfile (handoff item 1)
 // ------------------------------------------------------------
 

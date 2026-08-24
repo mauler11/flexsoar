@@ -25,6 +25,7 @@ import { PricePayout } from "@/components/market/intake/PricePayout";
 import {
   CONDITION_QUESTIONS,
   REQUIRED_PHOTO_COUNT,
+  isValidCountryCode,
   type IntakePhoto,
   type PayoutMethod,
 } from "@/components/market/intake/intake-config";
@@ -47,6 +48,14 @@ export interface IntakeWizardProps {
    * own payout route and is never a choice. Null when signed out.
    */
   sellerPayoutMethod?: "cash" | "credit" | null;
+  /** users.country_code on file today, if any — prefills the country step. */
+  initialCountryCode?: string | null;
+  /**
+   * Every ISO alpha-2 code a seller can be paid cash from — read live off
+   * `cash_payout_countries` (see app/(market)/queries.ts). Lets PricePayout
+   * preview cash-vs-FSC for whatever country is picked, before it is saved.
+   */
+  cashPayoutCountryCodes?: readonly string[];
 }
 
 const STEPS = ["SKU", "Photos", "Condition", "Price", "Review"] as const;
@@ -57,6 +66,8 @@ export function IntakeWizard({
   payoutEligibility,
   signedIn,
   sellerPayoutMethod,
+  initialCountryCode,
+  cashPayoutCountryCodes = [],
 }: IntakeWizardProps) {
   const [step, setStep] = useState<StepIndex>(0);
   const [selectedSku, setSelectedSku] = useState<Sku | null>(null);
@@ -66,6 +77,7 @@ export function IntakeWizard({
   const [answers, setAnswers] = useState<Partial<GradeComponents>>({});
   const [priceCents, setPriceCents] = useState<number | null>(null);
   const [payout, setPayout] = useState<PayoutMethod | null>(null);
+  const [countryCode, setCountryCode] = useState<string | null>(initialCountryCode ?? null);
   const [notes, setNotes] = useState("");
   const [submit, setSubmit] = useState<{
     state: "idle" | "running" | "done";
@@ -89,7 +101,8 @@ export function IntakeWizard({
           priceCents != null &&
           priceCents > 0 &&
           payout != null &&
-          (payout !== "cash" || payoutEligibility?.cashEligible === true)
+          (payout !== "cash" || payoutEligibility?.cashEligible === true) &&
+          isValidCountryCode(countryCode)
         );
       default: return true;
     }
@@ -105,7 +118,9 @@ export function IntakeWizard({
   }
 
   function doSubmit() {
-    if (!selectedSku || payout == null || priceCents == null) return;
+    if (!selectedSku || payout == null || priceCents == null || !isValidCountryCode(countryCode)) {
+      return;
+    }
     setSubmit({ state: "running", itemId: null, error: null });
     const formData = new FormData();
     formData.set("sku_id", selectedSku.id);
@@ -113,6 +128,7 @@ export function IntakeWizard({
     formData.set("components", JSON.stringify(answers));
     formData.set("reserve_price_cents", String(priceCents));
     formData.set("payout_method", payout);
+    formData.set("country_code", countryCode);
     formData.set("notes", notes);
 
     startTransition(async () => {
@@ -195,6 +211,9 @@ export function IntakeWizard({
           onPayoutChange={setPayout}
           eligibility={payoutEligibility}
           sellerPayoutMethod={sellerPayoutMethod}
+          countryCode={countryCode}
+          onCountryChange={setCountryCode}
+          cashPayoutCountryCodes={cashPayoutCountryCodes}
         />
       )}
 
@@ -206,6 +225,7 @@ export function IntakeWizard({
           priceCents={priceCents!}
           payout={payout!}
           payoutEligibility={payoutEligibility}
+          countryCode={countryCode!}
           notes={notes}
           onNotesChange={setNotes}
           error={submit.error}
@@ -257,6 +277,13 @@ export function IntakeWizard({
     if (i === 1)
       return photos.filter((p) => p.url.startsWith("https://")).length >= REQUIRED_PHOTO_COUNT;
     if (i === 2) return declaredFloat != null;
+    if (i === 3)
+      return (
+        priceCents != null &&
+        priceCents > 0 &&
+        payout != null &&
+        isValidCountryCode(countryCode)
+      );
     return true;
   }
 }
@@ -268,6 +295,7 @@ function ReviewPane({
   priceCents,
   payout,
   payoutEligibility,
+  countryCode,
   notes,
   onNotesChange,
   error,
@@ -278,6 +306,7 @@ function ReviewPane({
   priceCents: number;
   payout: PayoutMethod;
   payoutEligibility: PayoutEligibility | null;
+  countryCode: string;
   notes: string;
   onNotesChange: (v: string) => void;
   error: string | null;
@@ -293,6 +322,7 @@ function ReviewPane({
         <Detail label="Self-declared float" value={declaredFloat.toFixed(3)} />
         <Detail label="Reserve price" value={formatUsd(priceCents)} />
         <Detail label="Payout" value={payout === "cash" ? "cash" : "credit"} />
+        <Detail label="Country" value={countryCode} />
         <Detail
           label="Cash gate"
           value={

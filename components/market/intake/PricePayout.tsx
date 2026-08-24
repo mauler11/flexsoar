@@ -12,6 +12,23 @@
  *
  * Payout: credit always available; cash is gated on completed fulfilments
  * (server re-checks at submit, this is the convenience lock).
+ *
+ * Country: `fn_payout_method_for_user` resolves a null `users.country_code`
+ * to 'credit' with no error — a real signup produces exactly that null, so a
+ * seller who never sets a country is silently paid FSC instead of cash. This
+ * step is the first place payout is actually disclosed, so it is where the
+ * country is asked for. The disclosure banner below reacts to whichever
+ * country is currently selected, via `cashPayoutCountryCodes` (a live read of
+ * `cash_payout_countries`, not a hardcoded guess), so a seller sees the real
+ * outcome before submitting — not `sellerPayoutMethod`, which only reflects
+ * whatever is already saved and does not move as they pick a country here.
+ *
+ * NOTE (see docs/handoff/market.md): selecting a country here validates and
+ * blocks submission, but does not yet WRITE `users.country_code` — no
+ * contract export exists to save it, and `users`' self-update grant
+ * (007_profile_updates.sql) covers only `handle`. That is a track/data +
+ * migration ask, filed in the handoff; this step is ready to call it the
+ * moment it lands.
  */
 
 import type { Sku } from "@/lib/db/types";
@@ -20,7 +37,11 @@ import { formatUsd } from "@/components/card/format";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Banner } from "@/components/market/Banner";
-import type { PayoutMethod } from "@/components/market/intake/intake-config";
+import {
+  COUNTRIES,
+  isValidCountryCode,
+  type PayoutMethod,
+} from "@/components/market/intake/intake-config";
 import type { PayoutEligibility } from "@/app/(market)/list/actions";
 
 export interface PricePayoutProps {
@@ -35,9 +56,15 @@ export interface PricePayoutProps {
    * How the SELLER (not the listing's buyer-settlement election below) is
    * actually paid — fn_payout_method_for_user, derived from their country.
    * Distinct from `payout`/`onPayoutChange`, which is the buyer's own
-   * payment method for this listing.
+   * payment method for this listing. Only used as a fallback before a
+   * country is selected below; once one is, the selection wins.
    */
   sellerPayoutMethod?: "cash" | "credit" | null;
+  /** The seller's own country — required, real choice, no default. */
+  countryCode: string | null;
+  onCountryChange: (code: string) => void;
+  /** Live membership list for the disclosure preview — see the file doc comment. */
+  cashPayoutCountryCodes?: readonly string[];
 }
 
 export function PricePayout({
@@ -49,6 +76,9 @@ export function PricePayout({
   onPayoutChange,
   eligibility,
   sellerPayoutMethod,
+  countryCode,
+  onCountryChange,
+  cashPayoutCountryCodes = [],
 }: PricePayoutProps) {
   const oracle = sku.market_price_cents;
   const estimate =
@@ -59,18 +89,54 @@ export function PricePayout({
   const priceDollars =
     priceCents != null ? String((priceCents / 100).toFixed(2)) : "";
 
+  // The selection in this step always wins over the account's saved payout
+  // method once one is made — that saved value is stale the moment the
+  // seller picks a different country here.
+  const previewedPayoutMethod: "cash" | "credit" | null = isValidCountryCode(countryCode)
+    ? cashPayoutCountryCodes.includes(countryCode)
+      ? "cash"
+      : "credit"
+    : (sellerPayoutMethod ?? null);
+
   return (
     <div className="flex flex-col gap-4">
-      {sellerPayoutMethod === "credit" && (
+      <div className="flex flex-col gap-1">
+        <span className="font-mono text-[10px] uppercase tracking-tight text-muted">
+          Your country
+        </span>
+        <select
+          aria-label="Your country"
+          value={countryCode ?? ""}
+          onChange={(e) => onCountryChange(e.target.value)}
+          className="border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[12px] tracking-tight text-foreground"
+        >
+          <option value="" disabled>
+            Select your country…
+          </option>
+          {COUNTRIES.map((c) => (
+            <option key={c.code} value={c.code}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <span className="font-mono text-[10px] tracking-tight text-muted">
+          Decides whether this sale pays you in cash or FSC. Required to
+          submit.
+        </span>
+      </div>
+
+      {previewedPayoutMethod === "credit" && (
         <Banner tone="info" title="You'll be paid in FSC, not cash">
-          Your account routes to FSC payout — determined by your country, not
-          a choice made here. Know that now, before you list, not after this
-          sells.
+          FSC is store credit — 1 FSC = 1 USD, earned by selling, spendable on
+          FlexSoar. It cannot be cashed out to a bank. Your country is outside
+          the Stripe corridor this platform can settle cash through, so a sale
+          here pays out in FSC, not cash. Know that now, before you list, not
+          after this sells.
         </Banner>
       )}
-      {sellerPayoutMethod === "cash" && (
+      {previewedPayoutMethod === "cash" && (
         <Banner tone="info" title="You'll be paid in cash">
-          Your account routes to a cash bank payout.
+          Your country routes to a cash bank payout.
         </Banner>
       )}
 

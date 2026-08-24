@@ -7,9 +7,9 @@
  * without re-fetching.
  */
 import type { Metadata } from "next";
-import { getSkus, getPayoutMethodForUser } from "@/lib/api/contract";
+import { getSkus, getPayoutMethodForUser, getUser } from "@/lib/api/contract";
 import { getPayoutEligibilityAction } from "@/app/(market)/list/actions";
-import { currentUserId } from "@/app/(market)/queries";
+import { currentUserId, getCashPayoutCountryCodes } from "@/app/(market)/queries";
 import { IntakeWizard } from "@/components/market/intake/IntakeWizard";
 
 export const metadata: Metadata = {
@@ -24,9 +24,11 @@ export default async function ListPage() {
   // (fn_payout_method_for_user), never a choice. Read before they commit to
   // a listing, not surfaced only after it sells.
   const me = await currentUserId();
-  const sellerPayoutMethod = me
-    ? await getPayoutMethodForUser(me).catch(() => null)
-    : null;
+  const [sellerPayoutMethod, existingCountryCode, cashPayoutCountryCodes] = await Promise.all([
+    me ? getPayoutMethodForUser(me).catch(() => null) : Promise.resolve(null),
+    me ? getUser({ id: me }).then((u) => u?.country_code ?? null) : Promise.resolve(null),
+    getCashPayoutCountryCodes().catch(() => [] as string[]),
+  ]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -44,6 +46,8 @@ export default async function ListPage() {
         payoutEligibility={payoutEligibility}
         signedIn={payoutEligibility != null}
         sellerPayoutMethod={sellerPayoutMethod}
+        initialCountryCode={existingCountryCode}
+        cashPayoutCountryCodes={cashPayoutCountryCodes}
       />
     </div>
   );
