@@ -10,8 +10,13 @@
  * self-declared float as a hint. The oracle reference is the "what the shoe is
  * worth new at the oracle" figure — never the seller's own estimate.
  *
- * Payout: credit always available; cash is gated on completed fulfilments
- * (server re-checks at submit, this is the convenience lock).
+ * Payout: geography-derived, never a choice (AGENT_RULES.md section 5) —
+ * `fn_submit_listing` (019c) computes it itself via
+ * `fn_payout_method_for_user` and discards whatever this step sends, so the
+ * method here is a read-only indicator, not a toggle. The old
+ * cash_payout_min_fulfilments gate this step used to enforce client-side is
+ * gone from the SQL too (019c's own comment: "the gate is gone") — payout is
+ * a Stripe corridor fact now, not something a fulfilment history unlocks.
  *
  * Country: `fn_payout_method_for_user` resolves a null `users.country_code`
  * to 'credit' with no error — a real signup produces exactly that null, so a
@@ -23,41 +28,34 @@
  * outcome before submitting — not `sellerPayoutMethod`, which only reflects
  * whatever is already saved and does not move as they pick a country here.
  *
- * NOTE (see docs/handoff/market.md): selecting a country here validates and
- * blocks submission, but does not yet WRITE `users.country_code` — no
- * contract export exists to save it, and `users`' self-update grant
- * (007_profile_updates.sql) covers only `handle`. That is a track/data +
- * migration ask, filed in the handoff; this step is ready to call it the
- * moment it lands.
+ * Country persistence: `app/(market)/list/actions.ts`'s
+ * `submitListingIntakeAction` calls `setCountry()` (025's `fn_set_country`)
+ * before `submitListing()` when the picked value differs from the account's
+ * on-file one — this step just captures and validates it (docs/handoff/market.md,
+ * "setCountry() wiring: CLOSED").
  */
 
 import type { Sku } from "@/lib/db/types";
 import { floatMultiplier } from "@/components/card/value";
 import { formatUsd } from "@/components/card/format";
 import { Input } from "@/components/ui/Input";
-import { Button } from "@/components/ui/Button";
 import { Banner } from "@/components/market/Banner";
 import {
   COUNTRIES,
-  isValidCountryCode,
-  type PayoutMethod,
+  derivePayoutPreview,
 } from "@/components/market/intake/intake-config";
-import type { PayoutEligibility } from "@/app/(market)/list/actions";
 
 export interface PricePayoutProps {
   sku: Sku;
   declaredFloat: number | null;
   priceCents: number | null;
   onPriceChange: (cents: number) => void;
-  payout: PayoutMethod | null;
-  onPayoutChange: (method: PayoutMethod) => void;
-  eligibility: PayoutEligibility | null;
   /**
-   * How the SELLER (not the listing's buyer-settlement election below) is
-   * actually paid — fn_payout_method_for_user, derived from their country.
-   * Distinct from `payout`/`onPayoutChange`, which is the buyer's own
-   * payment method for this listing. Only used as a fallback before a
-   * country is selected below; once one is, the selection wins.
+   * The account's payout method on file today — fn_payout_method_for_user,
+   * derived from whatever country is currently saved (may be stale the
+   * moment a different one is picked below). Used only as a fallback before
+   * a country is selected in this step; once one is, `derivePayoutPreview`
+   * (below) recomputes from that selection and wins.
    */
   sellerPayoutMethod?: "cash" | "credit" | null;
   /** The seller's own country — required, real choice, no default. */
@@ -72,9 +70,6 @@ export function PricePayout({
   declaredFloat,
   priceCents,
   onPriceChange,
-  payout,
-  onPayoutChange,
-  eligibility,
   sellerPayoutMethod,
   countryCode,
   onCountryChange,
@@ -91,12 +86,13 @@ export function PricePayout({
 
   // The selection in this step always wins over the account's saved payout
   // method once one is made — that saved value is stale the moment the
-  // seller picks a different country here.
-  const previewedPayoutMethod: "cash" | "credit" | null = isValidCountryCode(countryCode)
-    ? cashPayoutCountryCodes.includes(countryCode)
-      ? "cash"
-      : "credit"
-    : (sellerPayoutMethod ?? null);
+  // seller picks a different country here. Not a choice either way: this is
+  // exactly what fn_submit_listing will compute itself.
+  const previewedPayoutMethod = derivePayoutPreview(
+    countryCode,
+    cashPayoutCountryCodes,
+    sellerPayoutMethod,
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -186,38 +182,24 @@ export function PricePayout({
           <span className="font-mono text-[10px] uppercase tracking-tight text-muted">
             Payout method
           </span>
-          <div className="grid grid-cols-2 gap-1.5">
-            <Button
-              variant={payout === "credit" ? "primary" : "secondary"}
-              size="md"
-              onClick={() => onPayoutChange("credit")}
-            >
-              credit
-            </Button>
-            <Button
-              variant={payout === "cash" ? "primary" : "secondary"}
-              size="md"
-              disabled={!eligibility?.cashEligible}
-              onClick={() => onPayoutChange("cash")}
-            >
-              cash
-            </Button>
+          {/* Read-only — not a choice. fn_submit_listing (019c) derives this
+              itself from the seller's country and ignores whatever this step
+              sends; see the file doc comment. */}
+          <div
+            aria-label="Payout method (determined by your country, not a choice)"
+            className="border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[12px] font-bold uppercase tracking-tight text-foreground"
+          >
+            {previewedPayoutMethod ?? "select your country above"}
           </div>
         </div>
       </div>
 
       <div className="border border-dashed border-line-strong bg-raised px-3 py-2 font-mono text-[10px] leading-relaxed tracking-tight text-muted">
-        {payout === "credit"
+        {previewedPayoutMethod === "credit"
           ? "Credit lands on your FlexSoar balance the moment the sale settles — usable in checkout immediately."
-          : payout === "cash"
-            ? "Cash is a bank payout after the sale clears. It unlocks once you've completed fulfilments — a payout ledger is pending (handoff M4), the gate uses shipped redemptions for now."
-            : "Credit is instant and always available. Cash unlocks after completed fulfilments."}
-        {payout !== "cash" &&
-          eligibility &&
-          !eligibility.cashEligible &&
-          ` Cash unlocks at ${eligibility.threshold} completed fulfilment(s); you have ${eligibility.fulfilledShipments}.`}
-        {!eligibility &&
-          " Sign in to unlock payout choices on submit."}
+          : previewedPayoutMethod === "cash"
+            ? "Cash is a bank payout after the sale clears, released after the platform's hold window. Proof of possession protects against an unproven seller, not a fulfilment count."
+            : "Select your country above to see how you'll be paid — it's decided by geography, not a choice you make here."}
       </div>
     </div>
   );

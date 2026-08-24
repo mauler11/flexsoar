@@ -23,7 +23,7 @@ import {
 } from "@/lib/api/contract";
 import { gradeFloatFromComponents } from "@/lib/db/grading";
 import type { GradeComponents } from "@/lib/db/grading";
-import { currentUserId, CASH_PAYOUT_MIN_FULFILMENTS } from "@/app/(market)/queries";
+import { currentUserId } from "@/app/(market)/queries";
 import { signUploadUrl } from "@/lib/r2/sign";
 import {
   REQUIRED_PHOTO_COUNT,
@@ -174,8 +174,6 @@ function submitErrorMessage(code: string, detail: string): string {
   switch (code) {
     case "RESTRICTED":
       return "Your account is restricted from listing right now.";
-    case "UNPROVEN_SELLER":
-      return detail || "Cash payout needs more completed fulfilments — list for credit first.";
     case "INVALID_AMOUNT":
       return "Set a price in whole cents greater than zero.";
     case "TOO_FEW_PHOTOS":
@@ -260,6 +258,13 @@ export async function submitListingIntakeAction(
     return { ok: false, code: "INVALID", message: "Set a price in whole cents greater than zero." };
   }
 
+  // Not a real choice — payout is geography, not client input
+  // (AGENT_RULES.md section 5). The wizard now sends whatever it derived
+  // from the seller's own country (see PricePayout / IntakeWizard), purely
+  // to satisfy submitListing()'s frozen PayoutMethod argument.
+  // fn_submit_listing (019c) ignores this value entirely: it overwrites it
+  // with fn_payout_method_for_user(v_user) before ever using it, so nothing
+  // downstream routes money off what's validated here.
   if (payoutRaw !== "credit" && payoutRaw !== "cash") {
     return { ok: false, code: "INVALID", message: "Choose a payout method." };
   }
@@ -329,7 +334,7 @@ export async function submitListingIntakeAction(
     if (thrown instanceof ContractError) {
       return {
         ok: false,
-        code: thrown.code === "UNPROVEN_SELLER" ? "CASH_LOCKED" : "SUBMIT_FAILED",
+        code: "SUBMIT_FAILED",
         message: submitErrorMessage(thrown.code, thrown.message),
       };
     }
@@ -339,32 +344,4 @@ export async function submitListingIntakeAction(
       message: thrown instanceof Error ? thrown.message : "submission failed",
     };
   }
-}
-
-// ------------------------------------------------------------
-// Payout gate — mirrors what fn_submit_listing itself enforces (013)
-// ------------------------------------------------------------
-
-export interface PayoutEligibility {
-  cashEligible: boolean;
-  fulfilledShipments: number;
-  threshold: number;
-}
-
-export async function getPayoutEligibilityAction(): Promise<PayoutEligibility | null> {
-  const me = await currentUserId();
-  if (!me) return null;
-
-  // users.fulfilments_completed is the live count 013 increments on
-  // fn_confirm_shipment. The threshold mirrors the seeded platform_config row
-  // (cash_payout_min_fulfilments), which the contract doesn't expose yet —
-  // flagged as a partial M4. The authoritative gate is inside fn_submit_listing.
-  const user = await getUser({ id: me });
-  const fulfilledShipments = user?.fulfilments_completed ?? 0;
-
-  return {
-    cashEligible: fulfilledShipments >= CASH_PAYOUT_MIN_FULFILMENTS,
-    fulfilledShipments,
-    threshold: CASH_PAYOUT_MIN_FULFILMENTS,
-  };
 }

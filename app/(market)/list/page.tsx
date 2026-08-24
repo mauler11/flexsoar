@@ -2,13 +2,12 @@
  * app/(market)/list/page.tsx
  *
  * The self-serve listing flow. Server page: it resolves the live SKU catalog
- * and the caller's payout eligibility once, then hands the wizard all the data
- * it needs as props. The wizard stays client-side so steps survive back/next
+ * and the caller's payout facts once, then hands the wizard all the data it
+ * needs as props. The wizard stays client-side so steps survive back/next
  * without re-fetching.
  */
 import type { Metadata } from "next";
 import { getSkus, getPayoutMethodForUser, getUser } from "@/lib/api/contract";
-import { getPayoutEligibilityAction } from "@/app/(market)/list/actions";
 import { currentUserId, getCashPayoutCountryCodes } from "@/app/(market)/queries";
 import { IntakeWizard } from "@/components/market/intake/IntakeWizard";
 
@@ -18,7 +17,6 @@ export const metadata: Metadata = {
 
 export default async function ListPage() {
   const skus = await getSkus({});
-  const payoutEligibility = await getPayoutEligibilityAction();
 
   // How THIS seller will actually be paid — geography-derived
   // (fn_payout_method_for_user), never a choice. Read before they commit to
@@ -43,8 +41,7 @@ export default async function ListPage() {
 
       <IntakeWizard
         skus={skus}
-        payoutEligibility={payoutEligibility}
-        signedIn={payoutEligibility != null}
+        signedIn={me != null}
         sellerPayoutMethod={sellerPayoutMethod}
         initialCountryCode={existingCountryCode}
         cashPayoutCountryCodes={cashPayoutCountryCodes}

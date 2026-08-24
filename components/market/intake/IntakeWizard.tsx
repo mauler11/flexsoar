@@ -25,21 +25,18 @@ import { PricePayout } from "@/components/market/intake/PricePayout";
 import {
   CONDITION_QUESTIONS,
   REQUIRED_PHOTO_COUNT,
+  derivePayoutPreview,
   isValidCountryCode,
   type IntakePhoto,
   type PayoutMethod,
 } from "@/components/market/intake/intake-config";
-import {
-  submitListingIntakeAction,
-  type PayoutEligibility,
-} from "@/app/(market)/list/actions";
+import { submitListingIntakeAction } from "@/app/(market)/list/actions";
 import type { GradeComponents } from "@/lib/db/grading";
 import { gradeFloatFromComponents } from "@/lib/db/grading";
 import { formatUsd } from "@/components/card/format";
 
 export interface IntakeWizardProps {
   skus: readonly Sku[];
-  payoutEligibility: PayoutEligibility | null;
   signedIn: boolean;
   /**
    * How THIS seller is actually paid — fn_payout_method_for_user, derived
@@ -63,7 +60,6 @@ type StepIndex = number;
 
 export function IntakeWizard({
   skus,
-  payoutEligibility,
   signedIn,
   sellerPayoutMethod,
   initialCountryCode,
@@ -76,7 +72,6 @@ export function IntakeWizard({
   const [photos, setPhotos] = useState<IntakePhoto[]>([]);
   const [answers, setAnswers] = useState<Partial<GradeComponents>>({});
   const [priceCents, setPriceCents] = useState<number | null>(null);
-  const [payout, setPayout] = useState<PayoutMethod | null>(null);
   const [countryCode, setCountryCode] = useState<string | null>(initialCountryCode ?? null);
   const [notes, setNotes] = useState("");
   const [submit, setSubmit] = useState<{
@@ -91,6 +86,15 @@ export function IntakeWizard({
     return gradeFloatFromComponents(answers as GradeComponents);
   }, [answers]);
 
+  // Payout is geography, not a choice (AGENT_RULES.md section 5) — derived
+  // from the selected country the same way fn_submit_listing itself will,
+  // never set by the seller directly.
+  const derivedPayout: PayoutMethod | null = derivePayoutPreview(
+    countryCode,
+    cashPayoutCountryCodes,
+    sellerPayoutMethod,
+  );
+
   const canNext = (() => {
     switch (step) {
       case 0: return selectedSku != null || requestingMissing;
@@ -100,8 +104,7 @@ export function IntakeWizard({
         return (
           priceCents != null &&
           priceCents > 0 &&
-          payout != null &&
-          (payout !== "cash" || payoutEligibility?.cashEligible === true) &&
+          derivedPayout != null &&
           isValidCountryCode(countryCode)
         );
       default: return true;
@@ -118,7 +121,7 @@ export function IntakeWizard({
   }
 
   function doSubmit() {
-    if (!selectedSku || payout == null || priceCents == null || !isValidCountryCode(countryCode)) {
+    if (!selectedSku || derivedPayout == null || priceCents == null || !isValidCountryCode(countryCode)) {
       return;
     }
     setSubmit({ state: "running", itemId: null, error: null });
@@ -127,7 +130,10 @@ export function IntakeWizard({
     formData.set("photos", JSON.stringify(photos));
     formData.set("components", JSON.stringify(answers));
     formData.set("reserve_price_cents", String(priceCents));
-    formData.set("payout_method", payout);
+    // Sent for signature compatibility with submitListing()'s frozen
+    // PayoutMethod argument only — fn_submit_listing (019c) discards it and
+    // computes the real payout itself from the seller's country.
+    formData.set("payout_method", derivedPayout);
     formData.set("country_code", countryCode);
     formData.set("notes", notes);
 
@@ -207,9 +213,6 @@ export function IntakeWizard({
           declaredFloat={declaredFloat}
           priceCents={priceCents}
           onPriceChange={setPriceCents}
-          payout={payout}
-          onPayoutChange={setPayout}
-          eligibility={payoutEligibility}
           sellerPayoutMethod={sellerPayoutMethod}
           countryCode={countryCode}
           onCountryChange={setCountryCode}
@@ -223,8 +226,7 @@ export function IntakeWizard({
           photos={photos}
           declaredFloat={declaredFloat!}
           priceCents={priceCents!}
-          payout={payout!}
-          payoutEligibility={payoutEligibility}
+          payout={derivedPayout!}
           countryCode={countryCode!}
           notes={notes}
           onNotesChange={setNotes}
@@ -281,7 +283,6 @@ export function IntakeWizard({
       return (
         priceCents != null &&
         priceCents > 0 &&
-        payout != null &&
         isValidCountryCode(countryCode)
       );
     return true;
@@ -294,7 +295,6 @@ function ReviewPane({
   declaredFloat,
   priceCents,
   payout,
-  payoutEligibility,
   countryCode,
   notes,
   onNotesChange,
@@ -305,7 +305,6 @@ function ReviewPane({
   declaredFloat: number;
   priceCents: number;
   payout: PayoutMethod;
-  payoutEligibility: PayoutEligibility | null;
   countryCode: string;
   notes: string;
   onNotesChange: (v: string) => void;
@@ -323,16 +322,6 @@ function ReviewPane({
         <Detail label="Reserve price" value={formatUsd(priceCents)} />
         <Detail label="Payout" value={payout === "cash" ? "cash" : "credit"} />
         <Detail label="Country" value={countryCode} />
-        <Detail
-          label="Cash gate"
-          value={
-            payoutEligibility
-              ? payoutEligibility.cashEligible
-                ? `unlocked (${payoutEligibility.fulfilledShipments} fulfilments)`
-                : `locked — ${payoutEligibility.fulfilledShipments}/${payoutEligibility.threshold} fulfilments`
-              : "sign in to unlock"
-          }
-        />
       </div>
 
       <div className="flex flex-col gap-1">

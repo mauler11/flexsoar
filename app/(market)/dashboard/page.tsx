@@ -4,29 +4,34 @@
  * The seller dashboard: submissions, held items, and owed redemptions with a
  * ship deadline.
  *
- * Data comes straight from the frozen contract reads the session is allowed:
- *   - submissions  getConsignments({ consignorId: me })  — my consignment queue
+ * Data:
+ *   - submissions  getMySubmittedItems(me)                — every item I've
+ *                  submitted (app/(market)/queries.ts workaround read; see
+ *                  its doc comment — getConsignments() never returns these,
+ *                  since submitListing() never sets items.consignment_id and
+ *                  nothing anywhere writes the consignments table at all)
  *   - held items   getConsignment(id).items, flattened    — pre-mint pipeline
  *   - redemptions  getRedemptions({ userId: me })         — cards I redeemed
  *
  * "Owed redemptions" here means the shipments the market owes the seller for
- * their redeemed cards. Fulfilment is the redemption that unlocks the cash
- * payout gate on /list (action re-reads shipped counts at submit). The ship
- * deadline is display-only pending handoff M5 (a redemptions column / shared
- * constant for the real SLA); the redemptions table has no deadline column, so
- * the 72h window below is a local constant and is clearly labelled as one.
+ * their redeemed cards. The ship deadline is display-only pending handoff M5
+ * (a redemptions column / shared constant for the real SLA); the redemptions
+ * table has no deadline column, so the 72h window below is a local constant
+ * and is clearly labelled as one.
+ *
+ * There used to be a "cash payout gate" panel here mirroring
+ * users.fulfilments_completed against a client-side threshold. Removed: it
+ * described a gate fn_submit_listing (019c) no longer has. Payout is derived
+ * from the seller's country, not rationed by a fulfilment count — see
+ * AGENT_RULES.md section 5 and 019c_settlement.sql's own comment ("The
+ * cash_payout_min_fulfilments gate is gone").
  */
 
 import type { Metadata } from "next";
-import {
-  getConsignment,
-  getConsignments,
-  getRedemptions,
-  getUser,
-} from "@/lib/api/contract";
+import { getConsignment, getConsignments, getRedemptions } from "@/lib/api/contract";
 import type { RedemptionSummary } from "@/lib/api/contract";
 import type { ItemSummary } from "@/lib/api/contract";
-import { currentUserId, CASH_PAYOUT_MIN_FULFILMENTS } from "@/app/(market)/queries";
+import { currentUserId, getMySubmittedItems } from "@/app/(market)/queries";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatUsd } from "@/components/card/format";
@@ -82,8 +87,8 @@ export default async function DashboardPage() {
     );
   }
 
+  const submittedItems = await getMySubmittedItems(me);
   const consignments = await getConsignments({ consignorId: me });
-  const meUser = await getUser({ id: me });
   const details = await Promise.all(
     consignments.map(async (c) => ({
       consignment: c,
@@ -98,10 +103,6 @@ export default async function DashboardPage() {
   const redemptions = await getRedemptions({ userId: me });
   const owed = redemptions.filter((r) => OWED_STATUSES.includes(r.status as RedemptionSummary["status"]));
 
-  // The gate count is users.fulfilments_completed — the live field 013
-  // increments on fn_confirm_shipment — not a shipped-redemption tally.
-  const fulfilled = meUser?.fulfilments_completed ?? 0;
-
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-end justify-between gap-3">
@@ -110,7 +111,7 @@ export default async function DashboardPage() {
             Seller dashboard
           </h1>
           <p className="font-mono text-[10px] uppercase tracking-tight text-muted">
-            Submissions · held stock · fulfilments
+            Submissions · held stock · redemptions
           </p>
         </div>
         <Button variant="primary" size="md" href="/list">
@@ -118,53 +119,32 @@ export default async function DashboardPage() {
         </Button>
       </div>
 
-      {/* Payout gate */}
-      <section className="flex flex-col gap-1 border border-line-strong bg-overlay p-3">
-        <div className="flex items-baseline justify-between gap-2">
-          <h2 className="font-mono text-[11px] font-black uppercase tracking-tight text-foreground">
-            Cash payout gate
-          </h2>
-          <span
-            className={"font-mono text-[10px] uppercase tracking-tight " +
-              (fulfilled >= CASH_PAYOUT_MIN_FULFILMENTS ? "text-accent" : "text-muted")}
-          >
-            {fulfilled >= CASH_PAYOUT_MIN_FULFILMENTS
-              ? "unlocked"
-              : `${fulfilled}/${CASH_PAYOUT_MIN_FULFILMENTS} fulfilments`}
-          </span>
-        </div>
-        <p className="font-mono text-[10px] tracking-tight text-muted">
-          Completed fulfilments on this account (013&apos;s
-          fulfilments_completed). fn_submit_listing enforces the real gate;
-          this meter mirrors it for the /list UI (partial M4).
-        </p>
-      </section>
-
       {/* Submissions */}
       <section className="flex flex-col gap-2">
         <h2 className="font-mono text-[11px] font-black uppercase tracking-tight text-foreground">
-          Submissions ({consignments.length})
+          Submissions ({submittedItems.length})
         </h2>
-        {consignments.length === 0 ? (
+        {submittedItems.length === 0 ? (
           <p className="border border-dashed border-line-strong px-3 py-4 font-mono text-[10px] tracking-tight text-muted">
             No submissions yet — list your first shoe from /list.
           </p>
         ) : (
           <div className="flex flex-col gap-1.5">
-            {consignments.map((c) => (
+            {submittedItems.map((item) => (
               <div
-                key={c.id}
+                key={item.id}
                 className="flex items-center justify-between gap-3 border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[11px] tracking-tight"
               >
                 <span className="min-w-0 truncate font-bold text-foreground">
-                  {c.status}
+                  {item.sku.brand} {item.sku.model} · {item.sku.colorway} · US{" "}
+                  {item.sku.size_us}
                 </span>
-                <span className="text-muted">{c.item_count} × item</span>
+                <span className="shrink-0 text-muted">{item.status}</span>
                 <span className="shrink-0 text-muted">
-                  submit {fmtDate(c.submitted_at)}
+                  submitted {fmtDate(item.createdAt)}
                 </span>
                 <span className="shrink-0 text-muted">
-                  {c.intake_fee_cents > 0 ? formatUsd(c.intake_fee_cents) : "no fee"}
+                  {item.askingPriceCents != null ? formatUsd(item.askingPriceCents) : "—"}
                 </span>
               </div>
             ))}
@@ -249,9 +229,9 @@ export default async function DashboardPage() {
       </section>
 
       <p className="border-t border-line-strong pt-2 font-mono text-[9px] tracking-tight text-muted">
-        Anything stale? The fulfilment SLA (M5) and the payout ledger (M4) are
-        flagged in docs/handoff/market.md — the dashboard renders the reads the
-        contract has today.
+        Anything stale? The fulfilment SLA (M5) is flagged in
+        docs/handoff/market.md — the dashboard renders the reads the contract
+        has today.
       </p>
     </div>
   );

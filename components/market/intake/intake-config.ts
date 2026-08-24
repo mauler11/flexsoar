@@ -134,6 +134,27 @@ export type SelfDeclaredCondition = GradeComponents;
 
 export type PayoutMethod = "credit" | "cash";
 
+/**
+ * How a seller will actually be paid for a given country selection — mirrors
+ * fn_payout_method_for_user's own membership check against
+ * cash_payout_countries (019b: `c.country_code = upper(btrim(u.country_code))`),
+ * not a guess. Payout is geography, not a choice a seller makes
+ * (AGENT_RULES.md section 5), so this is the single source of truth behind
+ * both the read-only indicator in PricePayout and the value the wizard
+ * submits. Falls back to the account's on-file `sellerPayoutMethod` only
+ * before a valid country is picked here.
+ */
+export function derivePayoutPreview(
+  countryCode: string | null,
+  cashPayoutCountryCodes: readonly string[],
+  sellerPayoutMethod?: PayoutMethod | null,
+): PayoutMethod | null {
+  if (isValidCountryCode(countryCode)) {
+    return cashPayoutCountryCodes.includes(countryCode) ? "cash" : "credit";
+  }
+  return sellerPayoutMethod ?? null;
+}
+
 // ------------------------------------------------------------
 // COUNTRY (payout routing)
 // ------------------------------------------------------------
