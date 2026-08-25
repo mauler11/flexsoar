@@ -229,6 +229,26 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   // fn_set_country — 'country must be a two-letter ISO country code, got %'.
   // p_country, upper-cased and trimmed, fails `^[A-Z]{2}$`.
   { pattern: /country must be a two-letter ISO country code/i, code: 'INVALID_COUNTRY_CODE' },
+
+  // 027_sku_models.sql trg_sku_variant_derive — 'skus.market_price_cents is
+  // derived (%). Set sku_models.base_price_cents or skus.price_override_cents
+  // instead of writing it directly.' upsertSku()/updateSkuVariant() in
+  // contract.ts never send this column, so this only fires if some other
+  // write path reaches the table directly — defense in depth, not a path
+  // this codebase exercises today.
+  { pattern: /market_price_cents is derived/i, code: 'MARKET_PRICE_IS_DERIVED' },
+  // fn_create_sku_model — 'brand, model and colorway are all required'.
+  { pattern: /brand, model and colorway are all required/i, code: 'SKU_MODEL_IDENTITY_REQUIRED' },
+  // fn_create_sku_model — 'base price must be positive, got %'.
+  { pattern: /base price must be positive/i, code: 'INVALID_AMOUNT' },
+  // fn_ensure_sku_variant — no signed-in users row, same shape as
+  // fn_reserve_credit's 'sign in to reserve FSC' / fn_set_country's 'sign in
+  // to set your country' above.
+  { pattern: /sign in to add a size/i, code: 'UNAUTHENTICATED' },
+  // fn_ensure_sku_variant — 'size % is outside the supported range (3 to 20)'
+  // and 'size % is not a whole or half size'.
+  { pattern: /is outside the supported range/i, code: 'INVALID_SKU_SIZE' },
+  { pattern: /is not a whole or half size/i, code: 'INVALID_SKU_SIZE' },
 ];
 
 /**

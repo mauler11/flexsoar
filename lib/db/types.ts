@@ -268,14 +268,40 @@ export interface User {
 
 export interface Sku {
   id: UUID;
+  /**
+   * The model this size belongs to (027). brand/model/colorway below are a
+   * MAINTAINED COPY of the model's — trg_sku_variant_derive overwrites
+   * whatever is written here on every insert/update. Never write them.
+   *
+   * Optional to the type because the shared lib/mock fixtures and
+   * components/market/bridge.ts predate 027 and cannot be edited here — the
+   * DB always sends it (NOT NULL). Same convention as User's
+   * fulfilments_completed above.
+   */
+  model_id?: UUID;
   brand: string;
   model: string;
   colorway: string;
   /** numeric(4,1). */
   size_us: number;
   retail_price_cents: Cents | null;
-  /** Oracle output. Drives tier via tier_bands. Never float-adjusted. */
+  /**
+   * DERIVED as of 027: coalesce(price_override_cents, sku_models.base_price_cents
+   * x size_multiplier), maintained by trg_sku_variant_derive. Writing this
+   * directly RAISES. Set sku_models.base_price_cents (updateSkuModel) or
+   * price_override_cents (updateSkuVariant) instead. Still the right column
+   * for VALUE (fn_card_value_cents) — TIER comes from the model instead, via
+   * fn_tier_for_sku / getSkuModel().
+   */
   market_price_cents: Cents | null;
+  /**
+   * numeric(5,3). Size curve point. 1.000 for every variant today (027 ships
+   * flat). Optional to the type for the same lib/mock/bridge.ts reason as
+   * model_id above — the DB always sends it (NOT NULL DEFAULT 1.000).
+   */
+  size_multiplier?: number;
+  /** Escape hatch for a size that genuinely diverges from base x multiplier (027). Admin-set only. */
+  price_override_cents?: Cents | null;
   /** numeric(3,2), 0.00 .. 1.00. */
   price_confidence: number | null;
   priced_at: Timestamptz | null;
@@ -289,6 +315,36 @@ export interface Sku {
   art_url?: string | null;
   /** null = uncapped. */
   mint_cap: number | null;
+  created_at: Timestamptz;
+}
+
+/**
+ * sku_models (027). Brand + model + colourway — the level a human merges
+ * duplicates at, size stripped out. Carries the ORACLE price and the single
+ * art asset shared by every size variant beneath it.
+ */
+export interface SkuModel {
+  id: UUID;
+  brand: string;
+  model: string;
+  colorway: string;
+  /**
+   * The oracle. Sets TIER via fn_tier_for_sku and feeds every variant's
+   * market_price_cents. Null means unpriced: fn_mint_card refuses, so an
+   * unpriced model physically cannot become a card. Admin-set only.
+   */
+  base_price_cents: Cents | null;
+  /** numeric(3,2), 0.00 .. 1.00. */
+  price_confidence: number | null;
+  priced_at: Timestamptz | null;
+  /** Pixel-art base map id, shared by every variant. */
+  sprite_key: string | null;
+  /** Colourway swap for the sprite: char -> hex. */
+  palette: Json | null;
+  /** Shared by every size. Write only through fn_replace_sku_art (replaceSkuArt). */
+  art_url: string | null;
+  /** numeric(5,2). */
+  demand_score: number;
   created_at: Timestamptz;
 }
 

@@ -56,6 +56,17 @@ import {
 } from '../app/(market)/checkout-math';
 import { CREDIT_HOLD_MINUTES_FALLBACK as CONTRACT_CREDIT_HOLD_MINUTES_FALLBACK } from '../lib/api/contract';
 import type { ListingSummary } from '../lib/api/contract';
+import {
+  ContractError,
+  upsertSku,
+  createSkuModel,
+  ensureSkuVariant,
+  listSkuModels,
+  getSkuModel,
+  updateSkuModel,
+  updateSkuVariant,
+  replaceSkuArt,
+} from '../lib/api/contract';
 import { contractErrorCode } from '../lib/db/errors';
 import { MarketTile } from '../components/market/MarketTile';
 import { PricePayout } from '../components/market/intake/PricePayout';
@@ -1786,5 +1797,229 @@ describe('ListForm — country picker on the relist path (docs/handoff/market.md
     );
     expect(html).not.toContain('No country on file yet');
     expect(html).not.toContain('Select your country');
+  });
+});
+
+// ------------------------------------------------------------
+// 027_sku_models.sql — model/variant catalog split
+// ------------------------------------------------------------
+//
+// skus.market_price_cents became a DERIVED column (coalesce(price_override_cents,
+// sku_models.base_price_cents x size_multiplier)), maintained by
+// trg_sku_variant_derive, which RAISES on a direct write rather than silently
+// dropping it. Tier moved to the model (fn_tier_for_sku), value stays
+// per-variant (fn_card_value_cents, unchanged). These tests cannot execute
+// SQL — scripts/smoke_catalog.sql already does, live, and this suite must not
+// duplicate it — so what's pinned here is: (1) upsertSku(), the one write
+// path this repo has for skus, can no longer construct a market_price_cents
+// write under any input shape; (2) the new exports exist with the shape
+// callers need; (3) every new raise text 027 introduces maps to a real
+// ContractErrorCode; (4) the tier-vs-value distinction itself, mirrored in
+// pure TS the same way every other SQL function in this file is mirrored.
+
+describe('upsertSku (027) — cannot construct a write containing market_price_cents, and cannot create without a model', () => {
+  const baseInput = {
+    brand: 'Nike',
+    model: 'Air Max 1',
+    colorway: 'Seed Grey',
+    size_us: 10,
+  };
+
+  it('market_price_cents on an UPDATE-shaped call (id present) throws MARKET_PRICE_IS_DERIVED before touching Supabase', async () => {
+    await expect(
+      upsertSku({ ...baseInput, id: 'sku-1', market_price_cents: 12345 }),
+    ).rejects.toMatchObject({
+      name: 'ContractError',
+      code: 'MARKET_PRICE_IS_DERIVED',
+    });
+  });
+
+  it('market_price_cents on an INSERT-shaped call (no id) ALSO throws MARKET_PRICE_IS_DERIVED — the price guard fires before the model guard', async () => {
+    await expect(
+      upsertSku({ ...baseInput, market_price_cents: 12345 }),
+    ).rejects.toMatchObject({
+      name: 'ContractError',
+      code: 'MARKET_PRICE_IS_DERIVED',
+    });
+  });
+
+  it('market_price_cents: null still counts as a supplied write, not "leave alone"', async () => {
+    await expect(
+      upsertSku({ ...baseInput, id: 'sku-1', market_price_cents: null }),
+    ).rejects.toMatchObject({ code: 'MARKET_PRICE_IS_DERIVED' });
+  });
+
+  it('an insert (no id, no market_price_cents) throws SKU_CREATION_REQUIRES_MODEL, naming the real replacement', async () => {
+    await expect(upsertSku({ ...baseInput })).rejects.toMatchObject({
+      name: 'ContractError',
+      code: 'SKU_CREATION_REQUIRES_MODEL',
+    });
+    try {
+      await upsertSku({ ...baseInput });
+      throw new Error('expected upsertSku to reject');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ContractError);
+      expect((err as ContractError).message).toMatch(/createSkuModel/);
+      expect((err as ContractError).message).toMatch(/ensureSkuVariant/);
+    }
+  });
+
+  // NOT tested here: an update with neither guard tripped (id present, no
+  // market_price_cents). That call proceeds past both new guards into
+  // createServerSupabase() and a real .update() against whatever project
+  // .env.local points at — this suite must not risk a real write to the live
+  // database (AGENT_RULES.md section 2), so the boundary this file can safely
+  // pin stops at "does the guard fire", not "what happens after it doesn't".
+});
+
+describe('027 — new contract exports exist with the shape callers need', () => {
+  it('listSkuModels, getSkuModel, createSkuModel, updateSkuModel, ensureSkuVariant, updateSkuVariant, replaceSkuArt are all exported functions', () => {
+    expect(typeof listSkuModels).toBe('function');
+    expect(typeof getSkuModel).toBe('function');
+    expect(typeof createSkuModel).toBe('function');
+    expect(typeof updateSkuModel).toBe('function');
+    expect(typeof ensureSkuVariant).toBe('function');
+    expect(typeof updateSkuVariant).toBe('function');
+    // Unchanged signature (027's own migration comment: "lib/api/contract.ts
+    // needs no change") — still exported, still (skuId, artUrl) -> Sku.
+    expect(typeof replaceSkuArt).toBe('function');
+    expect(replaceSkuArt.length).toBe(2);
+  });
+
+  it('createSkuModel(brand, model, colorway, basePriceCents?) — basePriceCents defaults, matching fn_create_sku_model default null', () => {
+    expect(createSkuModel.length).toBe(3); // default params do not count toward .length
+  });
+
+  it('ensureSkuVariant(modelId, sizeUs) — matches fn_ensure_sku_variant(p_model_id, p_size_us)', () => {
+    expect(ensureSkuVariant.length).toBe(2);
+  });
+
+  it('updateSkuModel(modelId, input) does not accept art_url — the only sanctioned art path is replaceSkuArt()', () => {
+    // Compile-time guarantee (UpdateSkuModelInput has no art_url field); this
+    // just pins that the input object shape stays a plain (modelId, input) pair.
+    expect(updateSkuModel.length).toBe(2);
+  });
+
+  it('updateSkuVariant(skuId, input) — direct table write, does not accept market_price_cents', () => {
+    expect(updateSkuVariant.length).toBe(2);
+  });
+});
+
+describe('lib/db/errors.ts — 027 sku_models raise mappings', () => {
+  it('trg_sku_variant_derive — market_price_cents is derived', () => {
+    expect(
+      contractErrorCode({
+        message:
+          'skus.market_price_cents is derived (26000). Set sku_models.base_price_cents ' +
+          'or skus.price_override_cents instead of writing it directly.',
+      }),
+    ).toBe('MARKET_PRICE_IS_DERIVED');
+  });
+
+  it('fn_create_sku_model — blank identity field', () => {
+    expect(
+      contractErrorCode({ message: 'brand, model and colorway are all required' }),
+    ).toBe('SKU_MODEL_IDENTITY_REQUIRED');
+  });
+
+  it('fn_create_sku_model — non-positive base price', () => {
+    expect(contractErrorCode({ message: 'base price must be positive, got -5' })).toBe(
+      'INVALID_AMOUNT',
+    );
+  });
+
+  it('fn_ensure_sku_variant — no signed-in users row', () => {
+    expect(contractErrorCode({ message: 'sign in to add a size' })).toBe('UNAUTHENTICATED');
+  });
+
+  it('fn_ensure_sku_variant — size validation, both messages', () => {
+    expect(
+      contractErrorCode({ message: 'size 2 is outside the supported range (3 to 20)' }),
+    ).toBe('INVALID_SKU_SIZE');
+    expect(contractErrorCode({ message: 'size 9.3 is not a whole or half size' })).toBe(
+      'INVALID_SKU_SIZE',
+    );
+  });
+
+  it('fn_ensure_sku_variant — "sku_model % not found" rides the existing generic NOT_FOUND rule, no new pattern needed', () => {
+    expect(
+      contractErrorCode({ message: 'sku_model 11111111-1111-1111-1111-111111111111 not found' }),
+    ).toBe('NOT_FOUND');
+  });
+
+  it('the model-level art guard (trg_guard_sku_model_art_url) rides the existing 42501 -> FORBIDDEN code map, no new pattern needed', () => {
+    expect(
+      contractErrorCode({
+        message:
+          'sku_model 1 already has art_url; replacement must go through fn_replace_sku_art()',
+        code: '42501',
+      }),
+    ).toBe('FORBIDDEN');
+  });
+});
+
+describe('027 — tier from the model, value from the variant (mirrors scripts/smoke_catalog.sql C3)', () => {
+  // Test-only mirror of trg_sku_variant_derive's formula — the same
+  // "SQL MIRRORS" convention this file uses throughout, never production
+  // code (lib/api/contract.ts never computes this; see AGENT_RULES.md).
+  function deriveMarketPriceCents(
+    basePriceCents: number | null,
+    sizeMultiplier: number,
+    priceOverrideCents: number | null,
+  ): number | null {
+    if (priceOverrideCents != null) return priceOverrideCents;
+    if (basePriceCents == null) return null;
+    return Math.floor(basePriceCents * sizeMultiplier);
+  }
+
+  // Same numbers as smoke_catalog.sql's C3 section, so a live run and this
+  // pure-TS mirror are checking the identical scenario.
+  const model = { base_price_cents: 26000 };
+  const plainVariant = { size_multiplier: 1.0, price_override_cents: null as number | null };
+  const overriddenVariant = { size_multiplier: 1.0, price_override_cents: 8000 };
+
+  it('fixture assumption: 8000 and 26000 really do fall in different tier bands', () => {
+    expect(tierForPrice(8000)).not.toBe(tierForPrice(26000));
+    expect(tierForPrice(8000)).toBe(2); // Uncommon
+    expect(tierForPrice(26000)).toBe(4); // Epic
+  });
+
+  it('value (fn_card_value_cents input) is genuinely per-variant: the override changes market_price_cents', () => {
+    const plainPrice = deriveMarketPriceCents(
+      model.base_price_cents,
+      plainVariant.size_multiplier,
+      plainVariant.price_override_cents,
+    );
+    const overriddenPrice = deriveMarketPriceCents(
+      model.base_price_cents,
+      overriddenVariant.size_multiplier,
+      overriddenVariant.price_override_cents,
+    );
+    expect(plainPrice).toBe(26000);
+    expect(overriddenPrice).toBe(8000);
+    expect(overriddenPrice).not.toBe(plainPrice);
+  });
+
+  it('tier (fn_tier_for_sku input) is the MODEL\'s base price for BOTH variants — never the variant\'s derived market_price_cents', () => {
+    // This is the exact regression getSkus()'s old tier filter had: it
+    // matched on skus.market_price_cents, which is 8000 for the overridden
+    // variant — tierForPrice(8000) = 2, not the model's real tier of 4.
+    const tierFromModel = tierForPrice(model.base_price_cents);
+    expect(tierFromModel).toBe(4);
+
+    // Both variants must report the SAME tier, because fn_tier_for_sku reads
+    // sku_models.base_price_cents regardless of which variant asks.
+    expect(tierForPrice(model.base_price_cents)).toBe(tierFromModel);
+    expect(tierForPrice(model.base_price_cents)).toBe(tierFromModel);
+
+    // The bug this fixes: computing tier from the variant's own derived price
+    // instead of the model's gives a DIFFERENT, wrong answer for the
+    // overridden variant.
+    const overriddenPrice = deriveMarketPriceCents(
+      model.base_price_cents,
+      overriddenVariant.size_multiplier,
+      overriddenVariant.price_override_cents,
+    );
+    expect(tierForPrice(overriddenPrice as number)).not.toBe(tierFromModel);
   });
 });

@@ -55,6 +55,29 @@
  *     anyone else's); new ContractErrorCode member INVALID_COUNTRY_CODE.
  *     COUNTRY_NOT_SET (fn_payout_method_for_user's raise) landed earlier,
  *     ef83d6d — not re-added here.
+ *   027: SKU identity split into model (sku_models: brand+model+colorway,
+ *     the ORACLE base_price_cents, the shared art) + variant (skus: size_us,
+ *     size_multiplier, price_override_cents). New: listSkuModels,
+ *     getSkuModel, createSkuModel (fn_create_sku_model), updateSkuModel
+ *     (direct table write, sku_models_admin_write), ensureSkuVariant
+ *     (fn_ensure_sku_variant), updateSkuVariant (direct table write,
+ *     skus_admin_write); model_id/size_multiplier/price_override_cents on
+ *     Sku; new ContractErrorCode members MARKET_PRICE_IS_DERIVED,
+ *     SKU_MODEL_IDENTITY_REQUIRED, INVALID_SKU_SIZE,
+ *     SKU_CREATION_REQUIRES_MODEL. replaceSkuArt's signature is UNCHANGED —
+ *     027 keeps it (uuid, text) -> skus, it just now writes the MODEL's art
+ *     and propagates to every sibling size (fn_sync_sku_variants).
+ *     upsertSku's body changed (its signature is NOT one of the frozen 16 —
+ *     it is itself a 009 sanctioned extension): a direct write of
+ *     market_price_cents now throws MARKET_PRICE_IS_DERIVED instead of
+ *     reaching the database, and an insert (no id) throws
+ *     SKU_CREATION_REQUIRES_MODEL — skus.model_id is NOT NULL as of 027 and
+ *     UpsertSkuInput has no way to supply one. See upsertSku's doc comment
+ *     and docs/handoff/data.md for the admin-track ask this creates.
+ *     getSkus()'s tier filter also changed: SkusQuery.tier now matches on
+ *     sku_models.base_price_cents (what fn_tier_for_sku actually reads),
+ *     not skus.market_price_cents — those two only agree when a variant has
+ *     no price_override and a 1.000 size_multiplier.
  * along with their query/input types and new ContractErrorCode members.
  * Additive only: nothing that existed before behaves differently.
  *
@@ -119,6 +142,7 @@ import type {
   PayoutMethod,
   RedemptionStatus,
   Sku,
+  SkuModel,
   Tier,
   Timestamptz,
   User,
@@ -293,6 +317,32 @@ export type ContractErrorCode =
    * unrecognised code is accepted and simply resolves to 'credit' payout.
    */
   | 'INVALID_COUNTRY_CODE'
+  /**
+   * 027_sku_models.sql trg_sku_variant_derive — 'skus.market_price_cents is
+   * derived (%). Set sku_models.base_price_cents or skus.price_override_cents
+   * instead of writing it directly.' upsertSku() throws this itself,
+   * client-side, the moment a caller supplies market_price_cents — see its
+   * doc comment. This code only reaches a caller from the database if some
+   * other write path bypasses that guard.
+   */
+  | 'MARKET_PRICE_IS_DERIVED'
+  /**
+   * 027_sku_models.sql fn_create_sku_model — 'brand, model and colorway are
+   * all required'. One of the three identity fields was blank after trimming.
+   */
+  | 'SKU_MODEL_IDENTITY_REQUIRED'
+  /**
+   * 027_sku_models.sql fn_ensure_sku_variant — 'size % is outside the
+   * supported range (3 to 20)' or 'size % is not a whole or half size'.
+   */
+  | 'INVALID_SKU_SIZE'
+  /**
+   * upsertSku() throws this itself, client-side — skus.model_id is NOT NULL
+   * as of 027 and UpsertSkuInput has no field to supply one, so a direct
+   * insert (no id) can no longer succeed. Create the model first
+   * (createSkuModel) then the variant (ensureSkuVariant).
+   */
+  | 'SKU_CREATION_REQUIRES_MODEL'
   | 'UNKNOWN';
 
 export class ContractError extends Error {
@@ -376,6 +426,21 @@ export interface SkuRef {
   palette: Json | null;
   /** Uploaded pixel-art PNG (012). null falls back to the sprite renderer. */
   art_url: string | null;
+}
+
+/**
+ * listSkuModels() row (027). The metric 027 exists to make measurable is
+ * "models with more than one card" — variant_count and card_count are computed
+ * from skus/cards, not columns on sku_models itself.
+ */
+export interface SkuModelSummary extends SkuModel {
+  variant_count: number;
+  card_count: number;
+}
+
+/** getSkuModel() result (027): one model plus every size variant beneath it. */
+export interface SkuModelDetail extends SkuModel {
+  variants: Sku[];
 }
 
 /** The active listing on a card, if there is one. */
@@ -766,9 +831,15 @@ export interface UpsertSkuInput {
   size_us: number;
   retail_price_cents?: Cents | null;
   /**
-   * Drives tier via tier_bands — for FUTURE mints only. Existing cards keep
-   * the tier copied at mint; 003_retier.sql exists because this was once
-   * misunderstood. Changing it re-tiers nothing retroactively.
+   * DEAD FOR WRITES as of 027 — skus.market_price_cents is now a derived
+   * column (coalesce(price_override_cents, sku_models.base_price_cents x
+   * size_multiplier)), maintained by a trigger that raises on a direct
+   * write. Supplying this field makes upsertSku() throw
+   * MARKET_PRICE_IS_DERIVED before it ever reaches the database — it never
+   * silently drops or misroutes the value. Kept on the type only so an
+   * existing caller that reads a Sku back and round-trips it into
+   * UpsertSkuInput still compiles; use updateSkuModel() (the oracle) or
+   * updateSkuVariant() (a per-size override) instead.
    */
   market_price_cents?: Cents | null;
   price_confidence?: number | null;
@@ -800,6 +871,45 @@ export interface SkusQuery {
   tier?: Tier[];
   limit?: number;
   offset?: number;
+}
+
+/** listSkuModels() / getSkuModel() input (027). */
+export interface SkuModelsQuery {
+  brand?: string;
+  model?: string;
+  /** Free-text over brand / model / colorway. */
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * updateSkuModel() input (027). Direct table write under
+ * sku_models_admin_write — same guard shape as UpsertSkuInput. `art_url` is
+ * deliberately absent: art is one asset per model and the only sanctioned
+ * write path is replaceSkuArt() (fn_replace_sku_art), which propagates to
+ * every size. Everything here is the model-level oracle and its metadata.
+ */
+export interface UpdateSkuModelInput {
+  base_price_cents?: Cents | null;
+  price_confidence?: number | null;
+  priced_at?: Timestamptz | null;
+  sprite_key?: string | null;
+  /** Char -> hex map. Validate against the 9 sprite glyphs before saving. */
+  palette?: Json | null;
+  demand_score?: number;
+}
+
+/**
+ * updateSkuVariant() input (027). Direct table write under skus_admin_write.
+ * Deliberately just these two columns — market_price_cents is derived from
+ * them by trg_sku_variant_derive and is not settable here or anywhere else.
+ */
+export interface UpdateSkuVariantInput {
+  /** numeric(5,3), 0 < x <= 10. Ships flat at 1.000 for every variant. */
+  size_multiplier?: number;
+  /** Escape hatch for a size that genuinely diverges from base x multiplier. */
+  price_override_cents?: Cents | null;
 }
 
 // ============================================================
@@ -844,8 +954,14 @@ const SKU_REF_COLUMNS =
   'id, brand, model, colorway, size_us, market_price_cents, sprite_key, palette, art_url';
 
 const SKU_COLUMNS =
-  'id, brand, model, colorway, size_us, retail_price_cents, market_price_cents, ' +
+  'id, model_id, brand, model, colorway, size_us, retail_price_cents, market_price_cents, ' +
+  'size_multiplier, price_override_cents, ' +
   'price_confidence, priced_at, demand_score, sprite_key, palette, art_url, mint_cap, created_at';
+
+/** sku_models column projection (027). Never `select *`. */
+const SKU_MODEL_COLUMNS =
+  'id, brand, model, colorway, base_price_cents, price_confidence, priced_at, ' +
+  'sprite_key, palette, art_url, demand_score, created_at';
 
 const CARD_SUMMARY_COLUMNS =
   'id, sku_id, item_id, owner_id, float_value, float_percentile, tier, ' +
@@ -2320,53 +2436,92 @@ export async function recordProof(
  * there is no RPC, the RLS policy is the guard, and a non-admin session is
  * refused by Postgres with 42501 (surfaced as FORBIDDEN).
  *
- * `market_price_cents` affects future mints only; tier is copied at mint and
- * existing cards keep theirs. See UpsertSkuInput.
+ * BOTH BRANCHES CHANGED UNDER 027 — this is a 009 sanctioned extension, not
+ * one of the frozen 16, so the body (not the signature) was fixed in place:
+ *
+ * - `market_price_cents` is a DERIVED column as of 027
+ *   (coalesce(price_override_cents, sku_models.base_price_cents x
+ *   size_multiplier)), maintained by a trigger that RAISES on a direct write
+ *   rather than silently ignoring it — the exact bug class AGENT_RULES.md
+ *   warns against. Supplying it here throws MARKET_PRICE_IS_DERIVED before
+ *   this function ever builds a query, so the value is never silently
+ *   dropped OR misrouted to whichever model the caller meant (a variant's
+ *   caller cannot know if it is the only size, so guessing which model to
+ *   reprice would reprice every sibling size silently). Use
+ *   updateSkuModel() for the oracle or updateSkuVariant() for a per-size
+ *   override instead.
+ * - `skus.model_id` is NOT NULL as of 027 and UpsertSkuInput has no field to
+ *   supply one, so a plain insert (no `id`) can no longer succeed — it would
+ *   hit a NOT NULL violation with no useful error. Refused up front instead,
+ *   with SKU_CREATION_REQUIRES_MODEL naming the real replacement:
+ *   createSkuModel() then ensureSkuVariant(). The update branch (an existing
+ *   variant, `id` present) is unaffected — model_id already exists on the row.
  *
  * @returns the full row as written, id included — the caller needs it for
  *          setFloatCurve() after a create.
  * @throws FORBIDDEN, WRONG_STATUS (duplicate of brand/model/colorway/size),
- *         NOT_FOUND (update of an id that does not exist).
+ *         NOT_FOUND (update of an id that does not exist),
+ *         MARKET_PRICE_IS_DERIVED (market_price_cents supplied),
+ *         SKU_CREATION_REQUIRES_MODEL (insert with no id).
  */
 export async function upsertSku(sku: UpsertSkuInput): Promise<Sku> {
-  const supabase = await createServerSupabase();
-  const { id, ...columns } = sku;
-
-  if (id) {
-    const result = await supabase
-      .from('skus')
-      .update(columns)
-      .eq('id', id)
-      .select(SKU_COLUMNS)
-      .maybeSingle();
-
-    if (result.error) fail(result.error, 'skus');
-    if (!result.data) {
-      // RLS makes "no such row" and "not yours to update" the same silence.
-      // For skus the read policy is public, so absence really is absence —
-      // unless the session is non-admin, in which case the UPDATE matched
-      // nothing it was allowed to touch. Read it back to tell the two apart.
-      const exists = await supabase
-        .from('skus')
-        .select('id')
-        .eq('id', id)
-        .maybeSingle();
-      if (exists.data) {
-        throw new ContractError(
-          'FORBIDDEN',
-          `sku ${id} exists but the update wrote nothing — the session is not an admin`,
-          { id },
-        );
-      }
-      throw new ContractError('NOT_FOUND', `sku ${id} not found`, { id });
-    }
-    return result.data as Sku;
+  // Both guards below run before any Supabase client is touched — a bad call
+  // is refused for free, and neither needs a request context to test.
+  if (sku.market_price_cents !== undefined) {
+    throw new ContractError(
+      'MARKET_PRICE_IS_DERIVED',
+      'skus.market_price_cents is derived as of 027 (base price x size ' +
+        'multiplier, or an override) and cannot be written directly. Call ' +
+        'updateSkuModel() to change the oracle, or updateSkuVariant() to set ' +
+        'a price_override_cents on this one size.',
+      { sku },
+    );
   }
 
-  return unwrap(
-    await supabase.from('skus').insert(columns).select(SKU_COLUMNS).single(),
-    'skus',
-  ) as Sku;
+  const { id, ...columns } = sku;
+
+  if (!id) {
+    throw new ContractError(
+      'SKU_CREATION_REQUIRES_MODEL',
+      'upsertSku() can no longer create a SKU: skus.model_id is NOT NULL as ' +
+        'of 027 and this function has no way to supply one. Call ' +
+        'createSkuModel(brand, model, colorway) once per model, then ' +
+        'ensureSkuVariant(modelId, sizeUs) for each size.',
+      { sku },
+    );
+  }
+
+  // id is guaranteed present past the check above — this function is
+  // update-only as of 027 (see the doc comment).
+  const supabase = await createServerSupabase();
+  const result = await supabase
+    .from('skus')
+    .update(columns)
+    .eq('id', id)
+    .select(SKU_COLUMNS)
+    .maybeSingle();
+
+  if (result.error) fail(result.error, 'skus');
+  if (!result.data) {
+    // RLS makes "no such row" and "not yours to update" the same silence.
+    // For skus the read policy is public, so absence really is absence —
+    // unless the session is non-admin, in which case the UPDATE matched
+    // nothing it was allowed to touch. Read it back to tell the two apart.
+    const exists = await supabase
+      .from('skus')
+      .select('id')
+      .eq('id', id)
+      .maybeSingle();
+    if (exists.data) {
+      throw new ContractError(
+        'FORBIDDEN',
+        `sku ${id} exists but the update wrote nothing — the session is not an admin`,
+        { id },
+      );
+    }
+    throw new ContractError('NOT_FOUND', `sku ${id} not found`, { id });
+  }
+  return result.data as Sku;
 }
 
 /**
@@ -2485,6 +2640,258 @@ export async function setFloatCurve(
     .from('sku_float_curve')
     .insert(sorted.map((band) => ({ sku_id: skuId, ...band })));
   if (inserted.error) fail(inserted.error, 'sku_float_curve');
+}
+
+// ============================================================
+// CATALOG — MODEL / VARIANT — added by 027_sku_models.sql
+// ============================================================
+//
+// 027 splits SKU identity into a model (brand + model + colourway, the
+// ORACLE base_price_cents, the shared art) and a variant (skus: size_us,
+// size_multiplier, price_override_cents). See lib/db/types.ts's SkuModel/Sku
+// doc comments and 027_sku_models.sql's own header for the full reasoning.
+
+/**
+ * Every catalog model, each with how many size variants and how many minted
+ * cards it has. "Models with more than one card" is the metric 027 exists to
+ * make measurable — see 027_sku_models.sql section C10 of
+ * scripts/smoke_catalog.sql.
+ *
+ * Three queries, not a join: PostgREST has no GROUP BY aggregation without a
+ * view or RPC, and neither is this track's to add (schema is human-only).
+ * Fine at catalog scale (this is an admin listing, not a hot path).
+ */
+export async function listSkuModels(
+  query: SkuModelsQuery = {},
+): Promise<SkuModelSummary[]> {
+  const supabase = await createServerSupabase();
+  const page = pageBounds(query.limit, query.offset);
+
+  let builder = supabase.from('sku_models').select(SKU_MODEL_COLUMNS);
+
+  if (query.brand !== undefined) builder = builder.eq('brand', query.brand);
+  if (query.model !== undefined) builder = builder.eq('model', query.model);
+  if (query.search) {
+    const term = sanitizePattern(query.search);
+    if (term) {
+      builder = builder.or(
+        [`brand.ilike.*${term}*`, `model.ilike.*${term}*`, `colorway.ilike.*${term}*`].join(','),
+      );
+    }
+  }
+
+  const models = unwrap(
+    await builder
+      .order('demand_score', { ascending: false })
+      .order('id', { ascending: true })
+      .range(page.from, page.to),
+    'sku_models',
+  ) as SkuModel[] | null;
+
+  const rows = models ?? [];
+  if (rows.length === 0) return [];
+
+  const modelIds = rows.map((m) => m.id);
+
+  const variantRows = (unwrap(
+    await supabase.from('skus').select('id, model_id').in('model_id', modelIds),
+    'skus',
+  ) ?? []) as { id: UUID; model_id: UUID }[];
+
+  const variantCounts = new Map<UUID, number>();
+  const modelBySkuId = new Map<UUID, UUID>();
+  for (const v of variantRows) {
+    variantCounts.set(v.model_id, (variantCounts.get(v.model_id) ?? 0) + 1);
+    modelBySkuId.set(v.id, v.model_id);
+  }
+
+  const cardCounts = new Map<UUID, number>();
+  const variantIds = variantRows.map((v) => v.id);
+  if (variantIds.length > 0) {
+    const cardRows = (unwrap(
+      await supabase.from('cards').select('sku_id').in('sku_id', variantIds),
+      'cards',
+    ) ?? []) as { sku_id: UUID }[];
+
+    for (const c of cardRows) {
+      const modelId = modelBySkuId.get(c.sku_id);
+      if (modelId === undefined) continue;
+      cardCounts.set(modelId, (cardCounts.get(modelId) ?? 0) + 1);
+    }
+  }
+
+  return rows.map((m) => ({
+    ...m,
+    variant_count: variantCounts.get(m.id) ?? 0,
+    card_count: cardCounts.get(m.id) ?? 0,
+  }));
+}
+
+/**
+ * One model plus every size variant beneath it, oldest size first.
+ *
+ * @returns null if no such model — same "absence, not an error" convention
+ *          as getItem()/getListing().
+ */
+export async function getSkuModel(modelId: UUID): Promise<SkuModelDetail | null> {
+  const supabase = await createServerSupabase();
+
+  const modelResult = await supabase
+    .from('sku_models')
+    .select(SKU_MODEL_COLUMNS)
+    .eq('id', modelId)
+    .maybeSingle();
+  if (modelResult.error && !isNoRows(modelResult.error)) fail(modelResult.error, 'sku_models');
+
+  const model = modelResult.data as SkuModel | null;
+  if (!model) return null;
+
+  const variants = unwrap(
+    await supabase
+      .from('skus')
+      .select(SKU_COLUMNS)
+      .eq('model_id', modelId)
+      .order('size_us', { ascending: true }),
+    'skus',
+  ) as Sku[] | null;
+
+  return { ...model, variants: variants ?? [] };
+}
+
+/**
+ * fn_create_sku_model(p_brand, p_model, p_colorway, p_base_price_cents) -> uuid
+ *
+ * Admin only. Idempotent on the identity triple (brand, model, colorway) —
+ * returns the existing model's id on conflict rather than erroring, so a
+ * seller-facing "type your shoe, create if nothing fits" flow can call this
+ * without checking first. base_price_cents is the ORACLE: null is a valid,
+ * deliberate "unpriced" state (fn_mint_card refuses on it), never a mistake
+ * to default away.
+ *
+ * @throws FORBIDDEN, SKU_MODEL_IDENTITY_REQUIRED (blank brand/model/colorway),
+ *         INVALID_AMOUNT (non-positive base price).
+ */
+export async function createSkuModel(
+  brand: string,
+  model: string,
+  colorway: string,
+  basePriceCents: Cents | null = null,
+): Promise<UUID> {
+  const supabase = await createServerSupabase();
+  return unwrap(
+    await supabase.rpc('fn_create_sku_model', {
+      p_brand: brand,
+      p_model: model,
+      p_colorway: colorway,
+      p_base_price_cents: basePriceCents,
+    }),
+    'fn_create_sku_model',
+  ) as UUID;
+}
+
+/**
+ * Update a model's oracle price and metadata. Direct table write under
+ * sku_models_admin_write, same guard shape as upsertSku(). Changing
+ * base_price_cents propagates to every size variant's market_price_cents
+ * (trg_sku_model_propagate -> fn_sync_sku_variants) and re-tiers every
+ * FUTURE mint — cards.tier is stamped at mint and immutable, so nothing
+ * already minted moves.
+ *
+ * `art_url` is not settable here — see UpdateSkuModelInput's doc comment;
+ * use replaceSkuArt().
+ *
+ * @returns the full model row as written.
+ * @throws FORBIDDEN, NOT_FOUND.
+ */
+export async function updateSkuModel(
+  modelId: UUID,
+  input: UpdateSkuModelInput,
+): Promise<SkuModel> {
+  const supabase = await createServerSupabase();
+
+  const result = await supabase
+    .from('sku_models')
+    .update(input)
+    .eq('id', modelId)
+    .select(SKU_MODEL_COLUMNS)
+    .maybeSingle();
+
+  if (result.error) fail(result.error, 'sku_models');
+  if (!result.data) {
+    // Same RLS-silence disambiguation as upsertSku(): sku_models_read is
+    // public, so absence really is absence unless a non-admin session's
+    // UPDATE matched a row it was not allowed to touch.
+    const exists = await supabase.from('sku_models').select('id').eq('id', modelId).maybeSingle();
+    if (exists.data) {
+      throw new ContractError(
+        'FORBIDDEN',
+        `sku_model ${modelId} exists but the update wrote nothing — the session is not an admin`,
+        { modelId },
+      );
+    }
+    throw new ContractError('NOT_FOUND', `sku_model ${modelId} not found`, { modelId });
+  }
+  return result.data as SkuModel;
+}
+
+/**
+ * fn_ensure_sku_variant(p_model_id, p_size_us) -> uuid
+ *
+ * Any signed-in user. Idempotent per (model_id, size_us) — returns the
+ * existing variant's id rather than forking a duplicate. Safe for a seller
+ * to call directly: the variant's price is derived from the model, so
+ * creating one confers no value, and a variant under an unpriced model is
+ * simply unmintable (fn_mint_card already enforces that).
+ *
+ * @throws UNAUTHENTICATED, NOT_FOUND (no such model), INVALID_SKU_SIZE (not
+ *         a whole/half size between 3 and 20).
+ */
+export async function ensureSkuVariant(modelId: UUID, sizeUs: number): Promise<UUID> {
+  const supabase = await createServerSupabase();
+  return unwrap(
+    await supabase.rpc('fn_ensure_sku_variant', {
+      p_model_id: modelId,
+      p_size_us: sizeUs,
+    }),
+    'fn_ensure_sku_variant',
+  ) as UUID;
+}
+
+/**
+ * Update a variant's size curve point or per-size price override. Direct
+ * table write under skus_admin_write. market_price_cents is NOT settable
+ * here (see UpdateSkuVariantInput) — trg_sku_variant_derive recomputes it
+ * from whichever of these two changed.
+ *
+ * @returns the full variant row as written.
+ * @throws FORBIDDEN, NOT_FOUND.
+ */
+export async function updateSkuVariant(
+  skuId: UUID,
+  input: UpdateSkuVariantInput,
+): Promise<Sku> {
+  const supabase = await createServerSupabase();
+
+  const result = await supabase
+    .from('skus')
+    .update(input)
+    .eq('id', skuId)
+    .select(SKU_COLUMNS)
+    .maybeSingle();
+
+  if (result.error) fail(result.error, 'skus');
+  if (!result.data) {
+    const exists = await supabase.from('skus').select('id').eq('id', skuId).maybeSingle();
+    if (exists.data) {
+      throw new ContractError(
+        'FORBIDDEN',
+        `sku ${skuId} exists but the update wrote nothing — the session is not an admin`,
+        { skuId },
+      );
+    }
+    throw new ContractError('NOT_FOUND', `sku ${skuId} not found`, { skuId });
+  }
+  return result.data as Sku;
 }
 
 // ============================================================
@@ -3322,19 +3729,33 @@ export async function getSkus(query: SkusQuery = {}): Promise<Sku[]> {
     }
   }
 
-  // Tier is not a column on skus — it is the band the base oracle price falls
-  // in, per fn_tier_for_price. Translate the tiers back into price ranges.
+  // Tier is not a column on skus, and as of 027 it is not even the variant's
+  // own price band any more — fn_tier_for_sku reads sku_models.base_price_cents,
+  // not skus.market_price_cents (those two only agree when a variant has a
+  // 1.000 size_multiplier and no price_override_cents). Resolve the requested
+  // tiers against the MODEL first, then filter variants by model_id.
   if (query.tier?.length) {
     const arms = query.tier
       .map((tier) => TIER_BANDS.find((band) => band.tier === tier))
       .filter((band): band is (typeof TIER_BANDS)[number] => band !== undefined)
       .map((band) =>
         band.maxCents === null
-          ? `market_price_cents.gte.${band.minCents}`
-          : `and(market_price_cents.gte.${band.minCents},market_price_cents.lt.${band.maxCents})`,
+          ? `base_price_cents.gte.${band.minCents}`
+          : `and(base_price_cents.gte.${band.minCents},base_price_cents.lt.${band.maxCents})`,
       );
 
-    if (arms.length > 0) builder = builder.or(arms.join(','));
+    if (arms.length === 0) return [];
+
+    const modelRows = (unwrap(
+      await supabase.from('sku_models').select('id').or(arms.join(',')),
+      'sku_models',
+    ) ?? []) as { id: UUID }[];
+
+    if (modelRows.length === 0) return [];
+    builder = builder.in(
+      'model_id',
+      modelRows.map((m) => m.id),
+    );
   }
 
   const rows = unwrap(

@@ -12,6 +12,166 @@ with the credit-ledger and art_url work below.
 
 ## Open
 
+### 17. 027 (SKU model/variant split): contract layer updated; upsertSku can no longer write market_price_cents or create a SKU — BLOCKING ask for track/admin on SkuForm.tsx
+
+Task: 027_sku_models.sql (applied live, migration file now in this worktree)
+split SKU identity into `sku_models` (brand+model+colorway, the ORACLE
+`base_price_cents`, the shared art) and `skus` as the size VARIANT
+(`model_id`, `size_multiplier`, `price_override_cents`).
+`skus.market_price_cents` became a column maintained by
+`trg_sku_variant_derive` — `coalesce(price_override_cents,
+base_price_cents x size_multiplier)` — and a direct write now RAISES
+instead of being silently ignored. Tier moved to the model
+(`fn_tier_for_sku`); value stays per-variant (`fn_card_value_cents`,
+unchanged).
+
+**Pre-flight note, per AGENT_RULES.md section 0:** this worktree was 6
+commits behind `main` when the task was first handed to this pass
+(`027_sku_models.sql` did not exist in the checkout at all — confirmed via
+`git log HEAD..main` and `git show main:supabase/migrations/027_sku_models.sql`,
+which resolved fine from `main` but not from this branch). Stopped and
+reported per section 0 rather than working from the task prompt's prose
+description of the schema; the human reset the worktree and this pass
+resumed from a clean `git log HEAD..main` with no output.
+
+**Every direct writer of `skus.market_price_cents` in the repo, found by
+grepping for `market_price_cents\s*:` and `.update(`/`.insert(` against
+`skus` repo-wide (not just the two files the task named):**
+
+- **`lib/api/contract.ts`'s `upsertSku()`** — the real one, fixed here (see
+  below).
+- **`components/admin/skus/SkuForm.tsx`** — builds `market_price_cents:
+  market` into the object it hands `upsertSkuAction()` →
+  `upsertSku()`. **This will now throw `MARKET_PRICE_IS_DERIVED` on every
+  save**, both create and price-edit. Not fixed here — `app/admin/**` and
+  `components/admin/**` are track/admin's lane. **Ask:** the form's price
+  field needs to become two things: a `base_price_cents` field wired to
+  `updateSkuModel()` (or `createSkuModel()` for a new model), and, only
+  where a size genuinely diverges, a `price_override_cents` field wired to
+  `updateSkuVariant()`. The bench likely also wants `listSkuModels()` /
+  `getSkuModel()` for a model-first browse view instead of (or alongside)
+  the current flat SKU list, since 027's whole point is one pricing/art
+  decision per model instead of one per size.
+- **`components/admin/db-writes.ts`** — the task prompt named this file as
+  a place to check; it does **not** write `market_price_cents`. Its
+  `approveSubmission()` calls `fn_approve_submission(p_item_id,
+  p_price_cents)`, and `p_price_cents` there is the **listing** price
+  (`asking_price_cents` → the reviewer's decision), an unrelated column on
+  an unrelated table. Verified by reading the function in full — no `skus`
+  write anywhere in that file.
+- **`scripts/seed.ts`** — `ensureSku()` does a raw `.from('skus').insert({
+  ..., market_price_cents: SKU.market_price_cents })` with no `model_id` at
+  all. This is now broken twice over against the live (post-027) schema: it
+  will hit the `model_id` NOT NULL constraint before it ever reaches the
+  price trigger. `scripts/**` is this track's lane, but fixing a seed
+  script's SKU-creation flow (decide whether it should call
+  `fn_create_sku_model` directly or insert `sku_models` as the seed's
+  service-role client already does elsewhere in the file, then
+  `ensureSkuVariant`) is a design choice outside this task's four numbered
+  items — flagging rather than guessing at it unasked.
+- **Everywhere else** (`components/market/intake/PricePayout.tsx`,
+  `components/market/intake/SkuPicker.tsx`, `components/market/bridge.ts`,
+  `app/admin/skus/page.tsx`, `app/admin/skus/[id]/page.tsx`,
+  `components/admin/mint/MintTable.tsx`,
+  `app/admin/submissions/[itemId]/page.tsx`, `components/admin/db-reads.ts`,
+  `lib/db/valuation.ts`, `components/card/value.ts`, `lib/mock/fixtures.ts`,
+  `HANDOFF.md`, `docs/handoff/design.md`) only **reads** the column or
+  mirrors `fn_card_value_cents`'s existing (unchanged) formula. No other
+  write found.
+
+**`upsertSku()` fixed in place — its signature is NOT one of the frozen 16**
+(it is itself a 009 sanctioned extension: "Direct table write under
+skus_admin_write — there is no RPC"), so the body was changed rather than
+worked around or left broken:
+
+- Supplying `market_price_cents` (including explicit `null`) now throws
+  `MARKET_PRICE_IS_DERIVED` before any Supabase client is even constructed —
+  the value is never silently dropped or guessed-and-misrouted to a model
+  (a variant-shaped caller can't know if it's the model's only size, so
+  repricing "the" model on its behalf could silently reprice every sibling
+  size).
+- A plain insert (no `id`) now throws `SKU_CREATION_REQUIRES_MODEL` —
+  `skus.model_id` is `NOT NULL` as of 027 and `UpsertSkuInput` has no field
+  to supply one, so insert-via-upsertSku cannot succeed at all any more.
+  Both messages name the real replacement (`createSkuModel` +
+  `ensureSkuVariant`, or `updateSkuModel` / `updateSkuVariant`).
+- The update branch (existing variant, `id` present, no
+  `market_price_cents`) is untouched — `retail_price_cents`, `sprite_key`,
+  `palette`, `demand_score`, `mint_cap` etc. still update exactly as before.
+
+**Also fixed while in the file — `getSkus()`'s `SkusQuery.tier` filter was
+matching the wrong column.** It built its price-range OR-filter against
+`skus.market_price_cents`, but 027 moves tier to the MODEL
+(`fn_tier_for_sku` reads `sku_models.base_price_cents`). Those two only
+agree when a variant has a `1.000` size_multiplier and no
+`price_override_cents` — true for every variant today (027 ships the curve
+flat), but the C3 section of `scripts/smoke_catalog.sql` (this migration's
+own smoke test) demonstrates a variant whose override crosses a tier
+boundary while its model tier stays put, which the old filter would have
+sorted into the wrong tier bucket. `getSkus()` now resolves the requested
+tiers against `sku_models.base_price_cents` first, then filters variants by
+`model_id`. Not one of the task's four numbered items, but directly caused
+by 027 and in this same file — flagged explicitly rather than silently
+folded in.
+
+**New additive exports** (SANCTIONED EXTENSIONS block in `contract.ts`
+updated with a `027:` bullet): `listSkuModels(query?)`, `getSkuModel(modelId)`,
+`createSkuModel(brand, model, colorway, basePriceCents?)` (wraps
+`fn_create_sku_model`), `updateSkuModel(modelId, input)` (direct table
+write, `sku_models_admin_write` — deliberately has no `art_url` field, that
+stays `replaceSkuArt()`-only), `ensureSkuVariant(modelId, sizeUs)` (wraps
+`fn_ensure_sku_variant`), `updateSkuVariant(skuId, input)` (direct table
+write, `skus_admin_write`, only `size_multiplier`/`price_override_cents`).
+`replaceSkuArt()` is unchanged, per 027's own migration comment — same
+`(uuid, text) -> skus` signature, it just now propagates to every sibling
+size.
+
+New `ContractErrorCode` members, each mapped in `lib/db/errors.ts` against
+the exact raise text in `027_sku_models.sql`: `MARKET_PRICE_IS_DERIVED`,
+`SKU_MODEL_IDENTITY_REQUIRED`, `INVALID_SKU_SIZE`,
+`SKU_CREATION_REQUIRES_MODEL` (the last is thrown client-side by
+`upsertSku()` only — there is no matching SQL raise for it).
+`sku_model % not found` and the new model-level art guard (42501) both ride
+existing generic rules (`/\bnot found\b/i`, the `42501 -> FORBIDDEN` code
+map) — pinned by a test rather than assumed.
+
+**`Sku` (lib/db/types.ts) gained `model_id`, `size_multiplier`,
+`price_override_cents`, all marked optional on the TS type** even though
+`model_id`/`size_multiplier` are `NOT NULL` in the database — same
+precedent as `User.fulfilments_completed` above (013): the shared
+`lib/mock/fixtures.ts` and `components/market/bridge.ts` (track/market's
+file) both build `Sku`-shaped objects that predate 027 and are not this
+track's or this task's to edit. Required fields would have failed `tsc` in
+two other tracks' lanes for a schema fact those files have no way to know
+about yet. New `SkuModel` interface added alongside.
+
+**Tests:** `tests/invariants.test.ts` — **191 passing (was 172, +19)**. New
+coverage, none of it executing SQL (that's what `scripts/smoke_catalog.sql`
+is for, live — this suite must not duplicate it, per the task's own
+instruction): `upsertSku()` rejects with `MARKET_PRICE_IS_DERIVED` for
+`market_price_cents` on both an update- and insert-shaped call and for an
+explicit `null`; rejects with `SKU_CREATION_REQUIRES_MODEL` for a plain
+insert, naming `createSkuModel`/`ensureSkuVariant` in the message; the new
+exports exist with the arities their RPCs/table shapes imply;
+`contractErrorCode()` maps every new 027 raise text (and confirms the two
+that deliberately have no new rule still resolve via the existing generic
+ones); and a mirror of `scripts/smoke_catalog.sql`'s C3 section proving
+tier is the model's `base_price_cents` for every variant of a model
+regardless of a per-size `price_override_cents`, while value
+(`market_price_cents`) genuinely diverges — using `tierForPrice()` (already
+imported in this suite) as the same mirror `fn_tier_for_price` gets
+elsewhere, never a new formula.
+
+**Not verified live:** none of this was probed against the live project.
+Every raise text came from reading `027_sku_models.sql` directly, not from
+a live call — this task's writes are all admin-acting-in-a-session
+mutations (`fn_create_sku_model`, `fn_ensure_sku_variant`,
+`updateSkuModel`/`updateSkuVariant`'s direct table writes), and calling any
+of them for real would be a real catalog write against the live project
+(AGENT_RULES.md section 2). `npx tsc --noEmit` clean, `npm run build`
+compiles (`Compiled successfully`, all 22 routes render), `npx eslint` on
+every changed file clean with zero warnings.
+
 ### 16. Re-landed setCountry() — lost to a worktree reset as `39f0efa`, rebuilt against current main; track/market has a ready wiring plan waiting on this
 
 `39f0efa` shipped this once; the commit is unreachable (an earlier pass's
