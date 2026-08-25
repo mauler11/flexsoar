@@ -1,26 +1,35 @@
 /**
  * components/admin/skus/ArtUploader.tsx
  *
- * Uploads one SKU's pixel-art to Cloudflare R2, reusing the grading bench's
- * presigned-PUT pattern: the server action signs a short-lived URL and this
- * component PUTs the raw file bytes straight to R2 with fetch(). No base64,
- * no server-action body — art files can be large without touching Next's 1MB
- * action limit. The R2 access keys never leave the server.
+ * Uploads one MODEL's pixel-art to Cloudflare R2, reusing the grading
+ * bench's presigned-PUT pattern: the server action signs a short-lived URL
+ * and this component PUTs the raw file bytes straight to R2 with fetch(). No
+ * base64, no server-action body — art files can be large without touching
+ * Next's 1MB action limit. The R2 access keys never leave the server.
  *
- * Art is stored PER SKU, not per card: every listing of the same model and
- * colourway shares this one image. That is why an overwrite is guarded —
- * replacing it changes cards users already own — and why the submission
- * review bench (mode="review") never offers to overwrite at all.
+ * `skuId` here is a VARIANT id, not a model id — `fn_replace_sku_art`
+ * (027_sku_models.sql) takes a variant id even though it writes the whole
+ * model's art_url and propagates to every sibling size. This component
+ * always addresses it through one variant, whatever variant the caller has
+ * on hand (the model page's first size; a submission review bench's own
+ * item.sku). It never writes art_url through upsertSku any more — that path
+ * would only set ONE variant's own art_url column, which 027 leaves
+ * unsynced with the model on UPDATE, silently forking one size's art from
+ * every other size's. replaceSkuArtAction (fn_replace_sku_art) is the only
+ * write in this file for exactly that reason, for BOTH a first upload and a
+ * replacement.
+ *
+ * Art is stored PER MODEL, not per size and not per card: every size of the
+ * same model, and every card minted from any of them, shares this one
+ * image. That is why an overwrite is guarded — replacing it changes cards
+ * users already own, on every size at once — and why the submission review
+ * bench (mode="review") never offers to overwrite at all.
  */
 
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import {
-  getSkuArtUploadUrlAction,
-  replaceSkuArtAction,
-  setSkuArtUrlAction,
-} from "@/app/admin/skus/actions";
+import { getSkuArtUploadUrlAction, replaceSkuArtAction } from "@/app/admin/skus/actions";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import type { UUID } from "@/lib/db/types";
@@ -28,15 +37,16 @@ import type { UUID } from "@/lib/db/types";
 const MAX_ART_BYTES = 5 * 1024 * 1024;
 
 export interface ArtUploaderProps {
+  /** Any one variant of the model this art belongs to. */
   skuId: UUID;
-  /** The current art_url, shown as a preview until a replacement lands. */
+  /** The MODEL's current art_url, shown as a preview until a replacement lands. */
   currentArtUrl: string | null;
   /**
-   * "edit" (the SKU page) allows a fresh upload freely and an overwrite of
+   * "edit" (the model page) allows a fresh upload freely and an overwrite of
    * existing art behind an explicit confirmation. "review" (a submission's
    * review bench) never overwrites: existing art renders read-only with a
-   * note to change it from the SKU page, and upload is offered only when the
-   * SKU has none yet.
+   * note to change it from the model page, and upload is offered only when
+   * the model has none yet.
    */
   mode?: "edit" | "review";
   onUploaded?: (url: string) => void;
@@ -63,7 +73,6 @@ export function ArtUploader({
     startTransition(async () => {
       setUploading(true);
       setError(null);
-      const replacing = art !== null;
       try {
         const outcome = await getSkuArtUploadUrlAction({
           skuId,
@@ -87,9 +96,10 @@ export function ArtUploader({
           return;
         }
 
-        const saved = replacing
-          ? await replaceSkuArtAction(skuId, outcome.publicUrl)
-          : await setSkuArtUrlAction(skuId, outcome.publicUrl);
+        // First art or a replacement — both go through fn_replace_sku_art.
+        // There is no other sanctioned write path for a model's art (see the
+        // file header).
+        const saved = await replaceSkuArtAction(skuId, outcome.publicUrl);
         if (!saved.ok) {
           setError(saved.message);
           return;
@@ -133,14 +143,15 @@ export function ArtUploader({
           Pixel art
         </h2>
         <p className="font-mono text-[10px] leading-snug tracking-tight text-muted">
-          This SKU already has artwork — shared by every card of this model
-          and colourway. Change it from the SKU page, not here.
+          This model already has artwork — shared by every size, and every
+          card already minted at any of them. Change it from the model page,
+          not here.
         </p>
         <div className="flex items-center gap-3">
           {/* eslint-disable-next-line @next/next/no-img-element -- external host; see grading PhotoViewer */}
           <img
             src={art!}
-            alt="Current art for this SKU"
+            alt="Current art for this model"
             className="h-20 w-20 border border-line bg-overlay object-contain"
           />
           <span className="font-mono text-[10px] tracking-tight text-muted">
@@ -157,8 +168,8 @@ export function ArtUploader({
         Pixel art
       </h2>
       <p className="font-mono text-[10px] leading-snug tracking-tight text-muted">
-        The SKU&apos;s artwork — shared by every card of this model and
-        colourway, not just one.
+        The model&apos;s one shared image — every size renders it, and so
+        does every card already minted at any of them, the moment this saves.
       </p>
 
       {art ? (
@@ -166,7 +177,7 @@ export function ArtUploader({
           {/* eslint-disable-next-line @next/next/no-img-element -- external host; see grading PhotoViewer */}
           <img
             src={art}
-            alt="Art for this SKU"
+            alt="Art for this model"
             className="h-20 w-20 border border-line bg-overlay object-contain"
           />
           <span className="font-mono text-[10px] tracking-tight text-muted">
@@ -227,7 +238,7 @@ export function ArtUploader({
           setConfirming(false);
           setPendingFile(null);
         }}
-        title="Replace artwork for all cards of this SKU"
+        title="Replace artwork for every size of this model"
         footer={
           <>
             <Button
@@ -246,15 +257,16 @@ export function ArtUploader({
               disabled={uploading}
               onClick={() => pendingFile && upload(pendingFile)}
             >
-              {uploading ? "Uploading…" : "Replace artwork for all cards of this SKU"}
+              {uploading ? "Uploading…" : "Replace artwork for every size"}
             </Button>
           </>
         }
       >
         <p className="font-mono text-[11px] leading-snug tracking-tight">
-          Every card minted from this SKU — this model, colourway and size —
-          shares one artwork. Replacing it changes how cards users already own
-          are shown, everywhere they are shown.
+          Every size of this model, and every card already minted at any of
+          them, shares one artwork. Replacing it changes how cards users
+          already own are shown, everywhere they are shown — wider than a
+          single-size replacement, on purpose (027).
         </p>
       </Modal>
     </div>

@@ -8,8 +8,15 @@
  * local adapter for a contract gap; every one of these dies the day
  * track/data ships the real function:
  *
- *   - getSkuFloatCurve(skuId) -> wants getFloatCurve(skuId)
- *   - getAdminSku(id)         -> wants getSku(id) or SkusQuery.id
+ *   - getSkuFloatCurve(skuId)      -> wants getFloatCurve(skuId)
+ *   - getAdminSku(id)              -> wants a single-variant read; narrowed
+ *                                   (027) to backing just the art-upload
+ *                                   existence check now that the model page
+ *                                   itself reads through getSkuModel()
+ *   - getVariantCardCounts(ids)    -> wants card_count per variant.entry on
+ *                                   SkuModelDetail.variants, the way
+ *                                   listSkuModels() already aggregates it per
+ *                                   model (027)
  *   - getPendingSubmissions() -> wants ItemsQuery to reach 'pending_review'
  *   - getSubmission(id)       -> wants the 013 columns on ItemSummary
  *   - getSellerHistory(id)    -> wants a trust read (012/013 columns on users)
@@ -79,11 +86,15 @@ export async function getSkuFloatCurve(skuId: UUID): Promise<FloatCurveBand[]> {
 }
 
 // ------------------------------------------------------------
-// One SKU, by id, for the edit form
+// One SKU (variant), by id
 // ------------------------------------------------------------
 
 /**
- * Same projection the contract's SKU reads use. skus_read is public.
+ * A single variant row. As of 027 the model bench's edit page reads through
+ * the contract's getSkuModel() instead — this now backs exactly one thing:
+ * app/admin/skus/actions.ts's getSkuArtUploadUrlAction() confirming the
+ * variant id it was handed actually exists before signing an R2 upload URL.
+ * skus_read is public, so this needs no admin nuance of its own.
  */
 export async function getAdminSku(skuId: UUID): Promise<Sku | null> {
   const supabase = await createServerSupabase();
@@ -91,7 +102,8 @@ export async function getAdminSku(skuId: UUID): Promise<Sku | null> {
   const result = await supabase
     .from("skus")
     .select(
-      "id, brand, model, colorway, size_us, retail_price_cents, market_price_cents, " +
+      "id, model_id, brand, model, colorway, size_us, retail_price_cents, market_price_cents, " +
+        "size_multiplier, price_override_cents, " +
         "price_confidence, priced_at, demand_score, sprite_key, palette, mint_cap, created_at, art_url",
     )
     .eq("id", skuId)
@@ -101,6 +113,37 @@ export async function getAdminSku(skuId: UUID): Promise<Sku | null> {
   }
 
   return (result.data as Sku | null) ?? null;
+}
+
+/**
+ * Card counts for a set of variants, keyed by variant (skus.id) — the
+ * per-size number the model detail page's VariantsTable needs, mirroring
+ * exactly how the contract's own listSkuModels() aggregates a MODEL's total
+ * card_count (027): a second query against `cards.sku_id`, not a join,
+ * because PostgREST has no GROUP BY without a view or RPC and schema is
+ * human-only. A variant with no cards is simply absent from the map — callers
+ * read it with `?? 0`, same convention as listSkuModels()'s own maps.
+ */
+export async function getVariantCardCounts(
+  variantIds: readonly UUID[],
+): Promise<Map<UUID, number>> {
+  const counts = new Map<UUID, number>();
+  if (variantIds.length === 0) return counts;
+
+  const supabase = await createServerSupabase();
+
+  const result = await supabase
+    .from("cards")
+    .select("sku_id")
+    .in("sku_id", variantIds as UUID[]);
+  if (result.error) {
+    throw new Error(`cards: ${result.error.message}`, { cause: result.error });
+  }
+
+  for (const row of (result.data ?? []) as { sku_id: UUID }[]) {
+    counts.set(row.sku_id, (counts.get(row.sku_id) ?? 0) + 1);
+  }
+  return counts;
 }
 
 // ============================================================

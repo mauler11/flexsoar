@@ -296,6 +296,93 @@ it is exposed whether or not this console exists. The adapter's doc comment
 says so rather than repeating the "guarded inside the transaction" claim that
 is true of its two siblings and false of this one.
 
+### 14. 027 model bench: three fields dropped from the old flat-SKU form have no 027-era write path; naming them rather than reaching around the contract
+
+Rebuilt `app/admin/skus/**` as a two-level MODEL bench per the 027 handoff ask
+(`docs/handoff/data.md` item 17): `app/admin/skus/page.tsx` now lists
+`sku_models` rows (`listSkuModels()`); `app/admin/skus/[id]/page.tsx` is one
+model (`getSkuModel()`) with its size variants beneath it
+(`components/admin/skus/VariantsTable.tsx`). `SkuForm.tsx` is deleted —
+replaced by `SkuModelForm.tsx` (model identity + oracle price + sprite/palette,
+via `createSkuModel()`/`updateSkuModel()`) — and `ArtUploader.tsx` now writes
+**only** through `replaceSkuArt()`, for a first upload and a replacement alike,
+since 027 gives a variant's own `art_url` column no synced relationship to its
+model on `UPDATE` (only `fn_sync_sku_variants` pushes the model's copy down,
+and that function is granted to no client role) — writing it any other way
+would fork one size's art from the model silently, exactly the class of bug
+027 exists to prevent.
+
+**Three fields the old `SkuForm.tsx` exposed per SKU have no home in this
+bench, on purpose — not an oversight:**
+
+- **`sprite_key` / `palette`** moved to the model (`UpdateSkuModelInput` has
+  both) since they render the shared art, same reasoning as `art_url`. No
+  regression: every variant of a model shares one render.
+- **`retail_price_cents`, `mint_cap`, `demand_score` per size** have **no 027
+  write export at all.** `UpdateSkuVariantInput` is deliberately only
+  `size_multiplier` / `price_override_cents` (`lib/api/contract.ts`'s own doc
+  comment on the type). The legacy `upsertSku()` update branch can still
+  technically write these three columns on a variant row — track/data's own
+  handoff note (data.md item 17) confirms `retail_price_cents`, `demand_score`,
+  `mint_cap` "still update exactly as before" on that branch — so this is not
+  a hard block, but using it would mean running two different write idioms
+  (the pre-027 upsert-by-identity shape and the 027 model/variant split) side
+  by side in one bench, and `mint_cap` in particular gates `fn_mint_card`'s cap
+  check, which is exactly the kind of "if a contract export you need does not
+  exist, STOP and tell me" case this track's instructions asked for rather
+  than a quiet reach-around. **Ask:** either add these three fields to
+  `UpdateSkuVariantInput` (they are per-size facts and belong there, not on
+  the model), or say explicitly that `upsertSku()`'s legacy branch is still the
+  sanctioned path for them and this track will wire it in.
+- **Renaming a model's `brand`/`model`/`colorway` after creation** has no
+  export either — `UpdateSkuModelInput` excludes all three, matching
+  `sku_models_identity_uidx` and 027's own migration comment that a
+  "model-level merge tool" is future, unbuilt work. The model page shows them
+  read-only with a note why, rather than a form field that would silently do
+  nothing (`upsertSku()`'s identity columns are overwritten by
+  `trg_sku_variant_derive` on the **variant** row, and there is no equivalent
+  path to the model's own row at all).
+
+**Also narrowed while in `db-reads.ts`:** `getAdminSku()` (item 6, above) now
+backs only the art-upload existence check in
+`app/admin/skus/actions.ts:getSkuArtUploadUrlAction` — the model page's own
+single-row read is `getSkuModel()`, a real contract export, so item 6's
+original ask ("no single-row read for a SKU") is effectively answered for the
+model case and only open for a bare variant lookup, which this bench no longer
+needs outside that one existence check. **New local read adapter added,
+same temporary-and-documented shape as the others:** `getVariantCardCounts()`,
+mirroring `listSkuModels()`'s own two-query card-count aggregation
+(`cards.sku_id` has no FK-embeddable count without a view or RPC) but keyed
+per variant instead of per model — `SkuModelDetail.variants` carries no
+`card_count` today. Retires the day `getSkuModel()` (or a sibling read) returns
+one.
+
+**Curve editing relocated, not changed.** `FloatCurveEditor.tsx` is untouched
+— `sku_float_curve` stays keyed on the variant post-027, per the migration's
+own note that this is deliberately inert until it moves to the model. It now
+opens from a per-row "Curve" button in `VariantsTable.tsx` (a modal, lazily
+loaded via a new `getSkuFloatCurveAction()` wrapper around the existing
+`getSkuFloatCurve()` local read) instead of living inline on a single-SKU
+page, since one model can now have many sizes and eagerly rendering every
+size's curve editor at once would be unreadable.
+
+**Verification:** `npx tsc --noEmit` clean. `npx eslint` on every changed file
+clean, zero warnings. `npm run build` compiles (`Compiled successfully`, all
+19 routes render, including `/admin/skus`, `/admin/skus/[id]`,
+`/admin/skus/new`, and `/admin/submissions/[itemId]` — confirming
+`ArtUploader`'s prop shape change (always `replaceSkuArt`, never
+`upsertSku`) didn't break its other caller). `npm test`: **191 passing,
+unchanged** — this task touched no file under `tests/**` and added no
+`lib/**` logic of its own to mirror; every write in this bench is a thin
+pass-through to an already-tested contract export.
+
+**Not verified live.** No admin mutation in this bench was called against the
+live project — creating a model, adding a size, setting an override, or
+replacing art are all real catalog writes (AGENT_RULES.md §2). Every claim
+about which columns 027 does or does not keep synced on `UPDATE` came from
+reading `027_sku_models.sql` and `lib/api/contract.ts`'s doc comments
+directly, not from a live probe.
+
 ---
 
 ## Resolved
