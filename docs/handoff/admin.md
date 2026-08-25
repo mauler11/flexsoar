@@ -566,3 +566,77 @@ contains a `formatUsd`-formatted price and never contains the string `"FSC"`
 source files via `git stash`, reran, both new tests failed with the literal
 `"260.00 FSC"` string, then restored). `npx tsc --noEmit`, `npm test`
 (206 passing), `npm run build` all clean.
+
+### ~~18. The rest of item 17's list — fixed~~
+
+Closed out every file item 17 named but left unfixed:
+
+- `app/admin/submissions/page.tsx` and `.../[itemId]/page.tsx` — deleted the
+  shared-shape local `formatCents()` from both (each file had its own copy,
+  not a shared import) and replaced every call site with an inline
+  `cents == null ? "—" : formatUsd(cents)`, matching the null-safe-inline
+  convention `track/market`/`track/design` already used for this exact thing
+  elsewhere in the repo (`app/(market)/dashboard/page.tsx`,
+  `app/(market)/u/[handle]/page.tsx`, `components/market/intake/PricePayout.tsx`,
+  `components/market/intake/SkuPicker.tsx` all do the same ternary, no named
+  helper) — not a convention invented for this task.
+- `app/admin/consignments/[id]/page.tsx` — deleted `formatMoney()` entirely.
+  `Consignment.intake_fee_cents` is `Cents`, not `Cents | null`
+  (`lib/db/types.ts`), so the call site is a bare `formatUsd(consignment.intake_fee_cents)`
+  with no null guard at all — the old helper's null branch was dead code for
+  every real row.
+- `components/admin/mint/MintTable.tsx` — no local helper here, just an inline
+  template literal; replaced with `formatUsd(item.sku.market_price_cents)`.
+- `components/admin/submissions/DecisionControls.tsx` — same, two inline
+  template literals (the oracle-price hint and the "seller asked" note),
+  both now call `formatUsd`.
+- `app/admin/fulfilment/page.tsx` — the task confirmed this one directly:
+  `fn_redeem_card` books `handling_fee_cents` as `entry_type = 'handling_fee'`
+  on `asset = 'currency'`, both legs, so it was always USD. Replaced the
+  inline `"X.XX FSC"` template with `formatUsd(redemption.handling_fee_cents)`.
+  `RedemptionSummary.handling_fee_cents` is `Cents`, non-null, confirmed in
+  `lib/api/contract.ts` — no ternary needed.
+
+**No real FSC amount exists anywhere in `app/admin/**` or `components/admin/**`.**
+Grepped both trees for `FSC` and `formatFsc` after every fix landed — zero
+hits besides two doc-comments (this file's own "never FSC" notes from item
+17). Also grepped for `credit_cents`/`credit_balance`/anything imbalance- or
+trade-shaped — nothing. So there was nothing to leave alone: every money
+figure this track's admin surface displays is a USD price, fee, or amount,
+and after this item every one of them goes through `formatUsd`.
+
+**Local `money()`-shaped helpers deleted, not kept beside `formatUsd`** — per
+the task's own reasoning (a duplicated formatter is how six places drifted
+from the shared one at once) and matching what `track/market`/`track/design`
+already did elsewhere in the repo: no file in this change keeps a named
+wrapper around `formatUsd`, only inline null ternaries where the type
+actually allows null.
+
+**`DecisionControls`' two price strings could not be reached by a render
+test** — both live inside the approve confirm modal
+(`open={confirming === "approve"}`), which starts closed, and this suite has
+no jsdom/interactivity to click it open. Extracted `oracleHint()` and
+`askingNote()` as named exports (additive) so the strings themselves are
+testable directly — same reasoning and same shape as `parseDraft`'s export
+from `SkuModelForm.tsx` in item 16.
+
+**Tests:** `tests/invariants.test.ts` grew from 206 to 215 (9 new: MintTable
+x2, DecisionControls x3 — one closed-render smoke test plus the two
+extracted-function tests — and one render test per page for submissions
+list, submissions review, consignment detail, fulfilment). Confirmed
+regression coverage the way item 17 did: stashed the five straightforward
+source fixes, reran, all 6 affected tests failed showing the literal
+`"X.XX FSC"` string (`260.00`, `215.00` x2, `15.00`, `9.95`, `80.00`), then
+restored. Separately confirmed `oracleHint`'s test the same way by hand-
+reverting its body only, since that file wasn't part of the stash (it also
+carries the new exports, which the stash would have removed along with the
+fix). `npx tsc --noEmit`, `npm test` (215 passing), `npm run build` all
+clean.
+
+**Not verified live** — unlike item 17, this item's fixes were not re-checked
+against the running app in a browser. The pages touched here
+(`submissions`, `submissions/[itemId]`, `consignments/[id]`, `fulfilment`)
+need seed data this worktree's fixtures don't currently carry (a pending
+submission, a consignment, an unshipped redemption) to reach the changed
+rows at all; the render tests above substitute for that but are not the same
+as seeing it in a browser.

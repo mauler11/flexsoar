@@ -62,7 +62,7 @@ import {
   validateRequestedCredit,
 } from '../app/(market)/checkout-math';
 import { CREDIT_HOLD_MINUTES_FALLBACK as CONTRACT_CREDIT_HOLD_MINUTES_FALLBACK } from '../lib/api/contract';
-import type { ListingSummary } from '../lib/api/contract';
+import type { ListingSummary, ItemSummary } from '../lib/api/contract';
 import {
   ContractError,
   upsertSku,
@@ -78,6 +78,12 @@ import { contractErrorCode } from '../lib/db/errors';
 import { MarketTile } from '../components/market/MarketTile';
 import { SkuModelForm, parseDraft, type Draft } from '../components/admin/skus/SkuModelForm';
 import { VariantsTable } from '../components/admin/skus/VariantsTable';
+import { MintTable } from '../components/admin/mint/MintTable';
+import { DecisionControls, oracleHint, askingNote } from '../components/admin/submissions/DecisionControls';
+import SubmissionsQueuePage from '../app/admin/submissions/page';
+import ReviewSubmissionPage from '../app/admin/submissions/[itemId]/page';
+import ConsignmentDetailPage from '../app/admin/consignments/[id]/page';
+import FulfilmentPage from '../app/admin/fulfilment/page';
 import { PricePayout } from '../components/market/intake/PricePayout';
 import { ListForm } from '../components/market/ListForm';
 import {
@@ -112,7 +118,172 @@ vi.mock('@/app/admin/skus/actions', () => ({
   ensureSkuVariantAction: async () => ({ ok: true }),
   getSkuFloatCurveAction: async () => ({ ok: true, bands: [] }),
   updateSkuVariantAction: async () => ({ ok: true }),
+  getSkuArtUploadUrlAction: async () => ({ ok: true }),
+  replaceSkuArtAction: async () => ({ ok: true }),
 }));
+
+// Same reasoning, for the other admin surfaces' Server Actions this file's
+// new page-level renders below pull in transitively (MintTable,
+// DecisionControls, ArtUploader, TransitionControls, MarkShippedControl).
+vi.mock('@/app/admin/mint/actions', () => ({
+  batchMintAction: async () => ({ outcomes: [], message: undefined }),
+}));
+vi.mock('@/app/admin/submissions/actions', () => ({
+  approveSubmissionAction: async () => ({ ok: true }),
+  rejectSubmissionAction: async () => ({ ok: true }),
+}));
+vi.mock('@/app/admin/consignments/actions', () => ({
+  advanceConsignmentAction: async () => ({ ok: true }),
+}));
+vi.mock('@/app/admin/fulfilment/actions', () => ({
+  markShippedAction: async () => ({ ok: true }),
+  confirmShipmentAction: async () => ({ ok: true }),
+  markDefaultAction: async () => ({ ok: true }),
+}));
+
+// requireAdminPage() re-verifies against Supabase (auth.getUser(), then
+// getUser() on the contract) — real network calls with no request context
+// under a static render. Every page test below only cares what renders past
+// the gate, never the gate itself, so this always lets the render through.
+// Return value is discarded by every caller (`await requireAdminPage(...)`,
+// no assignment), so the stub's return value is never inspected.
+vi.mock('@/components/admin/auth', () => ({
+  requireAdminPage: async () => undefined,
+}));
+
+// db-reads.ts is a stack of local Supabase read adapters (see its own header
+// comment) — no request context under a static render, same reasoning as
+// requireAdminPage above. Each function here is called by exactly one page
+// tested below, so one fixture per function is unambiguous.
+vi.mock('@/components/admin/db-reads', () => ({
+  getPendingSubmissions: async () => [
+    {
+      id: 'submission-1',
+      sku_id: 'sku-1',
+      consignor_id: null,
+      status: 'pending_review',
+      custody: 'seller',
+      custody_holder_id: null,
+      grade_source: 'seller_declared',
+      asking_price_cents: 21500,
+      submitted_payout: 'cash',
+      last_proof_at: null,
+      photos: [],
+      grading_notes: null,
+      float_value: null,
+      grade: null,
+      created_at: '2026-01-01T00:00:00Z',
+      sku: { brand: 'Nike', model: 'Air Max 1', colorway: 'Seed Grey', size_us: 10 },
+      seller: null,
+    },
+  ],
+  getSellerTrust: async () => new Map(),
+  getSubmission: async () => ({
+    id: 'submission-1',
+    sku_id: 'sku-1',
+    consignor_id: 'consignor-1',
+    status: 'pending_review',
+    custody: 'seller',
+    custody_holder_id: null,
+    grade_source: 'seller_declared',
+    asking_price_cents: 21500,
+    submitted_payout: 'cash',
+    last_proof_at: null,
+    photos: [],
+    grading_notes: null,
+    float_value: null,
+    grade: null,
+    created_at: '2026-01-01T00:00:00Z',
+    sku: {
+      id: 'sku-1',
+      brand: 'Nike',
+      model: 'Air Max 1',
+      colorway: 'Seed Grey',
+      size_us: 10,
+      market_price_cents: 26000,
+      art_url: null,
+    },
+    seller: { id: 'consignor-1', handle: 'sneakerhead', level: 2 },
+  }),
+  getSellerHistory: async () => ({
+    id: 'consignor-1',
+    handle: 'sneakerhead',
+    level: 2,
+    fulfilments_completed: 3,
+    defaults_count: 0,
+    is_restricted: false,
+    recent: [
+      {
+        id: 'submission-0',
+        status: 'accepted',
+        created_at: '2025-12-01T00:00:00Z',
+        asking_price_cents: 8000,
+        brand: 'Nike',
+        model: 'Air Max 1',
+        size_us: 10,
+      },
+    ],
+  }),
+  getSellerHeldRedemptions: async () => [],
+  getProofOverdue: async () => [],
+  getPlatformConfig: async () => ({
+    sellerShipmentDays: 7,
+    proofOfPossessionDays: 90,
+  }),
+}));
+
+// PARTIAL mock: this file also imports real contract functions elsewhere
+// (upsertSku, createSkuModel, …) via the relative path and tests their real
+// throwing behaviour directly — those must keep running for real. Only
+// getConsignment/getRedemptions are overridden here, everything else in the
+// module passes through via importOriginal(), same module either way vitest
+// resolves it by, so a plain vi.mock without importOriginal would have
+// silently replaced those real exports with undefined too.
+vi.mock('@/lib/api/contract', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/api/contract')>();
+  return {
+    ...actual,
+    getConsignment: async () => ({
+      id: 'consignment-1',
+      consignor_id: 'consignor-1',
+      consignor: { id: 'consignor-1', handle: 'sneakerhead', level: 2 },
+      status: 'in_review',
+      item_count: 1,
+      intake_fee_cents: 1500,
+      submitted_at: '2026-01-01T00:00:00Z',
+      received_at: null,
+      completed_at: null,
+      notes: null,
+      created_at: '2026-01-01T00:00:00Z',
+      items: [],
+      events: [],
+    }),
+    getRedemptions: async () => [
+      {
+        id: 'redemption-1',
+        card_id: 'card-1',
+        item_id: 'item-1',
+        user_id: 'redeemer-1',
+        handling_fee_cents: 995,
+        shipping_address: { name: 'A. Buyer', line1: '1 Market St', city: 'SF', country: 'US' },
+        status: 'requested',
+        carrier: null,
+        tracking_number: null,
+        requested_at: '2026-01-01T00:00:00Z',
+        shipped_at: null,
+        card: {
+          id: 'card-1',
+          mint_number: 4,
+          float_value: 0.062,
+          sku: { brand: 'Nike', model: 'Air Max 1', colorway: 'Seed Grey', size_us: 10 },
+        },
+        item: { id: 'item-1', status: 'redemption_hold', custody_location: 'warehouse-a' },
+        redeemer: { id: 'redeemer-1', handle: 'buyer1', level: 1 },
+        fulfiller: null,
+      },
+    ],
+  };
+});
 
 // ------------------------------------------------------------
 // SQL MIRRORS
@@ -2267,6 +2438,145 @@ describe('VariantsTable — price column and override helper text render USD, ne
       }),
     );
     expect(html).toContain('—');
+    expect(html).not.toContain('FSC');
+  });
+});
+
+// ------------------------------------------------------------
+// docs/handoff/admin.md item 17 — every remaining "X.XX FSC" price outside
+// the SKU bench. Each of these had a real USD amount (an oracle price, a
+// seller's ask, an intake fee, a redemption handling fee) rendered through
+// either a local money()-shaped helper or an inline template literal that
+// happened to copy formatFsc's exact suffix. Fixed to call formatUsd; the
+// local helpers are gone rather than kept beside it, per the same reasoning
+// as the section above: a second formatter is how these six drifted from
+// formatUsd in the first place.
+// ------------------------------------------------------------
+
+describe('MintTable — oracle price column renders USD, never FSC', () => {
+  const baseItem: ItemSummary = {
+    id: 'item-1',
+    sku_id: 'sku-1',
+    consignment_id: null,
+    consignor_id: 'consignor-1',
+    status: 'in_custody',
+    float_value: 0.062,
+    condition_grade: 'factory_new',
+    graded_at: '2026-01-01T00:00:00Z',
+    grading_notes: null,
+    photos: [],
+    authenticated_at: '2026-01-01T00:00:00Z',
+    custody_location: 'warehouse-a',
+    reserve_price_cents: null,
+    sku: {
+      id: 'sku-1',
+      brand: 'Nike',
+      model: 'Air Max 1',
+      colorway: 'Seed Grey',
+      size_us: 10,
+      market_price_cents: 26000,
+      sprite_key: null,
+      palette: null,
+      art_url: null,
+    },
+    card_id: null,
+    grade: null,
+    custody: 'warehouse',
+    custody_holder_id: null,
+    grade_source: 'flexsoar',
+    asking_price_cents: null,
+    submitted_payout: 'cash',
+    last_proof_at: null,
+  };
+
+  it('a mintable item with an oracle price: the Oracle column shows a dollar amount, never FSC', () => {
+    const html = renderToStaticMarkup(createElement(MintTable, { items: [baseItem] }));
+    expect(html).toContain(formatUsd(26000));
+    expect(html).not.toContain('FSC');
+  });
+
+  it('an unpriced item: shows the "no oracle price" flag instead of a figure, still no FSC', () => {
+    const unpriced: ItemSummary = {
+      ...baseItem,
+      sku: { ...baseItem.sku, market_price_cents: null },
+    };
+    const html = renderToStaticMarkup(createElement(MintTable, { items: [unpriced] }));
+    expect(html).toContain('no oracle price');
+    expect(html).not.toContain('FSC');
+  });
+});
+
+describe('DecisionControls — oracle and asking price hint text render USD, never FSC', () => {
+  // Both price texts render only inside the approve confirm modal
+  // (open={confirming === "approve"}), which starts closed and a static
+  // render has no way to click open (no jsdom in this suite) — so a plain
+  // render of the closed component cannot reach the bug's own text at all.
+  // oracleHint/askingNote are exported from the component for exactly this
+  // reason: they are what actually builds those strings, tested directly
+  // rather than through a DOM assertion that structurally cannot see them.
+  it('a render of the closed component mounts cleanly and shows no price text yet', () => {
+    const html = renderToStaticMarkup(
+      createElement(DecisionControls, {
+        itemId: 'item-1',
+        itemLabel: 'Nike Air Max 1 · Seed Grey · US 10',
+        askingPriceCents: 21500,
+        marketPriceCents: 26000,
+        blocked: null,
+      }),
+    );
+    expect(html).toContain('Approve and publish');
+    expect(html).not.toContain('FSC');
+  });
+
+  it('oracleHint renders the SKU oracle price in dollars, never FSC', () => {
+    expect(oracleHint(26000)).toBe(`Integer USD cents. SKU oracle price is ${formatUsd(26000)}.`);
+    expect(oracleHint(26000)).not.toContain('FSC');
+    expect(oracleHint(null)).not.toContain('FSC');
+  });
+
+  it('askingNote renders the seller\'s ask in dollars, never FSC', () => {
+    expect(askingNote(21500)).toBe(`Seller asked ${formatUsd(21500)}. Prefilled, not binding.`);
+    expect(askingNote(21500)).not.toContain('FSC');
+    expect(askingNote(null)).toBeNull();
+  });
+});
+
+describe('app/admin/submissions/page.tsx — Asking column renders USD, never FSC', () => {
+  it('the pending-review queue shows the asking price in dollars, never FSC', async () => {
+    const html = renderToStaticMarkup(await SubmissionsQueuePage());
+    expect(html).toContain(formatUsd(21500));
+    expect(html).not.toContain('FSC');
+  });
+});
+
+describe('app/admin/submissions/[itemId]/page.tsx — asking/oracle price render USD, never FSC', () => {
+  it('the header\'s Asking figure, the SKU oracle price, and the seller\'s earlier-submission Asked column are all dollar-formatted, never FSC', async () => {
+    const element = await ReviewSubmissionPage({
+      params: Promise.resolve({ itemId: 'submission-1' }),
+    });
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain(formatUsd(21500)); // header Asking, and this submission's own ask
+    expect(html).toContain(formatUsd(26000)); // SKU oracle
+    expect(html).toContain(formatUsd(8000)); // seller's earlier-submission Asked column
+    expect(html).not.toContain('FSC');
+  });
+});
+
+describe('app/admin/consignments/[id]/page.tsx — Intake fee renders USD, never FSC', () => {
+  it('the consignment detail page shows the intake fee in dollars, never FSC', async () => {
+    const element = await ConsignmentDetailPage({ params: Promise.resolve({ id: 'consignment-1' }) });
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain(formatUsd(1500));
+    expect(html).not.toContain('FSC');
+  });
+});
+
+describe('app/admin/fulfilment/page.tsx — redemption handling fee renders USD, never FSC', () => {
+  // fn_redeem_card books this fee as entry_type 'handling_fee' on asset
+  // 'currency', both legs — it was always USD, never FSC.
+  it('the warehouse queue\'s Fee column shows the handling fee in dollars, never FSC', async () => {
+    const html = renderToStaticMarkup(await FulfilmentPage());
+    expect(html).toContain(formatUsd(995));
     expect(html).not.toContain('FSC');
   });
 });

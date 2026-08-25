@@ -16,6 +16,7 @@ import { notFound } from "next/navigation";
 import { requireAdminPage } from "@/components/admin/auth";
 import { TransitionControls } from "@/components/admin/consignments/TransitionControls";
 import { statusLabel, statusTone } from "@/components/admin/consignments/transitions";
+import { formatUsd } from "@/components/card/format";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Table, TBody, THead, Td, Th, Tr } from "@/components/ui/Table";
@@ -29,11 +30,6 @@ export const metadata: Metadata = {
 function formatTimestamp(value: string | null): string {
   if (!value) return "—";
   return new Date(value).toISOString().replace("T", " ").slice(0, 16);
-}
-
-function formatMoney(cents: number | null): string {
-  if (cents == null) return "—";
-  return `${(cents / 100).toFixed(2)} FSC`;
 }
 
 /** Photos are jsonb; anything that is not an array of strings is shown as absent. */
@@ -95,7 +91,7 @@ export default async function ConsignmentDetailPage({
 
       <dl className="grid grid-cols-2 gap-2 border border-line bg-raised p-3 font-mono text-[11px] tracking-tight sm:grid-cols-4">
         <Field label="Items" value={String(consignment.item_count)} />
-        <Field label="Intake fee" value={formatMoney(consignment.intake_fee_cents)} />
+        <Field label="Intake fee" value={formatUsd(consignment.intake_fee_cents)} />
         <Field label="Consignor level" value={`L${consignment.consignor.level}`} />
         <Field label="Created" value={formatTimestamp(consignment.created_at)} />
         <Field label="Submitted" value={formatTimestamp(consignment.submitted_at)} />

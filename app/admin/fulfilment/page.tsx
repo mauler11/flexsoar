@@ -32,6 +32,7 @@ import {
 } from "@/components/admin/db-reads";
 import { MarkShippedControl } from "@/components/admin/fulfilment/MarkShippedControl";
 import { SellerHeldControls } from "@/components/admin/fulfilment/SellerHeldControls";
+import { formatUsd } from "@/components/card/format";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Table, TBody, THead, Td, Th, Tr } from "@/components/ui/Table";
@@ -418,7 +419,7 @@ function RedemptionTable({
                 {formatTimestamp(redemption.requested_at)}
               </Td>
               <Td className="text-right tabular-nums">
-                {(redemption.handling_fee_cents / 100).toFixed(2)} FSC
+                {formatUsd(redemption.handling_fee_cents)}
               </Td>
               <Td className="max-w-56 text-muted">
                 {formatAddress(redemption.shipping_address)}

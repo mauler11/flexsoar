@@ -26,16 +26,13 @@ import { toPhotoList } from "@/components/admin/grading/photos";
 import { ArtUploader } from "@/components/admin/skus/ArtUploader";
 import { DecisionControls } from "@/components/admin/submissions/DecisionControls";
 import { DeclaredGrade } from "@/components/admin/submissions/DeclaredGrade";
+import { formatUsd } from "@/components/card/format";
 import { Badge } from "@/components/ui/Badge";
 import { Table, TBody, THead, Td, Th, Tr } from "@/components/ui/Table";
 
 export const metadata: Metadata = {
   title: "Review submission — FlexSoar admin",
 };
-
-function formatCents(cents: number | null): string {
-  return cents == null ? "—" : `${(cents / 100).toFixed(2)} FSC`;
-}
 
 function formatTimestamp(value: string | null): string {
   if (!value) return "—";
@@ -106,11 +103,15 @@ export default async function ReviewSubmissionPage({
             Asking
           </p>
           <p className="font-mono text-xl tabular-nums">
-            {formatCents(submission.asking_price_cents)}
+            {submission.asking_price_cents == null
+              ? "—"
+              : formatUsd(submission.asking_price_cents)}
           </p>
           <p className="font-mono text-[10px] tracking-tight text-muted">
             paid as {submission.submitted_payout} · SKU oracle{" "}
-            {formatCents(submission.sku.market_price_cents)}
+            {submission.sku.market_price_cents == null
+              ? "—"
+              : formatUsd(submission.sku.market_price_cents)}
           </p>
         </div>
       </header>
@@ -226,7 +227,9 @@ export default async function ReviewSubmissionPage({
                         {row.status.replace(/_/g, " ")}
                       </Td>
                       <Td className="text-right tabular-nums">
-                        {formatCents(row.asking_price_cents)}
+                        {row.asking_price_cents == null
+                          ? "—"
+                          : formatUsd(row.asking_price_cents)}
                       </Td>
                       <Td className="text-muted tabular-nums">
                         {formatTimestamp(row.created_at)}

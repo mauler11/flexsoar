@@ -12,6 +12,7 @@
 
 import { useState, useTransition } from "react";
 import { batchMintAction, type BatchMintResult } from "@/app/admin/mint/actions";
+import { formatUsd } from "@/components/card/format";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -138,7 +139,7 @@ export function MintTable({ items }: { items: ItemSummary[] }) {
                     // here so the failure is expected rather than surprising.
                     <span className="text-[#E8B33A]">no oracle price</span>
                   ) : (
-                    `${(item.sku.market_price_cents / 100).toFixed(2)} FSC`
+                    formatUsd(item.sku.market_price_cents)
                   )}
                 </Td>
                 <Td>

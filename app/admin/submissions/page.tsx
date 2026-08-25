@@ -24,6 +24,7 @@ import {
   type Submission,
 } from "@/components/admin/db-reads";
 import { toPhotoList } from "@/components/admin/grading/photos";
+import { formatUsd } from "@/components/card/format";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Table, TBody, THead, Td, Th, Tr } from "@/components/ui/Table";
@@ -32,10 +33,6 @@ import { gradeFloatFromComponents } from "@/lib/db/grading";
 export const metadata: Metadata = {
   title: "Submissions — FlexSoar admin",
 };
-
-function formatCents(cents: number | null): string {
-  return cents == null ? "—" : `${(cents / 100).toFixed(2)} FSC`;
-}
 
 /** The float the declared components imply, or null when none were declared. */
 function declaredFloat(submission: Submission): number | null {
@@ -151,7 +148,9 @@ export default async function SubmissionsQueuePage() {
                     )}
                   </Td>
                   <Td className="text-right tabular-nums">
-                    {formatCents(submission.asking_price_cents)}
+                    {submission.asking_price_cents == null
+                      ? "—"
+                      : formatUsd(submission.asking_price_cents)}
                   </Td>
                   <Td className="text-muted">{submission.submitted_payout}</Td>
                   <Td className="text-muted tabular-nums">
