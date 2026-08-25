@@ -474,3 +474,41 @@ Six `numeric(3,2)` columns on `items`, plus `items_grade_components_sum`
 (float must equal the weighted sum) and `items_grade_components_complete`
 (all six or none). The grading screen branches on both codes with a sentence
 of context on top of the verbatim server message.
+
+### ~~16. Reported bug: `SkuModelForm` shows "required" on brand/model/colorway even when filled~~ — could not reproduce; regression tests added instead
+
+Task: with brand/model/colorway all filled with valid values (e.g.
+"Nike"/"Air Jordan 1"/"Chicago") on `/admin/skus/new`, all three still showed
+the red "required" error and the submit button stayed disabled with "Fix the
+marked fields first." Three named suspects — errors computed once at mount,
+an uncontrolled input feeding a stale validator, an inverted touched/dirty
+flag.
+
+**Live-tested against the running app** (`npm run dev`, Chrome via
+claude-in-chrome), not just read: typed exactly that brand/model/colorway
+into `/admin/skus/new` — errors cleared field-by-field as each was filled,
+submit enabled with no filled fields left blank, price left blank stayed
+valid. Cleared a filled field back out — its error reappeared immediately (the
+inverse direction, which a frozen-at-mount or inverted-flag bug would also
+get wrong). Opened an existing model's edit page
+(`/admin/skus/[id]`) — identity renders as read-only text, not inputs, so
+there is no re-run of the create-mode required check there; blanked the price
+field and Save changes stayed enabled. `parseDraft()` (the component's own
+validator) recomputes from live `draft` state on every render and every
+`Input` is fully controlled (`value`/`onChange` both wired through `field()`)
+— nothing here was computed once, uncontrolled, or flag-inverted in this
+build.
+
+**Not touched, since nothing was found to fix.** No behavior change in
+`SkuModelForm.tsx` — `parseDraft`, `Draft`, and `Parsed` were made named
+exports (additive) so tests can drive the validator directly, since this
+component owns no separate `lib/**` module for it to mirror. Added to
+`tests/invariants.test.ts` (203 passing, up from 191): `parseDraft` exercised
+directly for create-mode (all-filled/blank-price/single-field-blank/
+whitespace-only/refill-clears-error) and edit-mode (identity never required,
+price still optional), plus two `renderToStaticMarkup` checks confirming the
+mounted component's disabled/error state agrees.
+
+**If this resurfaces**, it did not reproduce on this branch as of this
+commit — worth checking whether the report was against a stale `.next` build
+or a since-reverted change, rather than re-reading this component fresh.
