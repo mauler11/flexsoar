@@ -77,6 +77,7 @@ import {
 import { contractErrorCode } from '../lib/db/errors';
 import { MarketTile } from '../components/market/MarketTile';
 import { SkuModelForm, parseDraft, type Draft } from '../components/admin/skus/SkuModelForm';
+import { VariantsTable } from '../components/admin/skus/VariantsTable';
 import { PricePayout } from '../components/market/intake/PricePayout';
 import { ListForm } from '../components/market/ListForm';
 import {
@@ -98,6 +99,19 @@ vi.mock('next/navigation', () => ({
     replace: () => {},
     prefetch: () => {},
   }),
+}));
+
+// SkuModelForm and VariantsTable both import Server Actions ("use server")
+// from this module at module scope. Mirrors, not imports, same reasoning as
+// the stripe webhook section below: the real module pulls in
+// requireAdminAction's Supabase/cookies() chain, which has no request
+// context under a static render.
+vi.mock('@/app/admin/skus/actions', () => ({
+  createSkuModelAction: async () => ({ ok: true, modelId: 'model-1' }),
+  updateSkuModelAction: async () => ({ ok: true }),
+  ensureSkuVariantAction: async () => ({ ok: true }),
+  getSkuFloatCurveAction: async () => ({ ok: true, bands: [] }),
+  updateSkuVariantAction: async () => ({ ok: true }),
 }));
 
 // ------------------------------------------------------------
@@ -2177,5 +2191,82 @@ describe('SkuModelForm — rendered output agrees with parseDraft', () => {
 
     const button = html.match(/<button[^>]*>Save changes<\/button>/);
     expect(button?.[0]).not.toContain('disabled=""');
+  });
+});
+
+// ------------------------------------------------------------
+// VariantsTable — the Price column and the override's "model base" text are
+// the oracle price (USD, integer cents), never FSC. FSC is earned-only store
+// credit (AGENT_RULES.md section 5/6) and is never the price of anything.
+// components/card/format.ts already draws this line (formatUsd vs formatFsc,
+// both asserted above) — this pins that VariantsTable actually calls through
+// it rather than rolling its own "X.XX FSC" string, which is exactly the bug
+// that shipped: a local money() helper duplicating formatFsc's suffix on a
+// price.
+// ------------------------------------------------------------
+
+describe('VariantsTable — price column and override helper text render USD, never FSC', () => {
+  const baseVariant: Sku = {
+    id: 'variant-1',
+    model_id: 'model-1',
+    brand: 'Nike',
+    model: 'Air Max 1',
+    colorway: 'Seed Grey',
+    size_us: 10,
+    retail_price_cents: 20000,
+    market_price_cents: 26000,
+    size_multiplier: 1.0,
+    price_override_cents: null,
+    price_confidence: 0.9,
+    priced_at: '2026-01-01T00:00:00Z',
+    demand_score: 0,
+    sprite_key: 'low-top',
+    palette: null,
+    art_url: null,
+    mint_cap: null,
+    created_at: '2026-01-01T00:00:00Z',
+  };
+
+  it('a priced model: the Price column shows a dollar-formatted price and nowhere on the page says FSC', () => {
+    const html = renderToStaticMarkup(
+      createElement(VariantsTable, {
+        modelId: 'model-1',
+        modelBrand: 'Nike',
+        modelBasePriceCents: 26000,
+        variants: [baseVariant],
+        cardCounts: { 'variant-1': 3 },
+      }),
+    );
+    expect(html).toContain(formatUsd(26000));
+    expect(html).not.toContain('FSC');
+  });
+
+  it('the override row\'s "model base" helper text is the same USD figure, not FSC', () => {
+    const overriddenVariant: Sku = { ...baseVariant, price_override_cents: 8000 };
+    const html = renderToStaticMarkup(
+      createElement(VariantsTable, {
+        modelId: 'model-1',
+        modelBrand: 'Nike',
+        modelBasePriceCents: 26000,
+        variants: [overriddenVariant],
+        cardCounts: { 'variant-1': 0 },
+      }),
+    );
+    expect(html).toContain(`model base ${formatUsd(26000)}`);
+    expect(html).not.toContain('FSC');
+  });
+
+  it('an unpriced model (modelBasePriceCents null): renders the em-dash placeholder, still no FSC', () => {
+    const html = renderToStaticMarkup(
+      createElement(VariantsTable, {
+        modelId: 'model-1',
+        modelBrand: 'Nike',
+        modelBasePriceCents: null,
+        variants: [{ ...baseVariant, market_price_cents: null }],
+        cardCounts: {},
+      }),
+    );
+    expect(html).toContain('—');
+    expect(html).not.toContain('FSC');
   });
 });

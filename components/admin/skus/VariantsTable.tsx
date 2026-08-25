@@ -31,12 +31,14 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Table, TBody, THead, Td, Th, Tr } from "@/components/ui/Table";
+import { formatUsd } from "@/components/card/format";
 import type { FloatCurveBand, Sku } from "@/lib/api/contract";
 import type { Cents, UUID } from "@/lib/db/types";
 import { FloatCurveEditor } from "./FloatCurveEditor";
 
+/** market_price_cents / base_price_cents are the oracle price — USD, never FSC. */
 function money(cents: Cents | null): string {
-  return cents == null ? "—" : `${(cents / 100).toFixed(2)} FSC`;
+  return cents == null ? "—" : formatUsd(cents);
 }
 
 interface RowDraft {

@@ -512,3 +512,57 @@ mounted component's disabled/error state agrees.
 **If this resurfaces**, it did not reproduce on this branch as of this
 commit — worth checking whether the report was against a stale `.next` build
 or a since-reverted change, rather than re-reading this component fresh.
+
+### ~~17. `VariantsTable` and the models list labelled the oracle price "FSC"~~ — fixed
+
+Bug: `VariantsTable`'s Price column and its override row's "model base" text,
+plus `app/admin/skus/page.tsx`'s Base price column, rendered
+`market_price_cents`/`base_price_cents` — the oracle price, USD cents — as
+`"260.00 FSC"`. FSC is earned-only store credit
+(`components/card/format.ts`'s own header, AGENT_RULES.md §5/§6); it is never
+the price of anything, and both files had a local `money()` helper that
+literally reimplemented `formatFsc`'s suffix on a value that was never FSC.
+
+**Fix:** both `money()` helpers now delegate to `formatUsd` (kept the
+`cents == null -> "—"` fallback each already had, since `formatUsd` itself
+has no null case). `formatFsc` was never imported by either file — this
+wasn't a wrong-helper-picked bug, it was two hand-rolled string templates
+that happened to copy `formatFsc`'s exact suffix.
+
+**Grepped the whole bench** (`app/admin/skus/**`, `components/admin/skus/**`)
+for any other `FSC`/`formatFsc` — nothing else found there. **Grepped wider
+while I was in there** (`app/admin/**`, `components/admin/**`, outside this
+task's named scope, so left unfixed and only reported): the identical
+pattern — a real USD price rendered with an `" FSC"` suffix — also appears in:
+
+- `app/admin/submissions/page.tsx:37` and `app/admin/submissions/[itemId]/page.tsx:37`
+  — same `formatCents`/local helper, used on asking/seller-declared price.
+- `app/admin/consignments/[id]/page.tsx:36` — `formatMoney`, generic money
+  display.
+- `components/admin/mint/MintTable.tsx:141` — `item.sku.market_price_cents`,
+  the exact same column this bug was about, in a different table.
+- `components/admin/submissions/DecisionControls.tsx:218,223` —
+  `marketPriceCents` (SKU oracle price) and `askingPriceCents` (seller's ask)
+  in hint/helper text.
+- `app/admin/fulfilment/page.tsx:421` — `redemption.handling_fee_cents`. Did
+  not verify whether this one is genuinely a USD fee (same bug) or a real FSC
+  amount (fine as-is) — named here rather than guessed at.
+
+Given how many call sites share this exact shape, worth asking whether a
+`money()`/`formatCents()` helper this common should just be one export from
+`components/card/format.ts` (or similar) rather than re-declared per file —
+every occurrence found here was a fresh local reimplementation of the same
+"cents to two-decimal string" logic, and the FSC suffix rode along with it
+each time.
+
+**Verification:** live-tested against the running app — the seeded "Nike Air
+Jordan 1 · Chicago" model (created while testing item 16) showed `260.00 FSC`
+on both the models list and the size table before the fix, `$260.00` after,
+confirmed in both places including the override's "model base" text.
+Regression tests added to `tests/invariants.test.ts` (206 passing, up from
+203) render `VariantsTable` with a priced model and assert the output
+contains a `formatUsd`-formatted price and never contains the string `"FSC"`
+— confirmed these fail against the pre-fix code (temporarily reverted the two
+source files via `git stash`, reran, both new tests failed with the literal
+`"260.00 FSC"` string, then restored). `npx tsc --noEmit`, `npm test`
+(206 passing), `npm run build` all clean.
