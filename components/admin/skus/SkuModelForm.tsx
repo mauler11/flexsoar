@@ -37,7 +37,7 @@ import { DEFAULT_PALETTE } from "@/lib/sprites";
 /** The glyphs the shipped sprite maps resolve. */
 const KNOWN_GLYPHS = new Set(Object.keys(DEFAULT_PALETTE));
 
-interface Draft {
+export interface Draft {
   brand: string;
   model: string;
   colorway: string;
@@ -69,11 +69,17 @@ interface ParsedCommon {
   paletteWarning: string | null;
 }
 
-type Parsed =
+export type Parsed =
   | { ok: true; common: ParsedCommon; identity: { brand: string; model: string; colorway: string } | null }
   | { ok: false; errors: Partial<Record<keyof Draft, string>> };
 
-function parseDraft(draft: Draft, isCreate: boolean): Parsed {
+/**
+ * Exported so tests can drive the validator directly: this component owns no
+ * separate lib module, and the reactivity bug class this guards against
+ * (errors frozen at mount, an inverted touched/dirty flag) shows up in this
+ * function's output, not in the DOM events that feed it.
+ */
+export function parseDraft(draft: Draft, isCreate: boolean): Parsed {
   const errors: Partial<Record<keyof Draft, string>> = {};
 
   if (isCreate) {

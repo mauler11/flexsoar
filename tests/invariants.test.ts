@@ -14,7 +14,7 @@
  * file rather than because it is still required.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
@@ -46,7 +46,14 @@ import {
   gradeFloatFromComponents,
   type GradeComponents,
 } from '../lib/db/grading';
-import { CARD_STATUSES, type Card, type CardStatus, type Sku, type User } from '../lib/db/types';
+import {
+  CARD_STATUSES,
+  type Card,
+  type CardStatus,
+  type Sku,
+  type SkuModel,
+  type User,
+} from '../lib/db/types';
 import {
   CREDIT_HOLD_MINUTES_FALLBACK,
   cashLegCents,
@@ -69,6 +76,7 @@ import {
 } from '../lib/api/contract';
 import { contractErrorCode } from '../lib/db/errors';
 import { MarketTile } from '../components/market/MarketTile';
+import { SkuModelForm, parseDraft, type Draft } from '../components/admin/skus/SkuModelForm';
 import { PricePayout } from '../components/market/intake/PricePayout';
 import { ListForm } from '../components/market/ListForm';
 import {
@@ -76,6 +84,21 @@ import {
   derivePayoutPreview,
   isValidCountryCode,
 } from '../components/market/intake/intake-config';
+
+// SkuModelForm calls useRouter() (next/navigation) unconditionally at the top
+// of the component. Outside a real app-router tree that hook throws
+// ("invariant expected app router to be mounted") rather than returning null,
+// so a static render needs this mock regardless of which branch runs.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: () => {},
+    back: () => {},
+    forward: () => {},
+    refresh: () => {},
+    replace: () => {},
+    prefetch: () => {},
+  }),
+}));
 
 // ------------------------------------------------------------
 // SQL MIRRORS
@@ -2021,5 +2044,138 @@ describe('027 — tier from the model, value from the variant (mirrors scripts/s
       overriddenVariant.price_override_cents,
     );
     expect(tierForPrice(overriddenPrice as number)).not.toBe(tierFromModel);
+  });
+});
+
+// ------------------------------------------------------------
+// SkuModelForm — identity/price validation reactivity
+// ------------------------------------------------------------
+//
+// Reported bug: with brand/model/colorway all filled, the form still showed
+// "required" on all three and refused to submit. The three named suspects —
+// errors computed once at mount, an uncontrolled input feeding a stale
+// validator, or an inverted touched/dirty flag — all show up as a *frozen*
+// parseDraft() output: it would keep returning the mount-time result no
+// matter what the draft became. parseDraft is exported from SkuModelForm.tsx
+// for exactly this reason (no separate lib module owns this logic), so these
+// drive it directly with fresh Draft objects the way the component's own
+// useState would hold them, rather than mirroring it in parallel TS.
+
+describe('SkuModelForm.parseDraft — create mode (identity required)', () => {
+  const filledDraft: Draft = {
+    brand: 'Nike',
+    model: 'Air Jordan 1',
+    colorway: 'Chicago',
+    base_price_cents: '',
+    price_confidence: '',
+    sprite_key: '',
+    palette: '',
+  };
+
+  it('all three identity fields filled, price left blank: ok — the exact repro from the bug report', () => {
+    const parsed = parseDraft(filledDraft, true);
+    expect(parsed.ok).toBe(true);
+  });
+
+  it('blank price does not block submission — an unpriced model is valid, it just cannot mint', () => {
+    const parsed = parseDraft(filledDraft, true);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.common.basePriceCents).toBeNull();
+  });
+
+  it.each(['brand', 'model', 'colorway'] as const)(
+    'blanking only %s errors that field alone and flips ok to false',
+    (blankKey) => {
+      const draft: Draft = { ...filledDraft, [blankKey]: '' };
+      const parsed = parseDraft(draft, true);
+      expect(parsed.ok).toBe(false);
+      if (parsed.ok) return;
+      expect(parsed.errors[blankKey]).toBe('required');
+      for (const otherKey of ['brand', 'model', 'colorway'] as const) {
+        if (otherKey !== blankKey) expect(parsed.errors[otherKey]).toBeUndefined();
+      }
+    },
+  );
+
+  it('whitespace-only counts as blank, since the check is against the trimmed value', () => {
+    const parsed = parseDraft({ ...filledDraft, colorway: '   ' }, true);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.errors.colorway).toBe('required');
+  });
+
+  it('parsing a blanked-then-refilled field clears its error — the validator is not frozen at an earlier draft', () => {
+    const blanked = parseDraft({ ...filledDraft, brand: '' }, true);
+    expect(blanked.ok).toBe(false);
+
+    const refilled = parseDraft({ ...filledDraft, brand: 'Adidas' }, true);
+    expect(refilled.ok).toBe(true);
+  });
+});
+
+describe('SkuModelForm.parseDraft — edit mode never re-runs the identity check', () => {
+  const editDraft = (overrides: Partial<Draft> = {}): Draft => ({
+    brand: '',
+    model: '',
+    colorway: '',
+    base_price_cents: '',
+    price_confidence: '',
+    sprite_key: '',
+    palette: '',
+    ...overrides,
+  });
+
+  it('blank brand/model/colorway does not error in edit mode — those inputs do not exist there, and 027 gives identity no update path', () => {
+    const parsed = parseDraft(
+      editDraft({ base_price_cents: '18000', price_confidence: '0.9', sprite_key: 'low-top' }),
+      false,
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.identity).toBeNull();
+  });
+
+  it('blank price is still optional in edit mode — an already-priced model can be blanked back to unpriced', () => {
+    const parsed = parseDraft(editDraft(), false);
+    expect(parsed.ok).toBe(true);
+  });
+});
+
+describe('SkuModelForm — rendered output agrees with parseDraft', () => {
+  const baseSkuModel: SkuModel = {
+    id: 'model-1',
+    brand: 'Nike',
+    model: 'Air Max 1',
+    colorway: 'Seed Grey',
+    base_price_cents: null,
+    price_confidence: 0.9,
+    priced_at: null,
+    sprite_key: 'low-top',
+    palette: null,
+    art_url: null,
+    demand_score: 0,
+    created_at: '2026-01-01T00:00:00Z',
+  };
+
+  it('create mode, fresh mount: all three identity fields start blank, so all three render "required" and submit stays disabled', () => {
+    const html = renderToStaticMarkup(createElement(SkuModelForm, { model: null }));
+    expect(html).toContain('Fix the marked fields first.');
+    expect(html.match(/required/g)?.length).toBe(3);
+    const button = html.match(/<button[^>]*>Create model<\/button>/);
+    expect(button?.[0]).toContain('disabled=""');
+  });
+
+  it('edit mode: identity renders as fixed text, never as inputs — the create-mode required check has nothing to attach to', () => {
+    const html = renderToStaticMarkup(createElement(SkuModelForm, { model: baseSkuModel }));
+    expect(html).toContain('identity is fixed after creation');
+    expect(html).not.toContain('required');
+    expect(html).not.toContain('Fix the marked fields first.');
+  });
+
+  it('edit mode with base_price_cents null: price renders blank and Save changes stays enabled', () => {
+    const html = renderToStaticMarkup(createElement(SkuModelForm, { model: baseSkuModel }));
+    const priceInput = html.match(/id="input-Oracle price \(cents\)"[^>]*value="([^"]*)"/);
+    expect(priceInput?.[1] ?? '').toBe('');
+
+    const button = html.match(/<button[^>]*>Save changes<\/button>/);
+    expect(button?.[0]).not.toContain('disabled=""');
   });
 });
