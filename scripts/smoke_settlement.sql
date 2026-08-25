@@ -4,8 +4,8 @@
 --
 -- Puts one real purchase through each quadrant of the settlement matrix
 -- against live SQL (019c + 021), asserts the platform identity after every
--- one, and exercises hold expiry. Wrapped in BEGIN ... ROLLBACK: nothing
--- persists. Safe to run against the live project.
+-- one, and exercises hold expiry, vault custody and trades. Wrapped in
+-- BEGIN ... ROLLBACK: nothing persists. Safe to run against the live project.
 --
 -- RUN IN: Supabase SQL editor, "Run without RLS" (postgres role).
 --         Buyer-identity steps impersonate inside the transaction.
@@ -23,6 +23,15 @@
 --
 -- NOTE: Q3/Q4/Q5 spend FSC that Q2 issued. There is no top-up, so the chain
 -- is the only way a test buyer can hold FSC. Do not reorder.
+--
+-- ---------------------------------------------------------------------------
+-- 027 (model/variant catalog): fixtures now create a sku_model FIRST and hang
+-- a size variant off it. skus.market_price_cents is derived and raises if
+-- written directly, so the price lives on sku_models.base_price_cents and the
+-- variant inherits it. Derived values are identical to the pre-027 fixtures
+-- (30000 and 33000), so every quadrant, tier and imbalance assertion below is
+-- unchanged. The catalog layer itself is covered by scripts/smoke_catalog.sql,
+-- not here.
 -- ============================================================================
 
 begin;
@@ -44,7 +53,15 @@ begin
     raise exception 'PREFLIGHT: % function name(s) have multiple arities. '
       'Overloads silently serve callers. Fix before trusting this run.', v_dupes;
   end if;
-  raise notice 'PREFLIGHT ok: no arity duplicates';
+
+  -- The fixtures below build a model before a variant. Without 027 they would
+  -- fail deep inside a DO block with a confusing trigger error.
+  if to_regclass('public.sku_models') is null then
+    raise exception 'PREFLIGHT: sku_models does not exist. This script requires '
+      'migration 027; use the pre-027 revision of it against an older schema.';
+  end if;
+
+  raise notice 'PREFLIGHT ok: no arity duplicates, 027 catalog present';
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -55,6 +72,29 @@ create temporary table _log  (step text, note text) on commit drop;
 create temporary table _base (currency bigint, liability bigint,
                               commission bigint) on commit drop;
 
+-- Watermark for the results grid at the bottom. The old grid filtered on
+-- settlement_ref like 'smoke_%' or a smoke order's txn, so trade and reversal
+-- transactions — which have neither — were invisible even though the
+-- assertions covered them. A cancelled sale read as a completed one. Anchoring
+-- on the ledger id instead shows everything this run wrote, and only that.
+create temporary table _mark (ledger_id bigint) on commit drop;
+insert into _mark select coalesce(max(id), 0) from ledger_entries;
+
+-- Baseline solvency. Like the identity above, this must be asserted on the
+-- DELTA. The absolute position is legitimately negative on this database:
+-- uncollateralised FSC from the dead top-up path, plus the deliberate test
+-- grant in scripts/reset_fsc_and_seed_test_balance.sql. Neither is something
+-- this run can fix, and neither is a reason to fail it. What matters is that
+-- settling twelve purchases, two trades and two unwinds does not make the
+-- position WORSE.
+create temporary table _sol (unswept bigint, liability bigint) on commit drop;
+insert into _sol select unswept_cents, credit_liability_cents
+from fn_platform_position_raw();
+
+-- Insurance only. The discipline is still to read _ids BEFORE switching role:
+-- these tables belong to postgres and an impersonated block cannot see them.
+grant select on _ids, _log, _base, _mark to authenticated;
+
 do $$
 declare
   u_seller_my uuid := gen_random_uuid();
@@ -62,6 +102,7 @@ declare
   u_buyer_a   uuid := gen_random_uuid();
   u_buyer_b   uuid := gen_random_uuid();
   u_admin     uuid := gen_random_uuid();
+  v_model     uuid;
   v_sku       uuid;
   v_tag       text := substr(replace(gen_random_uuid()::text,'-',''),1,8);
 begin
@@ -100,19 +141,30 @@ begin
   values (u_admin, u_admin, ('smoke_adm_'||v_tag)::text,
        ('smoke.admin.'||v_tag||'@example.test')::text, 'MY', true);
 
-  insert into skus (brand, model, colorway, size_us,
-                    retail_price_cents, market_price_cents, priced_at)
-  values ('SmokeBrand', 'SmokeModel '||v_tag, 'Test/Colour', 10.0,
-          20000, 30000, now())
+  -- 027: the ORACLE lives on the model. The variant derives 30000 from it, so
+  -- market_price_cents is deliberately NOT written here — doing so raises.
+  insert into sku_models (brand, model, colorway, base_price_cents, priced_at)
+  values ('SmokeBrand', 'SmokeModel '||v_tag, 'Test/Colour', 30000, now())
+  returning id into v_model;
+
+  insert into skus (brand, model, colorway, size_us, model_id, retail_price_cents)
+  values ('SmokeBrand', 'SmokeModel '||v_tag, 'Test/Colour', 10.0, v_model, 20000)
   returning id into v_sku;
+
+  if (select market_price_cents from skus where id = v_sku) <> 30000 then
+    raise exception
+      'FIXTURES: the variant derived % instead of the model''s 30000 — every '
+      'price assertion below is built on that number',
+      (select market_price_cents from skus where id = v_sku);
+  end if;
 
   insert into _ids values
     ('seller_my', u_seller_my), ('seller_us', u_seller_us),
     ('buyer_a',   u_buyer_a),   ('buyer_b',   u_buyer_b),
     ('admin',     u_admin),
-    ('sku',       v_sku);
+    ('model',     v_model),     ('sku', v_sku);
 
-  raise notice 'FIXTURES ok: 5 users (1 admin), 1 sku';
+  raise notice 'FIXTURES ok: 5 users (1 admin), 1 model, 1 size variant at 30000';
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -500,18 +552,17 @@ declare
   v_buyer_before bigint; v_seller_before bigint; v_net bigint;
 begin
   select v into v_seller from _ids where k = 'seller_us';
-  select v into v_buyer  from _ids where k = 'seller_us';
 
   -- buyer and seller must differ; use buyer_b, funded by selling to buyer_a
   select v into v_buyer from _ids where k = 'buyer_b';
 
   -- fund buyer_b with FSC: buyer_b sells a card for cash, takes credit payout
-  declare v_fund uuid; v_fund_order uuid;
+  declare v_fund uuid; v_fund_order uuid; v_buyer_a uuid;
   begin
+    select v into v_buyer_a from _ids where k = 'buyer_a';
     update users set country_code = 'SG' where id = v_buyer;
     v_fund := pg_temp.mk_listing(v_buyer, 20000, 'credit');
-    v_fund_order := fn_purchase_card(
-      v_fund, (select v from _ids where k = 'buyer_a'), 'smoke_q4_fund', 0, null);
+    v_fund_order := fn_purchase_card(v_fund, v_buyer_a, 'smoke_q4_fund', 0, null);
   end;
 
   v_buyer_before  := fn_credit_balance(v_buyer);
@@ -542,7 +593,7 @@ select pg_temp.assert_invariants('Q4 credit->credit');
 -- ---------------------------------------------------------------------------
 -- Q5  buyer pays BOTH -> seller cash. Partial settlement.
 --     This is the checkout case track/market has to build, and the one
---     nothing has ever exercised.
+--     nothing had ever exercised before this script existed.
 -- ---------------------------------------------------------------------------
 do $$
 declare
@@ -951,16 +1002,31 @@ begin
   return v_card;
 end $$;
 
--- a second SKU priced higher, so a trade can be genuinely uneven
+-- A second MODEL priced higher, so a trade can be genuinely uneven.
+--
+-- 027: this is a separate model rather than a separate size, deliberately. Two
+-- sizes of one model share a base price, so they would value identically and
+-- T2 would have no imbalance to settle.
 do $$
-declare v_sku uuid; v_tag text := substr(replace(gen_random_uuid()::text,'-',''),1,8);
+declare
+  v_model uuid;
+  v_sku   uuid;
+  v_tag   text := substr(replace(gen_random_uuid()::text,'-',''),1,8);
 begin
-  insert into skus (brand, model, colorway, size_us,
-                    retail_price_cents, market_price_cents, priced_at)
-  values ('SmokeBrand', 'SmokeModel HI '||v_tag, 'Test/High', 10.0,
-          24000, 33000, now())
+  insert into sku_models (brand, model, colorway, base_price_cents, priced_at)
+  values ('SmokeBrand', 'SmokeModel HI '||v_tag, 'Test/High', 33000, now())
+  returning id into v_model;
+
+  insert into skus (brand, model, colorway, size_us, model_id, retail_price_cents)
+  values ('SmokeBrand', 'SmokeModel HI '||v_tag, 'Test/High', 10.0, v_model, 24000)
   returning id into v_sku;
-  insert into _ids values ('sku_hi', v_sku);
+
+  if (select market_price_cents from skus where id = v_sku) <> 33000 then
+    raise exception 'TRADE FIXTURE: the high variant derived % instead of 33000',
+      (select market_price_cents from skus where id = v_sku);
+  end if;
+
+  insert into _ids values ('model_hi', v_model), ('sku_hi', v_sku);
 end $$;
 
 -- T1: an even swap. No imbalance, initiator pays the flat fee.
@@ -1059,7 +1125,7 @@ begin
   v_hi := pg_temp.mk_card(v_ib, v_sku_hi, 33000);  -- and wants dearer
 
   if fn_card_value_cents(v_hi) <= fn_card_value_cents(v_lo) then
-    raise exception 'T2: fixture SKUs did not produce an imbalance';
+    raise exception 'T2: the fixture models did not produce an imbalance';
   end if;
 
   v_ia_before := fn_credit_balance(v_ia);
@@ -1209,15 +1275,17 @@ select pg_temp.assert_invariants('T4 decline releases hold');
 do $$
 declare
   v_currency bigint; v_sweepable bigint; v_admin uuid; r record;
+  v_b_unswept bigint; v_b_liab bigint;
 begin
   select v into v_admin from _ids where k = 'admin';
+  select unswept, liability into v_b_unswept, v_b_liab from _sol;
 
   select coalesce(sum(amount_cents * direction), 0) into v_currency
   from ledger_entries where is_platform and asset = 'currency';
 
   -- fn_check_solvency, fn_platform_position and fn_record_sweep all call
-  -- fn_require_admin() internally — they refuse postgres and service_role
-  -- despite carrying a PUBLIC EXECUTE grant. Become an admin to read them.
+  -- fn_require_admin() internally — they refuse postgres and service_role.
+  -- Become an admin to read them.
   perform set_config('role', 'authenticated', true);
   perform set_config('request.jwt.claims',
     json_build_object('sub', v_admin::text, 'role', 'authenticated')::text, true);
@@ -1227,11 +1295,27 @@ begin
   -- makes variance vacuously zero. Pass null: this asserts internal
   -- consistency only. Reconciling against Stripe is an operational step.
   for r in select * from fn_check_solvency(null) loop
-    if not r.ok then
-      raise exception 'SOLVENCY: variance % — %', r.variance_cents, r.detail;
+    -- The assertion that matters: this run must not have drained the pool.
+    if r.unswept_cents < v_b_unswept then
+      raise exception
+        'SOLVENCY: this run made the position WORSE — unswept % -> %. '
+        'Cash backing outstanding FSC left the pool during settlement. %',
+        v_b_unswept, r.unswept_cents, r.detail;
     end if;
-    raise notice 'SOLVENCY ok — liability % / unswept %',
-      r.liability_cents, r.unswept_cents;
+
+    if not r.ok then
+      raise notice
+        'SOLVENCY: the ABSOLUTE position is insolvent (unswept %, liability %) '
+        'and started that way (unswept %). This run improved it by %. Known '
+        'cause: uncollateralised FSC from the dead top-up path plus the test '
+        'grant in scripts/reset_fsc_and_seed_test_balance.sql — section 3 of '
+        'that script reverses the grant and MUST be run before live keys.',
+        r.unswept_cents, r.liability_cents, v_b_unswept,
+        r.unswept_cents - v_b_unswept;
+    else
+      raise notice 'SOLVENCY ok — liability % / unswept % (was %)',
+        r.liability_cents, r.unswept_cents, v_b_unswept;
+    end if;
   end loop;
 
   select sweepable_cents into v_sweepable from fn_platform_position();
@@ -1260,12 +1344,24 @@ reset role;
 reset request.jwt.claims;
 
 select * from _log;
+
+-- Everything this run wrote to the ledger, anchored on the watermark taken
+-- before the fixtures. The previous filter (settlement_ref like 'smoke_%' or a
+-- smoke order's txn) missed trade and reversal transactions entirely, because
+-- they carry neither — a cancelled sale read as a completed one.
 select entry_type, asset, is_platform, count(*),
        sum(amount_cents * direction) as net
 from ledger_entries
-where settlement_ref like 'smoke_%'
-   or txn_id in (select txn_id from orders where settlement_ref like 'smoke_%')
+where id > (select ledger_id from _mark)
 group by 1,2,3 order by 1,2,3;
+
+-- The catalog this run built, for eyeballing against 027.
+select m.model, m.base_price_cents, s.size_us, s.market_price_cents,
+       fn_tier_for_sku(s.id) as tier,
+       (select count(*) from cards c where c.sku_id = s.id) as cards
+from sku_models m join skus s on s.model_id = m.id
+where m.brand = 'SmokeBrand'
+order by m.model, s.size_us;
 
 rollback;
 -- ============================================================================
