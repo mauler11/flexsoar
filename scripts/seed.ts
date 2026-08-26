@@ -2,11 +2,33 @@
  * scripts/seed.ts
  *
  * Walks one shoe the whole way through the pipeline against the LIVE Supabase
- * project, then prints the ledger and the provenance chain it produced.
+ * project, then prints the ledger and the provenance chain it produced. Also
+ * leaves three more fixtures behind for the admin surfaces that have no other
+ * way to be exercised against a fresh database — see ADMIN FIXTURES below.
  *
  *   consignment draft -> submitted -> in_transit -> received ->
  *   authenticating -> authenticated -> completed
- *   item graded + authenticated -> minted -> listed -> purchased
+ *   item graded + authenticated -> minted -> listed -> purchased -> redeemed
+ *
+ * ------------------------------------------------------------------
+ * ADMIN FIXTURES (027 follow-up)
+ *
+ * scripts/seed.ts used to be the only thing populating a fresh database, and
+ * it stopped at "purchased" — nothing here ever exercised /admin/submissions,
+ * /admin/consignments' mid-flow view, or /admin/fulfilment's warehouse queue.
+ * Three more things are seeded now, each unblocking one admin page:
+ *
+ *   1. The main card is REDEEMED after its purchase (fn_redeem_card), and its
+ *      item is explicitly given `custody: 'warehouse'` so the redemption
+ *      lands 'requested' rather than 'awaiting_seller' — the warehouse
+ *      "Awaiting shipment" queue on /admin/fulfilment.
+ *   2. A second, self-declared item is inserted directly with
+ *      `status: 'pending_review'`, mirroring exactly what fn_submit_listing
+ *      would write (that RPC needs a seller session this script does not
+ *      have — see TWO CLIENTS below) — the queue on /admin/submissions.
+ *   3. A second consignment is opened and advanced only to 'submitted',
+ *      left there rather than walked to 'completed' — a live row on
+ *      /admin/consignments with its TransitionControls still usable.
  *
  * Run:
  *   node --env-file=.env.local --experimental-strip-types scripts/seed.ts
@@ -51,11 +73,13 @@
  * ------------------------------------------------------------------
  * RE-RUNNABLE
  *
- * The two users and the SKU have fixed identities and are created only if
- * absent. Everything downstream — consignment, item, card, listing, order — is
+ * The two users and the SKU model + its size variants have fixed identities
+ * and are created only if absent. Everything downstream — consignment, item,
+ * card, listing, order, redemption, submission, second consignment — is
  * created fresh on each run, so every run exercises the full path end to end
  * rather than reporting that there was nothing to do. Each run therefore adds
- * one card and one settled order.
+ * one card, one settled order, one redemption, one pending_review submission,
+ * and one more consignment sitting in 'submitted'.
  *
  * The fabricated settlement_ref ("seed_pi_<n>") is numbered from the count of
  * existing seed orders. No Stripe call is made; fn_purchase_card only records
@@ -114,19 +138,26 @@ const ADMIN = {
 };
 
 /**
- * Natural key is (brand, model, colorway, size_us) — unique in 001_schema.sql.
+ * Natural key is (brand, model, colorway) — unique in 027_sku_models.sql
+ * (sku_models_identity_uidx). $180 puts the model in tier 3 (Rare:
+ * 12000..25000) via fn_tier_for_sku, which reads base_price_cents. Tier comes
+ * from this alone; the float below never touches it.
  *
- * $180 puts the SKU in tier 3 (Rare: 12000..25000). Tier comes from this base
- * price alone; the float below never touches it.
+ * Two sizes on purpose: 027's whole success metric is "models with more than
+ * one card", which is structurally impossible to measure with one size per
+ * model. US10 carries the main pipeline below; US9 carries the pending_review
+ * submission fixture, so both variants end up minted or mintable.
  */
-const SKU = {
+const SKU_MODEL = {
   brand: 'Nike',
   model: 'Air Max 1',
   colorway: 'Seed Grey',
-  size_us: 10.0,
-  market_price_cents: 18_000 as Cents,
+  base_price_cents: 18_000 as Cents,
   sprite_key: 'lowtop',
 };
+
+const MAIN_SIZE_US = 10.0;
+const SUBMISSION_SIZE_US = 9.0;
 
 /**
  * The six rubric scores a human would enter, per docs/GRADING_RUBRIC.md.
@@ -158,27 +189,76 @@ const GRADE_WEIGHTS = {
 };
 
 /**
- * Mirrors the constraint in INTEGER arithmetic, the same way
- * lib/db/grading.ts does (this script cannot import it — the contract's
- * module graph reaches next/headers). Binary FP rounds exact half-milli ties
- * down while Postgres numeric rounds them half away from zero, so an FP
- * version of this line produced floats the constraint rejects — see
- * docs/handoff/admin.md item 5. Hundredths x whole percents land exactly in
- * ten-thousandths; one half-up rounding at the end matches numeric.
+ * Mirrors the constraint (items_grade_components_sum) in INTEGER arithmetic,
+ * the same way lib/db/grading.ts does (this script cannot import it — the
+ * contract's module graph reaches next/headers). Binary FP rounds exact
+ * half-milli ties down while Postgres numeric rounds them half away from
+ * zero, so an FP version of this produced floats the constraint rejects —
+ * see docs/handoff/admin.md item 5. Hundredths x whole percents land exactly
+ * in ten-thousandths; one half-up rounding at the end matches numeric.
+ *
+ * Shared by both graded fixtures below (the main item's admin grade and the
+ * submission's seller-declared grade) so the tricky rounding lives in one
+ * place rather than two copies that could drift apart.
  */
-const GRADED_FLOAT: FloatValue = (() => {
+function floatFromComponents(components: typeof GRADE_COMPONENTS): FloatValue {
   const tenThousandths =
-    Math.round(GRADE_COMPONENTS.outsole * 100) * Math.round(GRADE_WEIGHTS.outsole * 100) +
-    Math.round(GRADE_COMPONENTS.midsole * 100) * Math.round(GRADE_WEIGHTS.midsole * 100) +
-    Math.round(GRADE_COMPONENTS.creasing * 100) * Math.round(GRADE_WEIGHTS.creasing * 100) +
-    Math.round(GRADE_COMPONENTS.upper * 100) * Math.round(GRADE_WEIGHTS.upper * 100) +
-    Math.round(GRADE_COMPONENTS.heel * 100) * Math.round(GRADE_WEIGHTS.heel * 100) +
-    Math.round(GRADE_COMPONENTS.accessories * 100) * Math.round(GRADE_WEIGHTS.accessories * 100);
+    Math.round(components.outsole * 100) * Math.round(GRADE_WEIGHTS.outsole * 100) +
+    Math.round(components.midsole * 100) * Math.round(GRADE_WEIGHTS.midsole * 100) +
+    Math.round(components.creasing * 100) * Math.round(GRADE_WEIGHTS.creasing * 100) +
+    Math.round(components.upper * 100) * Math.round(GRADE_WEIGHTS.upper * 100) +
+    Math.round(components.heel * 100) * Math.round(GRADE_WEIGHTS.heel * 100) +
+    Math.round(components.accessories * 100) * Math.round(GRADE_WEIGHTS.accessories * 100);
   return (Math.floor(tenThousandths / 10) + (tenThousandths % 10 >= 5 ? 1 : 0)) / 1000;
-})();
+}
+
+const GRADED_FLOAT: FloatValue = floatFromComponents(GRADE_COMPONENTS);
 
 /** What the consignor asks for the card. */
 const LIST_PRICE_CENTS: Cents = 21_500;
+
+// ------------------------------------------------------------
+// ADMIN FIXTURES — see the ADMIN FIXTURES note at the top of this file
+// ------------------------------------------------------------
+
+/** Handling fee recorded on the redemption below (013's ledger shape). */
+const REDEMPTION_FEE_CENTS: Cents = 500;
+
+/** shipping_address is jsonb; app/admin/fulfilment/page.tsx's formatAddress() reads these keys. */
+const SHIP_TO = {
+  name: 'Seed Buyer',
+  line1: '1 Jalan Seed',
+  line2: '',
+  city: 'Kuala Lumpur',
+  state: 'WP',
+  postal_code: '50000',
+  country: 'MY',
+};
+
+/**
+ * A more worn pair than the main fixture, so the two submissions in the
+ * pipeline are visibly distinct rather than copy-pasted numbers.
+ */
+const SUBMISSION_GRADE_COMPONENTS = {
+  outsole: 0.65,
+  midsole: 0.55,
+  creasing: 0.6,
+  upper: 0.7,
+  heel: 0.6,
+  accessories: 0.3,
+};
+
+const SUBMISSION_FLOAT: FloatValue = floatFromComponents(SUBMISSION_GRADE_COMPONENTS);
+
+/** Placeholder https URLs — fn_submit_listing's own guard needs >= 4, all https. */
+const SUBMISSION_PHOTOS = [
+  'https://picsum.photos/seed/flexsoar-seed-sub-1/800',
+  'https://picsum.photos/seed/flexsoar-seed-sub-2/800',
+  'https://picsum.photos/seed/flexsoar-seed-sub-3/800',
+  'https://picsum.photos/seed/flexsoar-seed-sub-4/800',
+];
+
+const SUBMISSION_ASKING_PRICE_CENTS: Cents = 16_000;
 
 /** The happy path through fn_advance_consignment's CASE block, in order. */
 const CONSIGNMENT_PATH: ConsignmentStatus[] = [
@@ -421,45 +501,106 @@ async function ensureAdminSession(): Promise<{
   return { client, userId: authUserId as UUID };
 }
 
-async function ensureSku(): Promise<{ id: UUID; market_price_cents: Cents }> {
+/**
+ * Direct table write, service-role — NOT the fn_create_sku_model RPC.
+ * fn_create_sku_model calls fn_require_admin(), which resolves the caller
+ * through auth.uid(); the service key has none, so an RPC call would be
+ * refused with "admin privileges required" exactly like fn_mint_card and
+ * fn_advance_consignment are (see TWO CLIENTS above). This mirrors the same
+ * exception the file's header already documents for tables with no usable
+ * RPC path from a plain script.
+ *
+ * Never writes skus.market_price_cents anywhere in this file — see
+ * ensureSkuVariant() below. base_price_cents here is the ORACLE.
+ */
+async function ensureSkuModel(): Promise<{ id: UUID; base_price_cents: Cents }> {
+  const found = await supabase
+    .from('sku_models')
+    .select('id, base_price_cents')
+    .eq('brand', SKU_MODEL.brand)
+    .eq('model', SKU_MODEL.model)
+    .eq('colorway', SKU_MODEL.colorway)
+    .maybeSingle();
+
+  if (found.error) throw new Error(`look up sku_model: ${found.error.message}`);
+
+  if (found.data) {
+    const model = found.data as { id: UUID; base_price_cents: Cents };
+    detail(`${SKU_MODEL.brand} ${SKU_MODEL.model} "${SKU_MODEL.colorway}" already exists — reused`);
+    return model;
+  }
+
+  const created = ok(
+    await supabase
+      .from('sku_models')
+      .insert({
+        brand: SKU_MODEL.brand,
+        model: SKU_MODEL.model,
+        colorway: SKU_MODEL.colorway,
+        base_price_cents: SKU_MODEL.base_price_cents,
+        price_confidence: 0.9,
+        priced_at: new Date().toISOString(),
+        demand_score: 42.5,
+        sprite_key: SKU_MODEL.sprite_key,
+      })
+      .select('id, base_price_cents')
+      .single(),
+    'create sku_model',
+  ) as { id: UUID; base_price_cents: Cents };
+
+  detail(`${SKU_MODEL.brand} ${SKU_MODEL.model} "${SKU_MODEL.colorway}" created`);
+  return created;
+}
+
+/**
+ * A size variant beneath a model. Same service-role-vs-RPC reasoning as
+ * ensureSkuModel(): fn_ensure_sku_variant is safe for any signed-in seller,
+ * but it still requires a real session (fn_current_user_id()), which the
+ * service key does not have — so this is a direct table write too.
+ *
+ * Supplies model_id and size_us ONLY (plus the placeholder identity columns
+ * trg_sku_variant_derive immediately overwrites, mirroring
+ * fn_ensure_sku_variant's own insert shape). market_price_cents is NEVER
+ * supplied — trg_sku_variant_derive derives it from the model's
+ * base_price_cents x size_multiplier and RAISES on a direct write.
+ */
+async function ensureSkuVariant(
+  modelId: UUID,
+  sizeUs: number,
+): Promise<{ id: UUID; market_price_cents: Cents }> {
   const found = await supabase
     .from('skus')
     .select('id, market_price_cents')
-    .eq('brand', SKU.brand)
-    .eq('model', SKU.model)
-    .eq('colorway', SKU.colorway)
-    .eq('size_us', SKU.size_us)
+    .eq('model_id', modelId)
+    .eq('size_us', sizeUs)
     .maybeSingle();
 
-  if (found.error) throw new Error(`look up sku: ${found.error.message}`);
+  if (found.error) throw new Error(`look up variant US${sizeUs}: ${found.error.message}`);
 
   if (found.data) {
-    const sku = found.data as { id: UUID; market_price_cents: Cents };
-    detail(`${SKU.brand} ${SKU.model} "${SKU.colorway}" US${SKU.size_us} already exists — reused`);
-    return sku;
+    const variant = found.data as { id: UUID; market_price_cents: Cents };
+    detail(`US${sizeUs} variant already exists — reused`);
+    return variant;
   }
 
   const created = ok(
     await supabase
       .from('skus')
       .insert({
-        brand: SKU.brand,
-        model: SKU.model,
-        colorway: SKU.colorway,
-        size_us: SKU.size_us,
-        market_price_cents: SKU.market_price_cents,
+        brand: '',
+        model: '',
+        colorway: '',
+        model_id: modelId,
+        size_us: sizeUs,
+        size_multiplier: 1.0,
         retail_price_cents: 15_000,
-        price_confidence: 0.9,
-        priced_at: new Date().toISOString(),
-        demand_score: 42.5,
-        sprite_key: SKU.sprite_key,
       })
       .select('id, market_price_cents')
       .single(),
-    'create sku',
+    `create variant US${sizeUs}`,
   ) as { id: UUID; market_price_cents: Cents };
 
-  detail(`${SKU.brand} ${SKU.model} "${SKU.colorway}" US${SKU.size_us} created`);
+  detail(`US${sizeUs} variant created — market price ${money(created.market_price_cents)} (derived)`);
   return created;
 }
 
@@ -495,9 +636,18 @@ async function main(): Promise<void> {
   const admin = await ensureAdminSession();
   detail(`session established, users.id ${admin.userId}`);
 
-  step('Ensuring the SKU');
-  const sku = await ensureSku();
-  detail(`base oracle price ${money(sku.market_price_cents)} — this alone sets the tier`);
+  step('Ensuring the SKU model');
+  const model = await ensureSkuModel();
+  detail(`base oracle price ${money(model.base_price_cents)} — this alone sets the tier`);
+
+  step('Ensuring the size variants');
+  const mainVariant = await ensureSkuVariant(model.id, MAIN_SIZE_US);
+  const submissionVariant = await ensureSkuVariant(model.id, SUBMISSION_SIZE_US);
+  detail(
+    `US${MAIN_SIZE_US} market price ${money(mainVariant.market_price_cents)}, ` +
+      `US${SUBMISSION_SIZE_US} ${money(submissionVariant.market_price_cents)} — both derived from the model`,
+  );
+  detail('two sizes under one model: "models with more than one card" now has a real case');
 
   // ---- consignment --------------------------------------------------
   step('Opening a consignment in draft');
@@ -518,14 +668,16 @@ async function main(): Promise<void> {
   detail(`consignment ${consignment.id} (draft)`);
 
   step('Adding the physical item, ungraded');
+  detail('custody: warehouse — this item is physically authenticated below, not seller-held');
   const item = ok(
     await supabase
       .from('items')
       .insert({
-        sku_id: sku.id,
+        sku_id: mainVariant.id,
         consignment_id: consignment.id,
         consignor_id: consignor.id,
         status: 'pending_intake',
+        custody: 'warehouse',
         photos: [],
       })
       .select('id, status')
@@ -639,7 +791,7 @@ async function main(): Promise<void> {
   };
 
   detail(`card ${card.id}`);
-  detail(`tier ${card.tier} from the ${money(sku.market_price_cents)} base price, not from the float`);
+  detail(`tier ${card.tier} from the model's ${money(model.base_price_cents)} base price, not from the float`);
   detail(`float ${Number(card.float_value).toFixed(3)} copied off the item, immutable from here`);
   detail(`mint #${card.mint_number}, percentile ${card.float_percentile ?? '—'}`);
 
@@ -711,6 +863,36 @@ async function main(): Promise<void> {
     `gross ${money(order.gross_cents)} — fee ${money(order.fee_cents)} ` +
       `(${order.fee_bps} bps, from the SELLER's level) = net ${money(order.net_cents)}`,
   );
+
+  // ---- redemption -----------------------------------------------------
+  // Admin fixture 1/3 — see the ADMIN FIXTURES note at the top of this file.
+  // fn_redeem_card is ownership-checked by p_user_id, not by auth.uid() (it
+  // is not in 005's admin-guarded set), so the service-role client can call
+  // it directly, same as fn_list_card and fn_purchase_card above.
+  step('Redeeming the card via fn_redeem_card');
+  detail("burning the card back into a physical shoe the buyer now owns");
+  detail("item.custody is 'warehouse', so this lands 'requested', not 'awaiting_seller'");
+  const redemptionId = ok(
+    await supabase.rpc('fn_redeem_card', {
+      p_card_id: cardId,
+      p_user_id: buyer.id,
+      p_address: SHIP_TO,
+      p_fee_cents: REDEMPTION_FEE_CENTS,
+    }),
+    'fn_redeem_card',
+  ) as UUID;
+
+  const redemption = ok(
+    await supabase
+      .from('redemptions')
+      .select('id, status, handling_fee_cents, requested_at')
+      .eq('id', redemptionId)
+      .single(),
+    'read redemption',
+  ) as { id: UUID; status: string; handling_fee_cents: Cents; requested_at: Timestamptz };
+
+  detail(`redemption ${redemption.id} (${redemption.status}), fee ${money(redemption.handling_fee_cents)}`);
+  detail("unblocks /admin/fulfilment's warehouse 'Awaiting shipment' queue");
 
   // ---- ledger -------------------------------------------------------
   heading('LEDGER — every entry touching this card, oldest first');
@@ -867,11 +1049,109 @@ async function main(): Promise<void> {
     } (${handleOf(finalCard.owner_id, false)}, card is ${finalCard.status})`,
   );
 
+  // ---- pending_review submission -------------------------------------
+  // Admin fixture 2/3. Direct table write, not the fn_submit_listing RPC:
+  // that function resolves the caller through fn_current_user_id() (auth.uid()),
+  // and CONSIGNOR has no real auth.users row behind it (see FIXED IDENTITIES
+  // above) — only ADMIN does. This insert matches fn_submit_listing's own
+  // column list and values exactly (013_seller_custody.sql), just written
+  // directly under the service key instead of through a seller session.
+  heading('SUBMISSION — a self-declared item awaiting review');
+
+  const submission = ok(
+    await supabase
+      .from('items')
+      .insert({
+        sku_id: submissionVariant.id,
+        consignor_id: consignor.id,
+        custody: 'seller',
+        custody_holder_id: consignor.id,
+        grade_source: 'seller_declared',
+        status: 'pending_review',
+        float_value: SUBMISSION_FLOAT,
+        graded_by: consignor.id,
+        graded_at: new Date().toISOString(),
+        grading_notes: 'seed: seller-declared, worn but honest — see the component scores',
+        photos: SUBMISSION_PHOTOS,
+        asking_price_cents: SUBMISSION_ASKING_PRICE_CENTS,
+        submitted_payout: 'credit',
+        last_proof_at: new Date().toISOString(),
+        grade_outsole: SUBMISSION_GRADE_COMPONENTS.outsole,
+        grade_midsole: SUBMISSION_GRADE_COMPONENTS.midsole,
+        grade_creasing: SUBMISSION_GRADE_COMPONENTS.creasing,
+        grade_upper: SUBMISSION_GRADE_COMPONENTS.upper,
+        grade_heel: SUBMISSION_GRADE_COMPONENTS.heel,
+        grade_accessories: SUBMISSION_GRADE_COMPONENTS.accessories,
+      })
+      .select('id, status, float_value')
+      .single(),
+    'create submission',
+  ) as { id: UUID; status: string; float_value: FloatValue };
+
+  detail(`item ${submission.id} (${submission.status}), declared float ${Number(submission.float_value).toFixed(3)}`);
+  detail(`asking ${money(SUBMISSION_ASKING_PRICE_CENTS)}, US${SUBMISSION_SIZE_US} of the same model`);
+  detail('unblocks /admin/submissions — the pending_review queue');
+
+  // ---- second consignment, left mid-flow ------------------------------
+  // Admin fixture 3/3. Advanced only to 'submitted' via the same admin
+  // session and RPC the main pipeline above uses, then left there — the
+  // main pipeline's own consignment reaches 'completed' in this same run,
+  // so without this one /admin/consignments would have nothing mid-flow to
+  // show TransitionControls against.
+  heading('SECOND CONSIGNMENT — left in submitted, not walked to completed');
+
+  const secondConsignment = ok(
+    await supabase
+      .from('consignments')
+      .insert({
+        consignor_id: consignor.id,
+        status: 'draft',
+        item_count: 1,
+        intake_fee_cents: 0,
+        notes: 'seed script: intentionally left mid-flow for the admin bench',
+      })
+      .select('id, status')
+      .single(),
+    'create second consignment',
+  ) as { id: UUID; status: ConsignmentStatus };
+
+  const secondItem = ok(
+    await supabase
+      .from('items')
+      .insert({
+        sku_id: mainVariant.id,
+        consignment_id: secondConsignment.id,
+        consignor_id: consignor.id,
+        status: 'pending_intake',
+        custody: 'warehouse',
+        photos: [],
+      })
+      .select('id')
+      .single(),
+    'create second consignment item',
+  ) as { id: UUID };
+
+  const advancedSecond = await admin.client.rpc('fn_advance_consignment', {
+    p_id: secondConsignment.id,
+    p_to: 'submitted',
+    p_actor: consignor.id,
+    p_note: 'seed: draft -> submitted',
+  });
+  if (advancedSecond.error) {
+    throw new Error(`fn_advance_consignment (second) draft -> submitted: ${advancedSecond.error.message}`);
+  }
+
+  detail(`consignment ${secondConsignment.id} (submitted), item ${secondItem.id} (pending_intake)`);
+  detail('unblocks /admin/consignments — a mid-flow row with TransitionControls still live');
+
   heading('DONE');
-  console.log(`  card      ${cardId}`);
-  console.log(`  listing   ${listingId}`);
-  console.log(`  order     ${orderId}`);
-  console.log(`  re-run to walk another shoe through; the users and SKU are reused.\n`);
+  console.log(`  card                ${cardId}`);
+  console.log(`  listing             ${listingId}`);
+  console.log(`  order               ${orderId}`);
+  console.log(`  redemption          ${redemptionId}`);
+  console.log(`  submission          ${submission.id}`);
+  console.log(`  second consignment  ${secondConsignment.id}`);
+  console.log(`  re-run to walk another shoe through; the users and SKU model are reused.\n`);
 }
 
 main().catch((thrown: unknown) => {

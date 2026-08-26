@@ -12,6 +12,124 @@ with the credit-ledger and art_url work below.
 
 ## Open
 
+### 18. `scripts/seed.ts` fixed (027 broke it completely) + three admin fixtures added; `renameSkuModel()` added answering admin.md item 14's rename ask
+
+**Part 1 — `scripts/seed.ts` was fully broken.** It did a raw `.insert()` into
+`skus` with no `model_id` (NOT NULL as of 027) and `market_price_cents` set
+directly (derived as of 027, the trigger raises) — the script could not
+populate a database at all, blocking a fresh deploy and every admin-track
+live-verification that needs seed data. Fixed:
+
+- `ensureSku()` replaced by `ensureSkuModel()` (writes `sku_models`,
+  `base_price_cents` is the oracle) and `ensureSkuVariant()` (writes `skus`
+  with `model_id` + `size_us` only — never `market_price_cents`, which
+  `trg_sku_variant_derive` derives). Both are direct table writes under the
+  service-role client, **not** the `fn_create_sku_model` /
+  `fn_ensure_sku_variant` RPCs — both RPCs need a real session
+  (`fn_require_admin()` / `fn_current_user_id()`) the service key does not
+  have, same reasoning the file's own header already gives for every other
+  direct write in it.
+- The one model (`Nike Air Max 1 "Seed Grey"`) now carries **two size
+  variants** (US9, US10) — "models with more than one card" (027's own
+  success metric) now has a real case to measure, not a structural zero.
+- Every downstream fixture (item, card, listing, order, provenance) rewired
+  onto the resulting variant id. Live-relevant assertions at the end of the
+  script (exactly one open provenance hop, ledger nets to zero per txn) are
+  unaffected — checked by re-reading the script's own logic, not by running
+  it against a live project (no `.env.local` in this pass; see the note at
+  the bottom of this item).
+
+**Also extended so three admin pages that previously had nothing to check
+against a fresh database now do:**
+
+| Fixture | What it is | Unblocks |
+|---|---|---|
+| The main card is **redeemed** after purchase (`fn_redeem_card`, called service-role — it's ownership-checked by `p_user_id`, not `auth.uid()`, so it is not in 005's admin-guarded set) | One `requested`, unshipped redemption. Required explicitly setting `custody: 'warehouse'` on the main item — `items.custody`'s column default was changed to `'seller'` by 019b, so the un-fixed script's warehouse-authenticated item was silently defaulting to seller custody, which would have produced an `'awaiting_seller'` redemption instead once anything redeemed it | `/admin/fulfilment`'s warehouse "Awaiting shipment" queue |
+| A second item inserted directly with `status: 'pending_review'`, `grade_source: 'seller_declared'`, `custody: 'seller'` — the exact column/value shape `fn_submit_listing` (013) writes, just via service role instead of a seller session (no real `auth.users` row exists for the seed consignor — see FIXED IDENTITIES in the script) | One pending_review submission, on the second (US9) size variant | `/admin/submissions` |
+| A second consignment, advanced via `fn_advance_consignment` only to `'submitted'` and left there (the main pipeline's own consignment reaches `'completed'` in the same run) | One mid-flow consignment | `/admin/consignments`'s list and its per-row `TransitionControls` |
+
+`npx tsc --noEmit` clean after the rewrite.
+
+**Not live-verified — AGENT_RULES.md section 2 ("Never write to the live
+database... Writing is not [fine]") rules out actually running
+`node scripts/seed.ts`, named per section 8 and section 12 rather than
+claimed.** `.env.local` exists in this worktree; the reason for not running
+it is the hard rule, not a missing credential. Everything above is checked
+by re-reading the migration files and the script's own logic (constraint
+definitions, trigger bodies, the exact RPC signatures) and by `npx tsc
+--noEmit`, not by execution. Whoever next runs it (or is authorized to) should
+confirm: the float-from-components integer arithmetic for the new submission
+fixture rounds to the same value Postgres's `items_grade_components_sum`
+constraint expects (worked by hand here, not executed); and that
+`fn_redeem_card`'s address/fee parameters need no shape this pass missed.
+
+**Part 2 — `renameSkuModel()` added, answering half of admin.md item 14**
+(the other half — `retail_price_cents`/`demand_score`/`mint_cap` per-size —
+is untouched here; that ask still stands). New export:
+
+```ts
+renameSkuModel(modelId: UUID, input: RenameSkuModelInput): Promise<SkuModel>
+// RenameSkuModelInput = { brand?: string; model?: string; colorway?: string }
+```
+
+Direct table write under `sku_models_admin_write` (same guard shape as
+`updateSkuModel()`), deliberately its own type rather than adding these three
+columns to `UpdateSkuModelInput` — a rename is a different decision from an
+oracle-price edit, and merging the two types would let a caller rename a
+model while only meaning to reprice it. Client-side validation before any
+query runs: at least one field must be supplied, and whichever ARE supplied
+must be non-blank after trimming (`SKU_MODEL_IDENTITY_REQUIRED`, the same
+code `fn_create_sku_model` uses for the equivalent create-time check).
+
+**A rename that collides with `sku_models_identity_uidx` (another model
+already has that brand/model/colorway) now fails with a new mapped code,
+`SKU_MODEL_IDENTITY_CONFLICT`, instead of surfacing the generic 23505 →
+`WRONG_STATUS` the `CODE_MAP` fallback would otherwise give it** (that code
+is borrowed from the listings/cards "already in that state" case and reads
+wrong for an identity collision between two different rows). New message
+rule in `lib/db/errors.ts` matches Postgres's own `sku_models_identity_uidx`
+constraint-name text, ahead of the generic 23505 entry. This collision is
+also *expected*, not just handled: it is exactly how a future duplicate-merge
+tool would discover two rows describe the same shoe. That merge tool
+(actually moving the losing model's variants onto the survivor) is **not**
+built here — the task was explicit that only the rename export was wanted.
+
+**The schema question the task asked me to check rather than route around:
+does variant identity (`skus.brand/model/colorway`) propagate on a rename?
+Yes — through the EXISTING path, not a new one.** Traced by reading
+`027_sku_models.sql` itself (not verified against the live project —
+AGENT_RULES.md section 8):
+
+1. `renameSkuModel()`'s `UPDATE sku_models` fires `trg_sku_model_propagate`
+   (`AFTER UPDATE ... WHEN (old.* IS DISTINCT FROM new.*)` — a rename
+   qualifies) → `fn_sync_sku_variants(new.id)`.
+2. That function's `UPDATE skus SET art_url = ..., sprite_key = ..., ...`
+   does **not** name `brand`/`model`/`colorway` in its `SET` list.
+3. But `trg_sku_variant_derive` is `BEFORE UPDATE ON skus` with **no** `WHEN`
+   clause, so it fires on every row that update touches regardless of which
+   columns were in the `SET` list — and it unconditionally runs `new.brand :=
+   v_m.brand; new.model := v_m.model; new.colorway := v_m.colorway;`,
+   reading `v_m` fresh (the rename already committed earlier in the same
+   transaction).
+4. So every sibling variant's identity copy gets overwritten to the new
+   value as a side effect of step 2, even though step 2 never names those
+   columns. This is an interaction between two trigger functions, not a
+   documented guarantee — if a future migration adds a `WHEN` clause to
+   `trg_sku_variant_derive`, this stops being true, and nothing currently
+   tests it.
+
+No schema change requested — the existing propagation path already covers
+the case the task raised. `renameSkuModel()`'s own doc comment in
+`lib/api/contract.ts` has the same trace, for whoever changes either trigger
+next.
+
+**Files changed:** `scripts/seed.ts` (rewritten for 027 + three admin
+fixtures), `lib/api/contract.ts` (`RenameSkuModelInput`,
+`renameSkuModel()`, `SKU_MODEL_IDENTITY_CONFLICT`, sanctioned-extensions
+header note), `lib/db/errors.ts` (one new message rule).
+
+---
+
 ### 17. 027 (SKU model/variant split): contract layer updated; upsertSku can no longer write market_price_cents or create a SKU — BLOCKING ask for track/admin on SkuForm.tsx
 
 Task: 027_sku_models.sql (applied live, migration file now in this worktree)

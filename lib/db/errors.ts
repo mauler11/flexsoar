@@ -249,6 +249,15 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   // and 'size % is not a whole or half size'.
   { pattern: /is outside the supported range/i, code: 'INVALID_SKU_SIZE' },
   { pattern: /is not a whole or half size/i, code: 'INVALID_SKU_SIZE' },
+
+  // sku_models_identity_uidx (027_sku_models.sql) — renameSkuModel()'s direct
+  // table write hits this constraint by name in Postgres's own 23505 message
+  // when the new (brand, model, colorway) triple already belongs to another
+  // model. Checked ahead of the generic 23505 CODE_MAP entry below, which
+  // would otherwise read this as WRONG_STATUS — a code borrowed from the
+  // listings/cards "already in that state" conflict and wrong for an
+  // identity collision between two different rows.
+  { pattern: /sku_models_identity_uidx/i, code: 'SKU_MODEL_IDENTITY_CONFLICT' },
 ];
 
 /**

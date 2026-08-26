@@ -78,6 +78,20 @@
  *     sku_models.base_price_cents (what fn_tier_for_sku actually reads),
  *     not skus.market_price_cents — those two only agree when a variant has
  *     no price_override and a 1.000 size_multiplier.
+ *   027 follow-up (docs/handoff/admin.md item 14, the rename half): new
+ *     renameSkuModel(), a direct table write under sku_models_admin_write
+ *     (same guard shape as updateSkuModel(), which deliberately excludes
+ *     brand/model/colorway — see UpdateSkuModelInput's doc comment, unchanged
+ *     here). New ContractErrorCode member SKU_MODEL_IDENTITY_CONFLICT for a
+ *     rename that collides with another model's (brand, model, colorway) —
+ *     sku_models_identity_uidx — mapped instead of a raw 23505. Variant
+ *     identity (skus.brand/model/colorway) propagates to every size on a
+ *     rename through the EXISTING path (trg_sku_model_propagate ->
+ *     fn_sync_sku_variants -> an UPDATE on skus, which unconditionally
+ *     re-fires trg_sku_variant_derive's `new.brand/model/colorway := v_m.*`
+ *     on every row it touches, not just the columns fn_sync_sku_variants'
+ *     own SET list names) — verified by reading 027_sku_models.sql itself,
+ *     not by probing the live project; see renameSkuModel()'s doc comment.
  * along with their query/input types and new ContractErrorCode members.
  * Additive only: nothing that existed before behaves differently.
  *
@@ -343,6 +357,17 @@ export type ContractErrorCode =
    * (createSkuModel) then the variant (ensureSkuVariant).
    */
   | 'SKU_CREATION_REQUIRES_MODEL'
+  /**
+   * sku_models_identity_uidx (027_sku_models.sql) — renameSkuModel()'s new
+   * (brand, model, colorway) triple already belongs to a DIFFERENT model.
+   * Postgres 23505 on that constraint, mapped here instead of the generic
+   * CODE_MAP fallback for 23505 (WRONG_STATUS — borrowed from the
+   * listings/cards "already in that state" case, and misleading for an
+   * identity collision). This is the expected way a duplicate-merge tool
+   * would discover two rows describe the same shoe; renameSkuModel()'s own
+   * doc comment has the full context.
+   */
+  | 'SKU_MODEL_IDENTITY_CONFLICT'
   | 'UNKNOWN';
 
 export class ContractError extends Error {
@@ -898,6 +923,24 @@ export interface UpdateSkuModelInput {
   /** Char -> hex map. Validate against the 9 sprite glyphs before saving. */
   palette?: Json | null;
   demand_score?: number;
+}
+
+/**
+ * renameSkuModel() input. Separate from UpdateSkuModelInput on purpose: that
+ * type deliberately excludes these three columns (see its doc comment and
+ * docs/handoff/admin.md item 14) because a rename is a different decision
+ * from an oracle-price edit, and giving it its own type keeps a caller from
+ * accidentally renaming a model while only meaning to reprice it.
+ *
+ * All three are optional so a caller can fix one field (a colorway typo)
+ * without restating the other two — but at least one must be supplied, and
+ * whichever ARE supplied must be non-blank after trimming; renameSkuModel()
+ * checks both itself, client-side, before touching the database.
+ */
+export interface RenameSkuModelInput {
+  brand?: string;
+  model?: string;
+  colorway?: string;
 }
 
 /**
@@ -2826,6 +2869,100 @@ export async function updateSkuModel(
       throw new ContractError(
         'FORBIDDEN',
         `sku_model ${modelId} exists but the update wrote nothing — the session is not an admin`,
+        { modelId },
+      );
+    }
+    throw new ContractError('NOT_FOUND', `sku_model ${modelId} not found`, { modelId });
+  }
+  return result.data as SkuModel;
+}
+
+/**
+ * Rename a model's brand / model / colorway. Direct table write under
+ * sku_models_admin_write, same guard shape as updateSkuModel() — there is no
+ * RPC for this (docs/handoff/admin.md item 14 filed exactly this gap).
+ *
+ * WHAT THIS DOES NOT DO: merge two models. sku_models_identity_uidx means a
+ * rename that lands on an identity another model already has FAILS with
+ * SKU_MODEL_IDENTITY_CONFLICT rather than combining them — that failure is
+ * how a future duplicate-merge tool would discover "AJ1 Chicago" and
+ * "Air Jordan 1 Retro High OG Chicago" describe the same shoe, but actually
+ * merging them (moving the losing model's variants onto the survivor, then
+ * deleting it) is unbuilt, is not this function's job, and is not added
+ * here — see 027_sku_models.sql's own "APP-LAYER FOLLOW-UPS" note.
+ *
+ * VARIANT IDENTITY PROPAGATES ON RENAME, THROUGH THE EXISTING PATH — verified
+ * by reading 027_sku_models.sql, not by probing the live project:
+ *   1. This UPDATE changes sku_models.brand/model/colorway, which fires
+ *      trg_sku_model_propagate (AFTER UPDATE, `when (old.* is distinct from
+ *      new.*)` — a rename qualifies).
+ *   2. That trigger calls fn_sync_sku_variants(new.id), which runs
+ *      `UPDATE skus SET art_url = ..., sprite_key = ..., ... WHERE model_id =
+ *      ...`. Its own SET list does not mention brand/model/colorway.
+ *   3. But trg_sku_variant_derive is a BEFORE UPDATE trigger on skus with NO
+ *      `when` clause, so it fires on EVERY update to a matched row —
+ *      including this one — and unconditionally runs
+ *      `new.brand := v_m.brand; new.model := v_m.model; new.colorway :=
+ *      v_m.colorway;` before the row is written, reading v_m fresh (the
+ *      rename already committed within the same transaction, being an
+ *      earlier statement in it).
+ *   4. So every sibling variant's brand/model/colorway copy is overwritten
+ *      to the NEW identity as a side effect of step 2's update, even though
+ *      fn_sync_sku_variants never names those columns itself.
+ * This is an interaction between two functions, not a documented contract —
+ * if a future migration adds a `when` clause to trg_sku_variant_derive or
+ * changes fn_sync_sku_variants' WHERE clause, this stops being true. It has
+ * NOT been verified against the live project (AGENT_RULES.md section 8) —
+ * only read against the migration file.
+ *
+ * @returns the full model row as written.
+ * @throws FORBIDDEN, NOT_FOUND, SKU_MODEL_IDENTITY_REQUIRED (a supplied
+ *         field is blank after trimming, or none was supplied at all),
+ *         SKU_MODEL_IDENTITY_CONFLICT (the new triple belongs to another
+ *         model already — sku_models_identity_uidx).
+ */
+export async function renameSkuModel(
+  modelId: UUID,
+  input: RenameSkuModelInput,
+): Promise<SkuModel> {
+  const columns: { brand?: string; model?: string; colorway?: string } = {};
+  for (const [key, value] of Object.entries(input) as [keyof RenameSkuModelInput, string | undefined][]) {
+    if (value === undefined) continue;
+    const trimmed = value.trim();
+    if (trimmed === '') {
+      throw new ContractError(
+        'SKU_MODEL_IDENTITY_REQUIRED',
+        `renameSkuModel(): ${key} was supplied but is blank after trimming`,
+        { modelId, input },
+      );
+    }
+    columns[key] = trimmed;
+  }
+  if (Object.keys(columns).length === 0) {
+    throw new ContractError(
+      'SKU_MODEL_IDENTITY_REQUIRED',
+      'renameSkuModel(): supply at least one of brand, model, colorway',
+      { modelId, input },
+    );
+  }
+
+  const supabase = await createServerSupabase();
+
+  const result = await supabase
+    .from('sku_models')
+    .update(columns)
+    .eq('id', modelId)
+    .select(SKU_MODEL_COLUMNS)
+    .maybeSingle();
+
+  if (result.error) fail(result.error, 'sku_models');
+  if (!result.data) {
+    // Same RLS-silence disambiguation as updateSkuModel()/upsertSku().
+    const exists = await supabase.from('sku_models').select('id').eq('id', modelId).maybeSingle();
+    if (exists.data) {
+      throw new ContractError(
+        'FORBIDDEN',
+        `sku_model ${modelId} exists but the rename wrote nothing — the session is not an admin`,
         { modelId },
       );
     }
