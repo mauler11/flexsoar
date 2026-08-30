@@ -29,7 +29,7 @@ export default async function MarketLayout({
   const me = meId ? await getUser({ id: meId }).catch(() => null) : null;
 
   const navItems: MarketNavItem[] = [
-    { href: "/", label: "Market" },
+    { href: "/market", label: "Market" },
     { href: "/list", label: "List" },
     ...(me
       ? [
@@ -80,7 +80,11 @@ export default async function MarketLayout({
         </main>
 
         <footer className="border-t border-line py-4 text-center font-mono text-[9px] uppercase tracking-tight text-muted">
-          FlexSoar · Market — mint, list, settle
+          <nav className="flex flex-col sm:flex-row items-center justify-center gap-3">
+            <Link href="/terms" className="hover:text-foreground">Terms</Link>
+            <Link href="/privacy" className="hover:text-foreground">Privacy</Link>
+            <span>FlexSoar · Market — mint, list, settle</span>
+          </nav>
         </footer>
       </ToastProvider>
     </div>

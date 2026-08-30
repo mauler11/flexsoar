@@ -2580,3 +2580,479 @@ describe('app/admin/fulfilment/page.tsx — redemption handling fee renders USD,
     expect(html).not.toContain('FSC');
   });
 });
+
+// ------------------------------------------------------------
+// New static pages — landing, terms, privacy, market
+// ------------------------------------------------------------
+
+// Mock fs for page-level static renders that read docs/
+vi.mock('fs', () => ({
+  default: {
+    readFileSync: vi.fn((path: string) => {
+      if (path.endsWith('TERMS.md')) {
+        return `# FlexSoar — Terms of Service
+
+Last updated: 26/08/2026
+
+## 1. Who we are
+
+FlexSoar is operated by William Imohi.
+
+You can reach us at info@flexsoar.net.
+
+By creating an account or using flexsoar.net, you agree to these Terms. If you do not agree, do not use the service.
+
+## 2. What FlexSoar is
+
+FlexSoar is a marketplace for authenticated secondhand sneakers.
+
+Every pair listed on FlexSoar is represented by a Card. A Card is a digital record of ownership of one specific physical pair of shoes. Cards can be bought, sold and traded on FlexSoar. The holder of a Card may at any time redeem it — meaning the Card is destroyed and we ship the physical shoes to them.
+
+A Card is a claim on a specific, identified pair of shoes. It is not:
+
+- a security, share, unit, investment product or collective investment scheme
+- a cryptocurrency, token, or blockchain asset
+- money, e-money, stored value, or a payment instrument
+- a fractional interest in anything — one Card, one pair, always
+
+There is no chance, randomisation, loot box, pack, crate or wager mechanic anywhere on FlexSoar, and there never will be. Every transaction is a purchase or exchange of an identified item at a known price.`;
+      }
+      if (path.endsWith('PRIVACY.md')) {
+        return `# FlexSoar — Privacy Policy / Dasar Privasi
+
+Last updated / Kemas kini terakhir: 27/08/2026
+
+---
+
+# English
+
+## 1. Who we are
+
+FlexSoar is operated by William Imohi.
+
+For anything about your personal data, contact **info@flexsoar.net**.
+
+This notice explains what we collect, why, who we share it with, and what you can ask us to do about it. It is issued under the Personal Data Protection Act 2010.
+
+## 2. What we collect
+
+**When you create an account**
+- Email address
+- Your chosen handle (this is public)
+- Country of residence — this determines whether we can pay you
+
+**When you list shoes**
+- Photographs of your shoes
+- Your own condition assessment and notes
+- Your asking price
+- Tracking numbers for parcels you send us
+- Contact details you give us for courier coordination
+
+**When you buy or sell**
+- Transaction records: what, when, how much
+- Payment status. We never see or store your card number — payments are handled by our payment provider and card details go directly to them
+- Amounts we owe you and payment records
+
+**When you redeem a Card**
+- Your shipping address
+- Contact details for the courier
+
+**Automatically**
+- Basic technical data: IP address, browser type, pages visited
+- Cookies needed to keep you signed in
+
+We do not collect identity documents, dates of birth, or financial account details, unless we tell you separately why we need them and you agree.
+
+## 3. Why we use it
+
+- To run your account and keep you signed in
+- To publish your listings and show your public handle and holdings
+- To process purchases, trades and redemptions
+- To pay you what you are owed
+- To ship shoes to you and coordinate with couriers
+- To review submissions and check for counterfeits
+- To email you about your transactions — sales, approvals, shipping, payouts. These are service emails, not marketing. You cannot opt out of them while you have an active account, because they are how the service works
+- To detect fraud, prevent abuse, and investigate disputes
+- To meet legal, tax and accounting obligations
+
+We do not sell your personal data, and we do not share it for advertising.
+
+---
+
+# Bahasa Malaysia
+
+## 1. Siapa kami
+
+FlexSoar dikendalikan oleh William Imohi.
+
+Untuk sebarang perkara berkaitan data peribadi anda, hubungi **info@flexsoar.net**.
+
+Notis ini menerangkan apa yang kami kumpulkan, mengapa, dengan siapa kami berkongsi, dan apa yang boleh anda minta kami lakukan mengenainya. Notis ini dikeluarkan di bawah Akta Perlindungan Data Peribadi 2010.
+
+## 2. Apa yang kami kumpulkan
+
+**Apabila anda membuka akaun**
+- Alamat e-mel
+- Nama pengguna pilihan anda (ini bersifat awam)
+- Negara kediaman — ini menentukan sama ada kami boleh membayar anda
+
+**Apabila anda menyenaraikan kasut**
+- Gambar kasut anda
+- Penilaian keadaan dan nota anda sendiri
+- Harga permintaan anda
+- Nombor penjejakan bagi bungkusan yang anda hantar kepada kami
+- Butiran perhubungan yang anda berikan untuk penyelarasan kurier
+
+**Apabila anda membeli atau menjual**
+- Rekod transaksi: apa, bila, berapa
+- Status pembayaran. Kami tidak pernah melihat atau menyimpan nombor kad anda — pembayaran dikendalikan oleh penyedia pembayaran kami dan butiran kad dihantar terus kepada mereka
+- Jumlah yang kami hutang kepada anda dan rekod pembayaran
+
+**Apabila anda menebus Kad**
+- Alamat penghantaran anda
+- Butiran perhubungan untuk kurier
+
+**Secara automatik**
+- Data teknikal asas: alamat IP, jenis pelayar, halaman yang dilawati
+- Kuki yang diperlukan untuk mengekalkan log masuk anda
+
+Kami tidak mengumpul dokumen pengenalan diri, tarikh lahir, atau butiran akaun kewangan, melainkan kami memberitahu anda secara berasingan mengapa kami memerlukannya dan anda bersetuju.`;
+      }
+      return '';
+    }),
+  },
+  readFileSync: vi.fn((path: string) => {
+    if (path.endsWith('TERMS.md')) {
+      return `# FlexSoar — Terms of Service
+
+Last updated: 26/08/2026
+
+## 1. Who we are
+
+FlexSoar is operated by William Imohi.
+
+You can reach us at info@flexsoar.net.
+
+By creating an account or using flexsoar.net, you agree to these Terms. If you do not agree, do not use the service.
+
+## 2. What FlexSoar is
+
+FlexSoar is a marketplace for authenticated secondhand sneakers.
+
+Every pair listed on FlexSoar is represented by a Card. A Card is a digital record of ownership of one specific physical pair of shoes. Cards can be bought, sold and traded on FlexSoar. The holder of a Card may at any time redeem it — meaning the Card is destroyed and we ship the physical shoes to them.
+
+A Card is a claim on a specific, identified pair of shoes. It is not:
+
+- a security, share, unit, investment product or collective investment scheme
+- a cryptocurrency, token, or blockchain asset
+- money, e-money, stored value, or a payment instrument
+- a fractional interest in anything — one Card, one pair, always
+
+There is no chance, randomisation, loot box, pack, crate or wager mechanic anywhere on FlexSoar, and there never will be. Every transaction is a purchase or exchange of an identified item at a known price.`;
+    }
+    if (path.endsWith('PRIVACY.md')) {
+      return `# FlexSoar — Privacy Policy / Dasar Privasi
+
+Last updated / Kemas kini terakhir: 27/08/2026
+
+---
+
+# English
+
+## 1. Who we are
+
+FlexSoar is operated by William Imohi.
+
+For anything about your personal data, contact **info@flexsoar.net**.
+
+This notice explains what we collect, why, who we share it with, and what you can ask us to do about it. It is issued under the Personal Data Protection Act 2010.
+
+## 2. What we collect
+
+**When you create an account**
+- Email address
+- Your chosen handle (this is public)
+- Country of residence — this determines whether we can pay you
+
+**When you list shoes**
+- Photographs of your shoes
+- Your own condition assessment and notes
+- Your asking price
+- Tracking numbers for parcels you send us
+- Contact details you give us for courier coordination
+
+**When you buy or sell**
+- Transaction records: what, when, how much
+- Payment status. We never see or store your card number — payments are handled by our payment provider and card details go directly to them
+- Amounts we owe you and payment records
+
+**When you redeem a Card**
+- Your shipping address
+- Contact details for the courier
+
+**Automatically**
+- Basic technical data: IP address, browser type, pages visited
+- Cookies needed to keep you signed in
+
+We do not collect identity documents, dates of birth, or financial account details, unless we tell you separately why we need them and you agree.
+
+## 3. Why we use it
+
+- To run your account and keep you signed in
+- To publish your listings and show your public handle and holdings
+- To process purchases, trades and redemptions
+- To pay you what you are owed
+- To ship shoes to you and coordinate with couriers
+- To review submissions and check for counterfeits
+- To email you about your transactions — sales, approvals, shipping, payouts. These are service emails, not marketing. You cannot opt out of them while you have an active account, because they are how the service works
+- To detect fraud, prevent abuse, and investigate disputes
+- To meet legal, tax and accounting obligations
+
+We do not sell your personal data, and we do not share it for advertising.
+
+---
+
+# Bahasa Malaysia
+
+## 1. Siapa kami
+
+FlexSoar dikendalikan oleh William Imohi.
+
+Untuk sebarang perkara berkaitan data peribadi anda, hubungi **info@flexsoar.net**.
+
+Notis ini menerangkan apa yang kami kumpulkan, mengapa, dengan siapa kami berkongsi, dan apa yang boleh anda minta kami lakukan mengenainya. Notis ini dikeluarkan di bawah Akta Perlindungan Data Peribadi 2010.
+
+## 2. Apa yang kami kumpulkan
+
+**Apabila anda membuka akaun**
+- Alamat e-mel
+- Nama pengguna pilihan anda (ini bersifat awam)
+- Negara kediaman — ini menentukan sama ada kami boleh membayar anda
+
+**Apabila anda menyenaraikan kasut**
+- Gambar kasut anda
+- Penilaian keadaan dan nota anda sendiri
+- Harga permintaan anda
+- Nombor penjejakan bagi bungkusan yang anda hantar kepada kami
+- Butiran perhubungan yang anda berikan untuk penyelarasan kurier
+
+**Apabila anda membeli atau menjual**
+- Rekod transaksi: apa, bila, berapa
+- Status pembayaran. Kami tidak pernah melihat atau menyimpan nombor kad anda — pembayaran dikendalikan oleh penyedia pembayaran kami dan butiran kad dihantar terus kepada mereka
+- Jumlah yang kami hutang kepada anda dan rekod pembayaran
+
+**Apabila anda menebus Kad**
+- Alamat penghantaran anda
+- Butiran perhubungan untuk kurier
+
+**Secara automatik**
+- Data teknikal asas: alamat IP, jenis pelayar, halaman yang dilawati
+- Kuki yang diperlukan untuk mengekalkan log masuk anda
+
+Kami tidak mengumpul dokumen pengenalan diri, tarikh lahir, atau butiran akaun kewangan, melainkan kami memberitahu anda secara berasingan mengapa kami memerlukannya dan anda bersetuju.`;
+    }
+    return '';
+  }),
+}));
+
+// Mock remark/remark-html for static page markdown rendering
+vi.mock('remark', () => ({
+  remark: () => ({
+    use: () => ({
+      processSync: (content: string) => ({
+        toString: () => content
+          .replace(/^# (.*)$/gm, '<h1>$1</h1>')
+          .replace(/^## (.*)$/gm, '<h2>$1</h2>')
+          .replace(/^\*\s(.*)$/gm, '<li>$1</li>')
+          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'),
+      }),
+    }),
+  }),
+}));
+
+vi.mock('remark-html', () => ({ default: () => {} }));
+
+// Mock next/navigation for page components that use usePathname
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: () => {},
+    back: () => {},
+    forward: () => {},
+    refresh: () => {},
+    replace: () => {},
+    prefetch: () => {},
+  }),
+  usePathname: () => '/',
+  useSearchParams: () => new URLSearchParams(),
+}));
+
+// Mock Supabase/cookies for market page
+vi.mock('@/lib/supabase/server', () => ({
+  createServerSupabase: vi.fn(() => ({
+    from: vi.fn(() => ({
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          order: vi.fn(() => Promise.resolve({ data: [], error: null })),
+        })),
+      })),
+    })),
+    auth: {
+      getUser: vi.fn(() => Promise.resolve({ data: { user: null }, error: null })),
+    },
+  })),
+}));
+
+// Mock getPlatformConfig, getListings, getSkus for market page
+vi.mock('@/lib/api/contract', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/api/contract')>();
+  return {
+    ...actual,
+    getPlatformConfig: async () => ({ show_numeric_float: false }),
+    getListings: async () => [],
+    getSkus: async () => [],
+    getConsignment: async () => ({
+      id: 'consignment-1',
+      consignor_id: 'consignor-1',
+      consignor: { id: 'consignor-1', handle: 'sneakerhead', level: 2 },
+      status: 'in_review',
+      item_count: 1,
+      intake_fee_cents: 1500,
+      submitted_at: '2026-01-01T00:00:00Z',
+      received_at: null,
+      completed_at: null,
+      notes: null,
+      created_at: '2026-01-01T00:00:00Z',
+      items: [],
+      events: [],
+    }),
+    getRedemptions: async () => [
+      {
+        id: 'redemption-1',
+        card_id: 'card-1',
+        item_id: 'item-1',
+        user_id: 'redeemer-1',
+        handling_fee_cents: 995,
+        shipping_address: { name: 'A. Buyer', line1: '1 Market St', city: 'SF', country: 'US' },
+        status: 'requested',
+        carrier: null,
+        tracking_number: null,
+        requested_at: '2026-01-01T00:00:00Z',
+        shipped_at: null,
+        card: {
+          id: 'card-1',
+          mint_number: 4,
+          float_value: 0.062,
+          sku: { brand: 'Nike', model: 'Air Max 1', colorway: 'Seed Grey', size_us: 10 },
+        },
+        item: { id: 'item-1', status: 'redemption_hold', custody_location: 'warehouse-a' },
+        redeemer: { id: 'redeemer-1', handle: 'buyer1', level: 1 },
+        fulfiller: null,
+      },
+    ],
+  };
+});
+
+// Mock currentUserId to return null (signed out)
+vi.mock('@/app/(market)/queries', () => ({
+  currentUserId: async () => null,
+}));
+
+// Import page components after mocks
+import LandingPage from '@/app/page';
+import TermsPage from '@/app/terms/page';
+import PrivacyPage from '@/app/privacy/page';
+import MarketPage from '@/app/(market)/market/page';
+
+describe('Landing page (/) — signed out render', () => {
+  it('renders without crashing and contains the consign message', async () => {
+    const element = await LandingPage();
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain('Can I sell here?');
+    expect(html).toContain('YES. Listing is open.');
+    expect(html).toContain('Malaysian consignors keep the shoes until they sell');
+  });
+
+  it('answers the three questions in order', async () => {
+    const element = await LandingPage();
+    const html = renderToStaticMarkup(element);
+    const whatIsThis = html.indexOf('What is this?');
+    const canISell = html.indexOf('Can I sell here?');
+    const isThisReal = html.indexOf('Is this real?');
+    expect(whatIsThis).toBeLessThan(canISell);
+    expect(canISell).toBeLessThan(isThisReal);
+  });
+
+  it('includes footer links to /terms and /privacy', async () => {
+    const element = await LandingPage();
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain('href="/terms"');
+    expect(html).toContain('href="/privacy"');
+  });
+
+  it('has Enter the market CTA linking to /market', async () => {
+    const element = await LandingPage();
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain('href="/market"');
+    expect(html).toContain('Enter the market');
+  });
+});
+
+describe('Terms page (/terms) — signed out render', () => {
+  it('renders without crashing and contains Terms content', async () => {
+    const element = await TermsPage();
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain('Terms of Service');
+    expect(html).toContain('Who we are');
+    expect(html).toContain('What FlexSoar is');
+  });
+
+  it('includes footer navigation links', async () => {
+    const element = await TermsPage();
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain('href="/"');
+    expect(html).toContain('href="/market"');
+    expect(html).toContain('href="/privacy"');
+  });
+});
+
+describe('Privacy page (/privacy) — signed out render', () => {
+  it('renders without crashing and contains Privacy content', async () => {
+    const element = await PrivacyPage();
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain('Privacy Policy');
+    expect(html).toContain('Who we are');
+    expect(html).toContain('What we collect');
+  });
+
+  it('renders both English and Bahasa Malaysia sections', async () => {
+    const element = await PrivacyPage();
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain('English');
+    expect(html).toContain('Bahasa Malaysia');
+    expect(html).toContain('Siapa kami');
+    expect(html).toContain('Apa yang kami kumpulkan');
+  });
+
+  it('includes footer navigation links', async () => {
+    const element = await PrivacyPage();
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain('href="/"');
+    expect(html).toContain('href="/market"');
+    expect(html).toContain('href="/terms"');
+  });
+});
+
+describe('Market page (/market) — signed out render', () => {
+  it('renders without crashing', async () => {
+    const element = await MarketPage({ searchParams: Promise.resolve({}) });
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain('Market');
+    expect(html).toContain('Level-gated early access');
+  });
+
+  it('shows empty state when no listings', async () => {
+    const element = await MarketPage({ searchParams: Promise.resolve({}) });
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain('Nothing listed yet');
+  });
+});
