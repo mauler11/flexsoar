@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/Button";
 export const metadata: Metadata = {
   title: "FlexSoar — Authenticated Secondhand Sneakers",
   description:
-    "Buy, sell, and trade authenticated sneakers. Every card represents a real pair in our vault. List your shoes — we cover authentication, grading, and shipping.",
+    "Buy, sell, and trade authenticated sneakers. Every card represents a real pair in our vault. List your shoes — we cover photography, vault storage, and shipping to the buyer.",
 };
 
 export default function LandingPage() {
@@ -79,8 +79,11 @@ export default function LandingPage() {
                   If you have shoes to sell, you can list them on FlexSoar.
                   Malaysian consignors keep the shoes until they sell — you only
                   ship after a sale, using the instructions we send you. We cover
-                  authentication, grading, photography, vault storage, and shipping
-                  to the buyer. There are no upfront costs to list.
+                  photography, vault storage, and shipping to the buyer.
+                  The initial review is documentary (based on your photos).
+                  Physical grading happens when shoes reach our vault.
+                  There are no upfront costs to list — you pay shipping to the vault
+                  after the sale, from the proceeds.
                 </p>
                 <p>
                   You set the asking price. When it sells, you ship within 48
