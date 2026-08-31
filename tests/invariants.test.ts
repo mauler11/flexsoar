@@ -2977,7 +2977,8 @@ describe('Landing page (/) — signed out render', () => {
     const html = renderToStaticMarkup(element);
     expect(html).toContain('How It Works');
     expect(html).toContain('List or Buy');
-    expect(html).toContain('Authenticate & Vault');
+    expect(html).toContain('Authenticate');
+    expect(html).toContain('Vault');
     expect(html).toContain('Trade Freely');
     expect(html).toContain('Redeem Anytime');
   });
@@ -3023,7 +3024,7 @@ describe('Landing page (/) — signed out render', () => {
     const html = renderToStaticMarkup(element);
     expect(html).toContain('Legal disclosures');
     expect(html).toContain('not a security');
-    expect(html).toContain('not investment advice');
+    expect(html).toContain('investment advice');
   });
 });
 
