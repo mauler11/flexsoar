@@ -2995,6 +2995,18 @@ describe('Landing page (/) — signed out render', () => {
     expect(html).toContain('href="/market"');
     expect(html).toContain('Enter the market');
   });
+
+  it('does not claim FlexSoar covers consignor shipping to vault (matches TERMS.md 4.6)', async () => {
+    const element = await LandingPage();
+    const html = renderToStaticMarkup(element);
+    // TERMS.md 4.6: "You arrange and pay for shipping to our vault using a tracked service."
+    // Landing page must not say we cover/pay for shipping TO the vault.
+    expect(html).not.toContain('cover.*ship'); // no "cover shipping" or "covers shipping"
+    expect(html).not.toContain('we pay.*ship'); // no "we pay for shipping"
+    expect(html).not.toContain('we cover.*shipping'); // no "we cover shipping"
+    // It should correctly state we cover shipping TO THE BUYER
+    expect(html).toContain('shipping to the buyer');
+  });
 });
 
 describe('Terms page (/terms) — signed out render', () => {
