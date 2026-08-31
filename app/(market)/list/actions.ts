@@ -19,6 +19,10 @@ import {
   submitListing,
   setCountry,
   getUser,
+  listSkuModels,
+  createSkuModel,
+  ensureSkuVariant,
+  getSkuModel,
   ContractError,
 } from "@/lib/api/contract";
 import { gradeFloatFromComponents } from "@/lib/db/grading";
@@ -112,22 +116,41 @@ export async function getUploadTargetAction(input: {
 }
 
 // ------------------------------------------------------------
-// The "not listed" path
+// Find or create SKU model + variant (replaces dead SKU request flow)
 // ------------------------------------------------------------
 
+export interface SkuModelMatch {
+  modelId: string;
+  brand: string;
+  model: string;
+  colorway: string;
+  basePriceCents: number | null;
+  variantId: string | null;
+  sizeUs: number | null;
+}
+
+export interface FindOrCreateResult {
+  skuId: string;
+  model: SkuModelMatch;
+  isNewModel: boolean;
+  isUnpriced: boolean;
+}
+
 /**
- * Pending handoff M2 (sku_requests). There is no backend table or function to
- * record a request, and the RPC seam that used to fake it is gone, so this
- * validates the form and then says exactly that — nothing is silently dropped.
+ * Fuzzy-match against sku_models. If a close match exists, return it (and
+ * ensure the size variant). If nothing fits, create the model (no price —
+ * sellers never set the oracle) and the variant, all in one call.
+ *
+ * This replaces the dead "request a SKU" ledger. The submission proceeds
+ * either way, exactly as it already does for the seeded SKU today.
  */
-export async function fileSkuRequestAction(
+export async function findOrCreateSkuModelAction(
   formData: FormData,
-): Promise<ActionResult<{ requestId: string }>> {
+): Promise<ActionResult<FindOrCreateResult>> {
   const brand = String(formData.get("brand") ?? "").trim();
   const model = String(formData.get("model") ?? "").trim();
   const colorway = String(formData.get("colorway") ?? "").trim() || null;
   const sizeRaw = String(formData.get("size") ?? "").trim();
-  const notes = String(formData.get("notes") ?? "").trim().slice(0, 1000);
 
   if (!brand || !model) {
     return { ok: false, code: "INVALID", message: "Brand and model are required." };
@@ -136,14 +159,185 @@ export async function fileSkuRequestAction(
   if (sizeRaw && (!Number.isFinite(sizeUs) || sizeUs! <= 0)) {
     return { ok: false, code: "INVALID", message: "Size must be a number greater than zero." };
   }
+  if (sizeUs !== null && (sizeUs < 3 || sizeUs > 20 || sizeUs * 2 !== Math.floor(sizeUs * 2))) {
+    return { ok: false, code: "INVALID", message: "Size must be a whole or half size between 3 and 20." };
+  }
 
-  return {
-    ok: false,
-    code: "REQUEST_LEDGER_PENDING",
-    message:
-      "The SKU request ledger isn't wired yet (handoff M2) — nothing was recorded. " +
-      "Pick a listed shoe from the catalog, or contact support about pricing this one.",
-  };
+  const searchTerm = [brand, model, colorway].filter(Boolean).join(" ");
+
+  try {
+    // 1) Fuzzy search existing models
+    const models = await listSkuModels({ search: searchTerm, limit: 10 });
+
+    // Score matches: exact brand+model+colorway > brand+model > brand > partial
+    let bestMatch: (typeof models)[0] | null = null;
+    let bestScore = -1;
+
+    const norm = (s: string) => s.toLowerCase().trim();
+    const nBrand = norm(brand);
+    const nModel = norm(model);
+    const nColorway = norm(colorway ?? "");
+
+    for (const m of models) {
+      let score = 0;
+      const mb = norm(m.brand);
+      const mm = norm(m.model);
+      const mc = norm(m.colorway);
+
+      if (mb === nBrand) score += 10;
+      if (mm === nModel) score += 10;
+      if (nColorway && mc === nColorway) score += 10;
+      if (mb.includes(nBrand) || nBrand.includes(mb)) score += 3;
+      if (mm.includes(nModel) || nModel.includes(mm)) score += 3;
+      if (nColorway && (mc.includes(nColorway) || nColorway.includes(mc))) score += 3;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = m;
+      }
+    }
+
+    // Threshold: require at least brand + model match (score >= 20)
+    if (bestMatch && bestScore >= 20) {
+      // Ensure variant for the requested size
+      let variantId: string | null = null;
+      if (sizeUs !== null) {
+        variantId = await ensureSkuVariant(bestMatch.id, sizeUs);
+      }
+      return {
+        ok: true,
+        skuId: variantId ?? bestMatch.id,
+        model: {
+          modelId: bestMatch.id,
+          brand: bestMatch.brand,
+          model: bestMatch.model,
+          colorway: bestMatch.colorway,
+          basePriceCents: bestMatch.base_price_cents,
+          variantId,
+          sizeUs,
+        },
+        isNewModel: false,
+        isUnpriced: bestMatch.base_price_cents === null,
+      };
+    }
+
+    // 2) No suitable match — create model (no base price) + variant
+    const modelId = await createSkuModel(brand, model, colorway ?? "", null);
+    let variantId: string | null = null;
+    if (sizeUs !== null) {
+      variantId = await ensureSkuVariant(modelId, sizeUs);
+    }
+    return {
+      ok: true,
+      skuId: variantId ?? modelId,
+      model: {
+        modelId,
+        brand,
+        model,
+        colorway: colorway ?? "",
+        basePriceCents: null,
+        variantId,
+        sizeUs,
+      },
+      isNewModel: true,
+      isUnpriced: true,
+    };
+  } catch (thrown) {
+    if (thrown instanceof ContractError) {
+      return {
+        ok: false,
+        code: "SUBMIT_FAILED",
+        message: thrown.message,
+      };
+    }
+    return {
+      ok: false,
+      code: "SUBMIT_FAILED",
+      message: thrown instanceof Error ? thrown.message : "could not find or create SKU",
+    };
+  }
+}
+
+// ------------------------------------------------------------
+// Search SKU models for fuzzy-match display (used by SkuModelFinder)
+// ------------------------------------------------------------
+
+export interface SkuModelSearchResult {
+  models: Array<{
+    id: string;
+    brand: string;
+    model: string;
+    colorway: string;
+    basePriceCents: number | null;
+    variantCount: number;
+    cardCount: number;
+  }>;
+}
+
+/**
+ * Search sku_models for fuzzy-match display. Returns top 5 scored matches
+ * without creating anything. Used by SkuModelFinder to show "close matches"
+ * as the seller types.
+ */
+export async function searchSkuModelsAction(
+  formData: FormData,
+): Promise<ActionResult<SkuModelSearchResult>> {
+  const brand = String(formData.get("brand") ?? "").trim();
+  const model = String(formData.get("model") ?? "").trim();
+  const colorway = String(formData.get("colorway") ?? "").trim() || null;
+
+  if (!brand && !model) {
+    return { ok: true, models: [] };
+  }
+
+  const searchTerm = [brand, model, colorway].filter(Boolean).join(" ");
+
+  try {
+    const models = await listSkuModels({ search: searchTerm, limit: 10 });
+
+    const norm = (s: string) => s.toLowerCase().trim();
+    const nBrand = norm(brand);
+    const nModel = norm(model);
+    const nColorway = norm(colorway ?? "");
+
+    const scored = models.map((m) => {
+      let score = 0;
+      const mb = norm(m.brand);
+      const mm = norm(m.model);
+      const mc = norm(m.colorway);
+
+      if (mb === nBrand) score += 10;
+      if (mm === nModel) score += 10;
+      if (nColorway && mc === nColorway) score += 10;
+      if (mb.includes(nBrand) || nBrand.includes(mb)) score += 3;
+      if (mm.includes(nModel) || nModel.includes(mm)) score += 3;
+      if (nColorway && (mc.includes(nColorway) || nColorway.includes(mc))) score += 3;
+
+      return {
+        id: m.id,
+        brand: m.brand,
+        model: m.model,
+        colorway: m.colorway,
+        basePriceCents: m.base_price_cents,
+        variantCount: m.variant_count,
+        cardCount: m.card_count,
+        score,
+      };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+
+    return {
+      ok: true,
+      models: scored.slice(0, 5).map(({ score, ...rest }) => rest),
+    };
+  } catch (thrown) {
+    return {
+      ok: false,
+      code: "SEARCH_FAILED",
+      message: thrown instanceof Error ? thrown.message : "model search failed",
+    };
+  }
 }
 
 // ------------------------------------------------------------

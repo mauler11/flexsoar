@@ -18,7 +18,7 @@ import { useMemo, useState, useTransition } from "react";
 import type { Sku } from "@/lib/db/types";
 import { Button } from "@/components/ui/Button";
 import { SkuPicker } from "@/components/market/intake/SkuPicker";
-import { SkuRequestForm } from "@/components/market/intake/SkuRequestForm";
+import { SkuModelFinder } from "@/components/market/intake/SkuModelFinder";
 import { PhotoUploader } from "@/components/market/intake/PhotoUploader";
 import { ConditionWizard } from "@/components/market/intake/ConditionWizard";
 import { PricePayout } from "@/components/market/intake/PricePayout";
@@ -67,8 +67,18 @@ export function IntakeWizard({
 }: IntakeWizardProps) {
   const [step, setStep] = useState<StepIndex>(0);
   const [selectedSku, setSelectedSku] = useState<Sku | null>(null);
-  const [requestingMissing, setRequestingMissing] = useState(false);
-  const [requestId, setRequestId] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<{
+    modelId: string;
+    brand: string;
+    model: string;
+    colorway: string;
+    basePriceCents: number | null;
+    variantId: string | null;
+    sizeUs: number | null;
+  } | null>(null);
+  const [isNewModel, setIsNewModel] = useState(false);
+  const [isUnpricedModel, setIsUnpricedModel] = useState(false);
+  const [findingModel, setFindingModel] = useState(false);
   const [photos, setPhotos] = useState<IntakePhoto[]>([]);
   const [answers, setAnswers] = useState<Partial<GradeComponents>>({});
   const [priceCents, setPriceCents] = useState<number | null>(null);
@@ -97,7 +107,7 @@ export function IntakeWizard({
 
   const canNext = (() => {
     switch (step) {
-      case 0: return selectedSku != null || requestingMissing;
+      case 0: return selectedSku != null;
       case 1: return photos.filter((p) => p.url.startsWith("https://")).length >= REQUIRED_PHOTO_COUNT;
       case 2: return declaredFloat != null;
       case 3:
@@ -148,7 +158,7 @@ export function IntakeWizard({
   }
 
   if (submit.state === "done") {
-    return <DoneState sku={selectedSku} itemId={submit.itemId} />;
+    return <DoneState sku={selectedSku} itemId={submit.itemId} isNewModel={isNewModel} isUnpricedModel={isUnpricedModel} />;
   }
 
   return (
@@ -176,25 +186,36 @@ export function IntakeWizard({
       </ol>
 
       {/* Steps */}
-      {step === 0 &&
-        (requestingMissing ? (
-          <SkuRequestForm
-            initialBrand={selectedSku?.brand}
-            initialModel={selectedSku?.model}
-            onDone={(id) => {
-              setRequestId(id);
-              setRequestingMissing(false);
-            }}
-            onBack={() => setRequestingMissing(false)}
-          />
+      {step === 0 && (
+        findingModel ? (
+          <div className="flex items-center justify-center py-8 font-mono text-[11px] text-muted">
+            Finding or creating your shoe…
+          </div>
         ) : (
-          <SkuPicker
-            skus={skus}
-            selected={selectedSku}
-            onSelect={(sku) => setSelectedSku(sku)}
-            onRequestMissing={() => setRequestingMissing(true)}
-          />
-        ))}
+          <>
+            <SkuPicker
+              skus={skus}
+              selected={selectedSku}
+              onSelect={(sku) => setSelectedSku(sku)}
+              onRequestMissing={() => setFindingModel(true)}
+            />
+            {findingModel && (
+              <SkuModelFinder
+                initialBrand={selectedSku?.brand}
+                initialModel={selectedSku?.model}
+                onDone={(sku, model, newModel, unpriced) => {
+                  setSelectedSku(sku);
+                  setSelectedModel(model);
+                  setIsNewModel(newModel);
+                  setIsUnpricedModel(unpriced);
+                  setFindingModel(false);
+                }}
+                onBack={() => setFindingModel(false)}
+              />
+            )}
+          </>
+        )
+      )}
 
       {step === 1 && (
         <>
@@ -231,19 +252,14 @@ export function IntakeWizard({
           notes={notes}
           onNotesChange={setNotes}
           error={submit.error}
+          isNewModel={isNewModel}
+          isUnpricedModel={isUnpricedModel}
         />
       )}
 
       {!signedIn && step > 0 && (
         <div className="border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 font-mono text-[10px] tracking-tight text-muted">
           You&apos;re not signed in — submit will require an account.
-        </div>
-      )}
-
-      {requestId && step === 0 && !requestingMissing && (
-        <div className="border border-dashed border-accent/50 bg-accent/5 px-3 py-2 font-mono text-[10px] tracking-tight text-foreground">
-          Request filed ({requestId}) — we&apos;ll notify you when the SKU is
-          priced. Pick a listed shoe above or keep browsing.
         </div>
       )}
 
@@ -275,7 +291,7 @@ export function IntakeWizard({
   );
 
   function canStepReached(i: number): boolean {
-    if (i === 0) return selectedSku != null || requestingMissing;
+    if (i === 0) return selectedSku != null;
     if (i === 1)
       return photos.filter((p) => p.url.startsWith("https://")).length >= REQUIRED_PHOTO_COUNT;
     if (i === 2) return declaredFloat != null;
@@ -299,6 +315,8 @@ function ReviewPane({
   notes,
   onNotesChange,
   error,
+  isNewModel,
+  isUnpricedModel,
 }: {
   sku: Sku;
   photos: IntakePhoto[];
@@ -309,6 +327,8 @@ function ReviewPane({
   notes: string;
   onNotesChange: (v: string) => void;
   error: string | null;
+  isNewModel: boolean;
+  isUnpricedModel: boolean;
 }) {
   return (
     <div className="flex flex-col gap-3">
@@ -323,6 +343,14 @@ function ReviewPane({
         <Detail label="Payout" value={payout === "cash" ? "cash" : "credit"} />
         <Detail label="Country" value={countryCode} />
       </div>
+
+      {(isNewModel || isUnpricedModel) && (
+        <div className="border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 font-mono text-[10px] tracking-tight text-[#E8B33A]">
+          {isNewModel
+            ? `This is a NEW model — it has no oracle price yet. Your submission will be recorded, but the card CANNOT MINT until an admin sets the base price. You&apos;ll see "pending review AND pricing" in your dashboard.`
+            : `This model exists but has NO oracle price. Your submission will be recorded, but the card CANNOT MINT until an admin sets the base price. You&apos;ll see "pending review AND pricing" in your dashboard.`}
+        </div>
+      )}
 
       <div className="flex flex-col gap-1">
         <label
@@ -372,9 +400,13 @@ function Detail({ label, value }: { label: string; value: string }) {
 function DoneState({
   sku,
   itemId,
+  isNewModel,
+  isUnpricedModel,
 }: {
   sku: Sku | null;
   itemId: string | null;
+  isNewModel: boolean;
+  isUnpricedModel: boolean;
 }) {
   return (
     <div className="flex flex-col gap-3 border border-accent bg-accent/10 p-4">
@@ -387,6 +419,13 @@ function DoneState({
         grader verifies condition against your photos, then the card goes live
         in your dashboard. You&apos;ll be notified either way.
       </p>
+{(isNewModel || isUnpricedModel) && (
+        <div className="border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 font-mono text-[10px] tracking-tight text-[#E8B33A]">
+          {isNewModel
+            ? `This is a NEW model — it has no oracle price yet. The card CANNOT MINT until an admin sets the base price. Your dashboard will show "pending review AND pricing".`
+            : `This model has NO oracle price. The card CANNOT MINT until an admin sets the base price. Your dashboard will show "pending review AND pricing".`}
+        </div>
+      )}
       <div className="flex gap-2">
         <Button variant="primary" size="md" href="/">
           back to market
