@@ -78,7 +78,8 @@ export function IntakeWizard({
   } | null>(null);
   const [isNewModel, setIsNewModel] = useState(false);
   const [isUnpricedModel, setIsUnpricedModel] = useState(false);
-  const [findingModel, setFindingModel] = useState(false);
+  const [showModelFinder, setShowModelFinder] = useState(false);
+  const [submittingModel, setSubmittingModel] = useState(false);
   const [photos, setPhotos] = useState<IntakePhoto[]>([]);
   const [answers, setAnswers] = useState<Partial<GradeComponents>>({});
   const [priceCents, setPriceCents] = useState<number | null>(null);
@@ -187,33 +188,30 @@ export function IntakeWizard({
 
       {/* Steps */}
       {step === 0 && (
-        findingModel ? (
+        submittingModel ? (
           <div className="flex items-center justify-center py-8 font-mono text-[11px] text-muted">
             Finding or creating your shoe…
           </div>
+        ) : showModelFinder ? (
+          <SkuModelFinder
+            initialBrand={selectedSku?.brand}
+            initialModel={selectedSku?.model}
+            onDone={(sku, model, newModel, unpriced) => {
+              setSelectedSku(sku);
+              setSelectedModel(model);
+              setIsNewModel(newModel);
+              setIsUnpricedModel(unpriced);
+              setShowModelFinder(false);
+            }}
+            onBack={() => setShowModelFinder(false)}
+          />
         ) : (
-          <>
-            <SkuPicker
-              skus={skus}
-              selected={selectedSku}
-              onSelect={(sku) => setSelectedSku(sku)}
-              onRequestMissing={() => setFindingModel(true)}
-            />
-            {findingModel && (
-              <SkuModelFinder
-                initialBrand={selectedSku?.brand}
-                initialModel={selectedSku?.model}
-                onDone={(sku, model, newModel, unpriced) => {
-                  setSelectedSku(sku);
-                  setSelectedModel(model);
-                  setIsNewModel(newModel);
-                  setIsUnpricedModel(unpriced);
-                  setFindingModel(false);
-                }}
-                onBack={() => setFindingModel(false)}
-              />
-            )}
-          </>
+          <SkuPicker
+            skus={skus}
+            selected={selectedSku}
+            onSelect={(sku) => setSelectedSku(sku)}
+            onRequestMissing={() => setShowModelFinder(true)}
+          />
         )
       )}
 

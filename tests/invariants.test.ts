@@ -2964,22 +2964,22 @@ import PrivacyPage from '@/app/privacy/page';
 import MarketPage from '@/app/(market)/market/page';
 
 describe('Landing page (/) — signed out render', () => {
-  it('renders without crashing and contains the consign message', async () => {
+  it('renders without crashing and contains key messaging', async () => {
     const element = await LandingPage();
     const html = renderToStaticMarkup(element);
-    expect(html).toContain('Can I sell here?');
-    expect(html).toContain('YES. Listing is open.');
-    expect(html).toContain('Malaysian consignors keep the shoes until they sell');
+    expect(html).toContain('Trade Sneakers Instantly');
+    expect(html).toContain('Redeem Them Anytime');
+    expect(html).toContain('Every pair is a card');
   });
 
-  it('answers the three questions in order', async () => {
+  it('includes How It Works 4-step timeline', async () => {
     const element = await LandingPage();
     const html = renderToStaticMarkup(element);
-    const whatIsThis = html.indexOf('What is this?');
-    const canISell = html.indexOf('Can I sell here?');
-    const isThisReal = html.indexOf('Is this real?');
-    expect(whatIsThis).toBeLessThan(canISell);
-    expect(canISell).toBeLessThan(isThisReal);
+    expect(html).toContain('How It Works');
+    expect(html).toContain('List or Buy');
+    expect(html).toContain('Authenticate & Vault');
+    expect(html).toContain('Trade Freely');
+    expect(html).toContain('Redeem Anytime');
   });
 
   it('includes footer links to /terms and /privacy', async () => {
@@ -2989,11 +2989,13 @@ describe('Landing page (/) — signed out render', () => {
     expect(html).toContain('href="/privacy"');
   });
 
-  it('has Enter the market CTA linking to /market', async () => {
+  it('has split CTA: Explore the Vault (buyers) and List Your Sneakers (sellers)', async () => {
     const element = await LandingPage();
     const html = renderToStaticMarkup(element);
     expect(html).toContain('href="/market"');
-    expect(html).toContain('Enter the market');
+    expect(html).toContain('Explore the Vault');
+    expect(html).toContain('href="/list"');
+    expect(html).toContain('List Your Sneakers');
   });
 
   it('does not claim FlexSoar covers consignor shipping to vault (matches TERMS.md 4.6)', async () => {
@@ -3006,6 +3008,22 @@ describe('Landing page (/) — signed out render', () => {
     expect(html).not.toContain('we cover.*shipping'); // no "we cover shipping"
     // It should correctly state we cover shipping TO THE BUYER
     expect(html).toContain('shipping to the buyer');
+  });
+
+  it('includes trust signals', async () => {
+    const element = await LandingPage();
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain('100% Authenticity Guaranteed');
+    expect(html).toContain('Climate-Controlled Vault Storage');
+    expect(html).toContain('Zero Upfront Listing Fees');
+  });
+
+  it('includes legal disclosures accordion', async () => {
+    const element = await LandingPage();
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain('Legal disclosures');
+    expect(html).toContain('not a security');
+    expect(html).toContain('not investment advice');
   });
 });
 
