@@ -449,6 +449,28 @@ async function sendCardSoldEmailForOrder(orderId: string): Promise<void> {
     dueBy: intake.due_by,
     listingUrl,
   });
+
+  // Also write a notification row (notification table must exist)
+  try {
+    await supabase.from('notifications').insert({
+      user_id: consignorId,
+      type: 'card_sold',
+      payload: {
+        order_id: orderId,
+        card_id: card.id,
+        shoe_brand: sku.brand,
+        shoe_model: sku.model,
+        shoe_colorway: sku.colorway,
+        shoe_size_us: sku.size_us,
+        sale_price_cents: order.gross_cents,
+        due_by: intake.due_by,
+        listing_url: listingUrl,
+      },
+    });
+  } catch (notificationError) {
+    // Notification table may not exist yet; log but don't fail the email
+    console.warn('[notification] card_sold_48h — could not write notification:', notificationError);
+  }
 }
 
 /**

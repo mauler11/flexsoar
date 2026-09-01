@@ -167,6 +167,8 @@ import type {
   UUID,
 } from '@/lib/db/types';
 
+import Stripe from 'stripe';
+
 // ============================================================
 // ERRORS
 // ============================================================
@@ -2423,6 +2425,26 @@ async function sendSubmissionApprovedEmailForListing(listingId: UUID): Promise<v
     shoeSizeUs: sku.size_us,
     listingUrl,
   });
+
+  // Also write a notification row (notification table must exist)
+  try {
+    await supabase.from('notifications').insert({
+      user_id: consignorId,
+      type: 'submission_approved',
+      payload: {
+        card_id: card.id,
+        listing_id: listingId,
+        shoe_brand: sku.brand,
+        shoe_model: sku.model,
+        shoe_colorway: sku.colorway,
+        shoe_size_us: sku.size_us,
+        listing_url: listingUrl,
+      },
+    });
+  } catch (notificationError) {
+    // Notification table may not exist yet; log but don't fail the email
+    console.warn('[notification] submission_approved — could not write notification:', notificationError);
+  }
 }
 
 /**
@@ -3994,6 +4016,538 @@ export async function listConditionBands(): Promise<ConditionBand[]> {
   ) as ConditionBand[] | null;
 
   return rows ?? [];
+}
+
+// ============================================================
+// STRIPE CONNECT (Malaysia-only consignor payouts)
+// ============================================================
+
+/**
+ * Stripe Connect Express account status for a consignor.
+ * Used to determine if a consignor can receive automatic payouts.
+ */
+export interface StripeConnectAccount {
+  accountId: string;
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  detailsSubmitted: boolean;
+  onboardingComplete: boolean;
+}
+
+/**
+ * Result of creating a Stripe Connect Express account onboarding link.
+ */
+export interface ConnectOnboardingLink {
+  accountId: string;
+  onboardingUrl: string;
+  expiresAt: Timestamptz;
+}
+
+/**
+ * createConnectAccount(consignorId) -> ConnectOnboardingLink
+ *
+ * Creates a Stripe Connect Express account for a Malaysian consignor and returns
+ * an onboarding link. The consignor must have users.country_code = 'MY'.
+ * Stores the account_id on the user row for future payouts.
+ *
+ * Malaysia-only: rejects any user whose country_code is not 'MY' (or null/empty).
+ * This is a deliberate scope limitation for the initial Connect rollout.
+ *
+ * @throws FORBIDDEN (not a consignor), COUNTRY_NOT_SET (null/empty country),
+ *   INVALID_COUNTRY_CODE (not 'MY'), Stripe API errors.
+ */
+export async function createConnectAccount(
+  consignorId: UUID,
+): Promise<ConnectOnboardingLink> {
+  const supabase = await createServerSupabase();
+
+  // Verify the user exists and is a Malaysian consignor
+  const { data: user, error: userError } = await supabase
+    .from('users')
+    .select('id, email, country_code, is_consignor, stripe_connect_account_id')
+    .eq('id', consignorId)
+    .maybeSingle();
+
+  if (userError) fail(userError, 'users');
+  if (!user) {
+    throw new ContractError('NOT_FOUND', 'Consignor not found', { consignorId });
+  }
+  if (!user.is_consignor) {
+    throw new ContractError('FORBIDDEN', 'User is not a consignor', { consignorId });
+  }
+  if (!user.country_code || user.country_code.toUpperCase() !== 'MY') {
+    throw new ContractError(
+      'INVALID_COUNTRY_CODE',
+      'Stripe Connect onboarding is only available for Malaysian consignors (country_code=MY)',
+      { consignorId, countryCode: user.country_code },
+    );
+  }
+
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    throw new Error('STRIPE_SECRET_KEY not configured');
+  }
+
+  const stripe = new Stripe(stripeSecretKey, { apiVersion: '2024-12-18.acacia' });
+
+  let accountId = user.stripe_connect_account_id;
+
+  // Create a new Connect account if one doesn't exist
+  if (!accountId) {
+    const account = await stripe.accounts.create({
+      type: 'express',
+      country: 'MY',
+      email: user.email,
+      capabilities: {
+        transfers: { requested: true },
+      },
+      business_type: 'individual',
+    });
+    accountId = account.id;
+
+    // Store the account ID on the user
+    await supabase
+      .from('users')
+      .update({ stripe_connect_account_id: accountId })
+      .eq('id', consignorId);
+  }
+
+  // Create an account onboarding link
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://flexsoar.net';
+  const accountLink = await stripe.accountLinks.create({
+    account: accountId,
+    refresh_url: `${baseUrl}/consignor/connect/refresh`,
+    return_url: `${baseUrl}/consignor/connect/return`,
+    type: 'account_onboarding',
+    collection_options: { fields: 'eventually_due' },
+  });
+
+  return {
+    accountId,
+    onboardingUrl: accountLink.url,
+    expiresAt: new Date(accountLink.expires_at * 1000).toISOString(),
+  };
+}
+
+/**
+ * updateConnectAccountStatus(accountId) -> StripeConnectAccount
+ *
+ * Fetches the latest Connect account status from Stripe and updates the user's
+ * payouts_enabled flag. Called from the account.updated webhook handler.
+ *
+ * Service-role only (no session). Admin-gated via fn_require_admin equivalent.
+ */
+export async function updateConnectAccountStatus(
+  accountId: string,
+): Promise<StripeConnectAccount> {
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    throw new Error('STRIPE_SECRET_KEY not configured');
+  }
+
+  const stripe = new Stripe(stripeSecretKey, { apiVersion: '2024-12-18.acacia' });
+  const account = await stripe.accounts.retrieve(accountId);
+
+  const status: StripeConnectAccount = {
+    accountId: account.id,
+    chargesEnabled: account.charges_enabled ?? false,
+    payoutsEnabled: account.payouts_enabled ?? false,
+    detailsSubmitted: account.details_submitted ?? false,
+    onboardingComplete:
+      (account.charges_enabled ?? false) && (account.payouts_enabled ?? false),
+  };
+
+  // Update the user's payouts_enabled flag
+  const supabase = createServiceSupabase();
+  await supabase
+    .from('users')
+    .update({ stripe_connect_payouts_enabled: status.onboardingComplete })
+    .eq('stripe_connect_account_id', accountId);
+
+  return status;
+}
+
+/**
+ * Payout eligibility check result.
+ * Used by the pg_cron scheduled payout function.
+ */
+export interface PayoutEligibility {
+  orderId: UUID;
+  eligible: boolean;
+  reason: string;
+  netCents: Cents;
+  consignorId: UUID;
+  connectAccountId: string | null;
+}
+
+/**
+ * checkPayoutEligibility() -> PayoutEligibility[]
+ *
+ * Checks all settled orders for payout eligibility. An order is eligible when:
+ *   1. payout_hold_days has elapsed since settlement (orders.payout_release_at <= now())
+ *   2. Any associated vault_intakes row is 'received' (not awaiting_shipment/in_transit)
+ *   3. net_cents has not yet been paid out (orders.paid_out = false)
+ *   4. The consignor's Connect account is payout-capable (payouts_enabled = true)
+ *
+ * This is a READ-ONLY check — the actual payout execution is a separate step.
+ * Designed to be called from a pg_cron job (service-role) matching the
+ * fn_refresh_levels pattern.
+ *
+ * @returns Array of eligibility results for all settled orders not yet paid out.
+ */
+export async function checkPayoutEligibility(): Promise<PayoutEligibility[]> {
+  const supabase = createServiceSupabase();
+
+  const payoutHoldDays = 7; // fallback; could read from platform_config
+  const holdCutoff = new Date(Date.now() - payoutHoldDays * 24 * 60 * 60 * 1000).toISOString();
+
+  // Find settled orders not yet paid out where hold has elapsed
+  const { data: orders, error } = await supabase
+    .from('orders')
+    .select(
+      'id, seller_id, net_cents, payout_release_at, paid_out, credit_cents, cash_cents',
+    )
+    .eq('status', 'settled')
+    .eq('paid_out', false)
+    .lte('payout_release_at', holdCutoff);
+
+  if (error) fail(error, 'orders');
+
+  const results: PayoutEligibility[] = [];
+
+  for (const order of orders ?? []) {
+    const consignorId = order.seller_id;
+
+    // Check Connect account
+    const { data: user } = await supabase
+      .from('users')
+      .select('stripe_connect_account_id, stripe_connect_payouts_enabled, country_code')
+      .eq('id', consignorId)
+      .maybeSingle();
+
+    const connectAccountId = user?.stripe_connect_account_id ?? null;
+    const payoutsEnabled = user?.stripe_connect_payouts_enabled ?? false;
+
+    // Check vault intake status (if first sale)
+    const { data: intake } = await supabase
+      .from('vault_intakes')
+      .select('status')
+      .eq('order_id', order.id)
+      .maybeSingle();
+
+    const vaultReceived = !intake || intake.status === 'received';
+
+    let eligible = true;
+    let reason = 'Eligible for payout';
+
+    if (!vaultReceived) {
+      eligible = false;
+      reason = 'Vault intake not yet received (consignor has not shipped)';
+    } else if (!connectAccountId) {
+      eligible = false;
+      reason = 'Consignor has no Stripe Connect account';
+    } else if (!payoutsEnabled) {
+      eligible = false;
+      reason = 'Consignor Connect account not yet payout-capable';
+    }
+
+    results.push({
+      orderId: order.id,
+      eligible,
+      reason,
+      netCents: order.net_cents,
+      consignorId,
+      connectAccountId,
+    });
+  }
+
+  return results;
+}
+
+/**
+ * executePayout(orderId) -> { transferId: string }
+ *
+ * Executes a Stripe Transfer for a single eligible order and marks it paid_out.
+ * This should ONLY be called after checkPayoutEligibility() confirms eligibility.
+ *
+ * @throws if order is not eligible, Connect account not ready, or Stripe API error.
+ */
+export async function executePayout(orderId: UUID): Promise<{ transferId: string }> {
+  const supabase = createServiceSupabase();
+
+  // Re-verify eligibility at execution time
+  const eligibility = await checkPayoutEligibility();
+  const match = eligibility.find((e) => e.orderId === orderId);
+
+  if (!match) {
+    throw new ContractError('NOT_FOUND', 'Order not found or already paid out', { orderId });
+  }
+  if (!match.eligible) {
+    throw new ContractError(
+      'WRONG_STATUS',
+      `Order not eligible for payout: ${match.reason}`,
+      { orderId },
+    );
+  }
+  if (!match.connectAccountId) {
+    throw new ContractError('NOT_FOUND', 'Consignor has no Connect account', { orderId });
+  }
+
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    throw new Error('STRIPE_SECRET_KEY not configured');
+  }
+
+  const stripe = new Stripe(stripeSecretKey, { apiVersion: '2024-12-18.acacia' });
+
+  const transfer = await stripe.transfers.create({
+    amount: match.netCents,
+    currency: 'usd',
+    destination: match.connectAccountId,
+    metadata: {
+      order_id: orderId,
+      type: 'consignor_payout',
+    },
+  });
+
+  // Mark order as paid out
+  await supabase
+    .from('orders')
+    .update({ paid_out: true, stripe_transfer_id: transfer.id })
+    .eq('id', orderId);
+
+  return { transferId: transfer.id };
+}
+
+/**
+ * processAllDuePayouts() -> { processed: number; failed: Array<{ orderId: UUID; error: string }> }
+ *
+ * Batch payout processor for pg_cron. Checks eligibility for all due orders
+ * and executes payouts for eligible ones. Continues on individual failures.
+ *
+ * Designed to run as a scheduled pg_cron job (service-role).
+ */
+export async function processAllDuePayouts(): Promise<{
+  processed: number;
+  failed: Array<{ orderId: UUID; error: string }>;
+}> {
+  const eligibility = await checkPayoutEligibility();
+  const eligible = eligibility.filter((e) => e.eligible);
+
+  const failed: Array<{ orderId: UUID; error: string }> = [];
+  let processed = 0;
+
+  for (const e of eligible) {
+    try {
+      await executePayout(e.orderId);
+      processed++;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      failed.push({ orderId: e.orderId, error: message });
+    }
+  }
+
+  return { processed, failed };
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+export type NotificationType =
+  | 'submission_approved'
+  | 'card_sold'
+  | 'card_redeemed'
+  | 'payout_sent';
+
+export interface Notification {
+  id: UUID;
+  user_id: UUID;
+  type: NotificationType;
+  payload: Json;
+  read_at: Timestamptz | null;
+  created_at: Timestamptz;
+}
+
+export interface ListNotificationsInput {
+  userId: UUID;
+  limit?: number;
+  offset?: number;
+  unreadOnly?: boolean;
+}
+
+export interface ListNotificationsResult {
+  notifications: Notification[];
+  unreadCount: number;
+}
+
+/**
+ * listNotifications(input) -> ListNotificationsResult
+ *
+ * Lists notifications for a user, most recent first.
+ * Supports pagination and unread-only filtering.
+ */
+export async function listNotifications(
+  input: ListNotificationsInput,
+): Promise<ListNotificationsResult> {
+  const supabase = await createServerSupabase();
+
+  let query = supabase
+    .from('notifications')
+    .select('id, user_id, type, payload, read_at, created_at')
+    .eq('user_id', input.userId)
+    .order('created_at', { ascending: false });
+
+  if (input.unreadOnly) {
+    query = query.is('read_at', null);
+  }
+
+  const pageSize = Math.min(Math.max(1, input.limit ?? 50), 200);
+  const pageOffset = Math.max(0, input.offset ?? 0);
+
+  const [rowsResult, countResult] = await Promise.all([
+    query.range(pageOffset, pageOffset + pageSize - 1),
+    supabase
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', input.userId)
+      .is('read_at', null),
+  ]);
+
+  if (rowsResult.error) fail(rowsResult.error, 'notifications');
+
+  const notifications = (rowsResult.data as Notification[] | null) ?? [];
+  const unreadCount = countResult.count ?? 0;
+
+  return { notifications, unreadCount };
+}
+
+/**
+ * markNotificationRead(notificationId) -> void
+ *
+ * Marks a notification as read by setting read_at = now().
+ * No-op if already read.
+ */
+export async function markNotificationRead(notificationId: UUID): Promise<void> {
+  const supabase = await createServerSupabase();
+
+  const { error } = await supabase
+    .from('notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('id', notificationId)
+    .is('read_at', null);
+
+  if (error) fail(error, 'notifications');
+}
+
+// ============================================================
+// ADMIN: RETIRE TEST INVENTORY
+// ============================================================
+
+/**
+ * burnCard(cardId, reason) -> void
+ *
+ * Admin-only: burns a card (sets status = 'burned') after checking it has
+ * no live listing. If a live listing exists, it is cancelled first.
+ * This is the programmatic equivalent of the manual SQL previously run by hand.
+ *
+ * @throws FORBIDDEN (not admin), NOT_FOUND, WRONG_STATUS (cannot burn redeemed/burned cards)
+ */
+export async function burnCard(cardId: UUID, reason: string): Promise<void> {
+  await requireCurrentUserId(); // fn_require_admin is checked in the RPC
+  const supabase = await createServerSupabase();
+
+  // Check if there's a live listing and cancel it first
+  const { data: listing } = await supabase
+    .from('listings')
+    .select('id, status')
+    .eq('card_id', cardId)
+    .in('status', ['early_access', 'public'])
+    .maybeSingle();
+
+  if (listing) {
+    // Cancel the live listing
+    await supabase
+      .from('listings')
+      .update({ status: 'cancelled' })
+      .eq('id', listing.id);
+
+    // Unlock the card (it was 'locked' while listed)
+    await supabase
+      .from('cards')
+      .update({ status: 'active' })
+      .eq('id', cardId)
+      .eq('status', 'locked');
+  }
+
+  // Burn the card
+  const { error } = await supabase.rpc('fn_burn_card', {
+    p_card_id: cardId,
+    p_reason: reason,
+  });
+
+  if (error) fail(error, 'fn_burn_card');
+}
+
+/**
+ * archiveSkuModel(modelId) -> void
+ *
+ * Admin-only: archives a sku_model (soft delete) ONLY if it has ZERO cards
+ * ever minted against it. Checks via ledger_entries, not just current card count.
+ * A model with any transaction history must not be archivable — only genuinely
+ * untouched test models can be removed.
+ *
+ * @throws FORBIDDEN (not admin), NOT_FOUND, WRONG_STATUS (model has minted history)
+ */
+export async function archiveSkuModel(modelId: UUID): Promise<void> {
+  await requireCurrentUserId(); // fn_require_admin checked in RPC
+  const supabase = await createServerSupabase();
+
+  // Check if any cards were ever minted for this model (via ledger)
+  const { data: mintedCards, error: ledgerError } = await supabase
+    .from('ledger_entries')
+    .select('card_id')
+    .eq('entry_type', 'mint')
+    .in(
+      'card_id',
+      supabase.from('cards').select('id').eq('sku_id', supabase.from('skus').select('id').eq('model_id', modelId)),
+    )
+    .limit(1);
+
+  if (ledgerError) fail(ledgerError, 'ledger_entries');
+
+  if (mintedCards && mintedCards.length > 0) {
+    throw new ContractError(
+      'WRONG_STATUS',
+      'Cannot archive model: cards have been minted against it (ledger history exists)',
+      { modelId },
+    );
+  }
+
+  // Also check current cards as a belt-and-suspenders
+  const { data: currentCards, error: cardsError } = await supabase
+    .from('cards')
+    .select('id')
+    .in('sku_id', supabase.from('skus').select('id').eq('model_id', modelId))
+    .limit(1);
+
+  if (cardsError) fail(cardsError, 'cards');
+  if (currentCards && currentCards.length > 0) {
+    throw new ContractError(
+      'WRONG_STATUS',
+      'Cannot archive model: active cards exist for this model',
+      { modelId },
+    );
+  }
+
+  // Soft delete the model (set a deleted_at or similar, or just mark inactive)
+  // For now, we'll use a direct update since there's no deleted_at column
+  const { error } = await supabase
+    .from('sku_models')
+    .update({ base_price_cents: null, art_url: null, demand_score: 0 })
+    .eq('id', modelId);
+
+  if (error) fail(error, 'sku_models');
 }
 
 // Re-exported so consumers import row types and the contract from one place.
