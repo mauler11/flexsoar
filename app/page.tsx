@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 
 export const metadata: Metadata = {
-  title: "FlexSoar — Trade Sneakers Instantly. Redeem Them Anytime.",
+  title: "FlexSoar — Authenticated Secondhand Sneakers",
   description:
     "Buy, sell, and trade authenticated sneakers. Every card represents a real pair in our vault. List your shoes — we cover photography, vault storage, and shipping to the buyer.",
 };
@@ -32,7 +32,7 @@ export default function LandingPage() {
           {/* Hero Section with Card-to-Box Visualization */}
           <div className="flex flex-col gap-4 text-center">
             <h1 className="font-mono text-4xl font-black uppercase tracking-tight sm:text-5xl">
-              Trade Sneakers Instantly. Redeem Them Anytime.
+              Authenticated secondhand sneakers
             </h1>
             <p className="font-mono text-lg text-muted max-w-2xl mx-auto">
               Every pair is a card you can buy, sell, and trade — and redeem at any
@@ -137,21 +137,6 @@ export default function LandingPage() {
               <div>
                 <div className="font-mono text-sm font-bold uppercase tracking-tight">Zero Upfront Listing Fees</div>
                 <div className="font-mono text-[10px] uppercase tracking-tight text-muted">Pay only after it sells — we cover photography, vault storage, and shipping to the buyer</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Live Market Ticker */}
-          <div className="border border-line rounded-lg p-4 text-center">
-            <div className="flex items-center justify-center gap-4 flex-wrap">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] uppercase tracking-tight text-muted">Pairs Currently Vaulted</span>
-                <span className="font-mono text-xl font-bold text-accent" id="vaulted-count">1,247</span>
-              </div>
-              <div className="w-px h-6 bg-line-strong" aria-hidden="true" />
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] uppercase tracking-tight text-muted">Cards Traded This Month</span>
-                <span className="font-mono text-xl font-bold text-accent" id="traded-count">3,892</span>
               </div>
             </div>
           </div>
@@ -261,7 +246,7 @@ export default function LandingPage() {
             Privacy
           </Link>
           <span className="flex-1 sm:flex-none text-center">
-            FlexSoar · Trade Sneakers Instantly. Redeem Them Anytime.
+            FlexSoar · Authenticated secondhand sneakers
           </span>
         </nav>
       </footer>

@@ -2967,8 +2967,7 @@ describe('Landing page (/) — signed out render', () => {
   it('renders without crashing and contains key messaging', async () => {
     const element = await LandingPage();
     const html = renderToStaticMarkup(element);
-    expect(html).toContain('Trade Sneakers Instantly');
-    expect(html).toContain('Redeem Them Anytime');
+    expect(html).toContain('Authenticated secondhand sneakers');
     expect(html).toContain('Every pair is a card');
   });
 
@@ -3025,6 +3024,19 @@ describe('Landing page (/) — signed out render', () => {
     expect(html).toContain('Legal disclosures');
     expect(html).toContain('not a security');
     expect(html).toContain('investment advice');
+  });
+
+  it('contains no hardcoded numeric activity claims (vaulted count, trade count)', async () => {
+    const element = await LandingPage();
+    const html = renderToStaticMarkup(element);
+    // No fabricated stats like "1,247 pairs vaulted" or "3,892 trades this month"
+    // Real metrics must come from a live query, not hardcoded HTML.
+    expect(html).not.toContain('vaulted-count');
+    expect(html).not.toContain('traded-count');
+    expect(html).not.toContain('Pairs Currently Vaulted');
+    expect(html).not.toContain('Cards Traded This Month');
+    // No hardcoded numbers with comma formatting that look like activity counters
+    expect(html).not.toMatch(/>\d{1,3}(,\d{3})+\s*(pairs?|cards?|trades?)/i);
   });
 });
 
