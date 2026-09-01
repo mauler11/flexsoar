@@ -44,3 +44,6 @@ next-env.d.ts
 graphify-out/
 .claude/settings.local.json
 .claude/settings.json
+
+.vercel
+.env*
