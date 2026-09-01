@@ -61,6 +61,8 @@ import {
   findOrderBySettlementRef,
   type ListingForSettlement,
 } from '@/lib/db/settlement';
+import { createServiceSupabase } from '@/lib/supabase/server';
+import { sendCardSoldEmail, type CardSoldEmailInput } from '@/lib/email/send';
 
 /** The two Checkout Session events this route understands. Everything else is acknowledged and dropped. */
 const HANDLED_EVENTS: ReadonlySet<string> = new Set([
@@ -283,6 +285,8 @@ async function handleCheckoutCompleted(
     // with a real PaymentIntent id.
     const orderId = await purchaseCardSplit(listingId, buyerId, intent.id, creditCents, holdId);
 
+    await sendCardSoldEmailForOrder(orderId);
+
     return NextResponse.json({ received: true, recorded: true, orderId }, { status: 200 });
   } catch (thrown) {
     if (isCreditHoldExpired(thrown)) {
@@ -389,6 +393,62 @@ async function handleCheckoutCompleted(
     console.error(`[stripe-webhook] ${intent.id} failed, asking Stripe to retry: ${message}`);
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+/**
+ * Sends the "card sold — 48h shipping window" email to the consignor.
+ * Fetches the vault_intakes row for the order to get the exact due_by timestamp.
+ * Failure to send does not affect the sale — the sale is real regardless.
+ */
+async function sendCardSoldEmailForOrder(orderId: string): Promise<void> {
+  const supabase = createServiceSupabase();
+
+  const { data: intake, error: intakeError } = await supabase
+    .from('vault_intakes')
+    .select('id, due_by, consignor_id, item:items!inner(sku:skus!inner(brand, model, colorway, size_us)), card:cards!inner(id), order:orders!inner(gross_cents)')
+    .eq('order_id', orderId)
+    .maybeSingle();
+
+  if (intakeError || !intake) {
+    console.error('[email] card_sold_48h — no vault_intakes row for order:', { orderId, error: intakeError });
+    return;
+  }
+
+  const item = Array.isArray(intake.item) ? intake.item[0] : intake.item;
+  const card = Array.isArray(intake.card) ? intake.card[0] : intake.card;
+  const order = Array.isArray(intake.order) ? intake.order[0] : intake.order;
+  const sku = item?.sku;
+  const consignorId = intake.consignor_id;
+
+  if (!item || !card || !order || !sku || !consignorId) {
+    console.error('[email] card_sold_48h — incomplete intake data:', { orderId, intake });
+    return;
+  }
+
+  const { data: consignor, error: consignorError } = await supabase
+    .from('users')
+    .select('email, handle')
+    .eq('id', consignorId)
+    .maybeSingle();
+
+  if (consignorError || !consignor?.email) {
+    console.error('[email] card_sold_48h — could not load consignor:', { consignorId, error: consignorError });
+    return;
+  }
+
+  const listingUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://flexsoar.net'}/market/${card.id}`;
+
+  await sendCardSoldEmail({
+    consignorEmail: consignor.email,
+    consignorHandle: consignor.handle,
+    shoeBrand: sku.brand,
+    shoeModel: sku.model,
+    shoeColorway: sku.colorway,
+    shoeSizeUs: sku.size_us,
+    salePriceCents: order.gross_cents,
+    dueBy: intake.due_by,
+    listingUrl,
+  });
 }
 
 /**

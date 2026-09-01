@@ -134,6 +134,10 @@ import {
 } from '@/lib/db/valuation';
 import { TIER_BANDS } from '@/lib/domain/rarity';
 import type { GradeComponents } from '@/lib/db/grading';
+import {
+  sendSubmissionApprovedEmail,
+  type SubmissionApprovedEmailInput,
+} from '@/lib/email/send';
 
 import type {
   Card,
@@ -2358,13 +2362,67 @@ export async function approveSubmission(
 ): Promise<UUID> {
   const supabase = await createServerSupabase();
 
-  return unwrap(
+  const listingId = unwrap(
     await supabase.rpc('fn_approve_submission', {
       p_item_id: itemId,
       p_price_cents: priceCents ?? null,
     }),
     'fn_approve_submission',
   ) as UUID;
+
+  await sendSubmissionApprovedEmailForListing(listingId);
+
+  return listingId;
+}
+
+async function sendSubmissionApprovedEmailForListing(listingId: UUID): Promise<void> {
+  const supabase = createServiceSupabase();
+
+  const { data: listing, error } = await supabase
+    .from('listings')
+    .select(
+      `id, card:cards!inner(id, item:items!inner(consignor_id, sku:skus!inner(brand, model, colorway, size_us)), seller_id)`,
+    )
+    .eq('id', listingId)
+    .maybeSingle();
+
+  if (error || !listing) {
+    console.error('[email] submission_approved — could not load listing for email:', { listingId, error });
+    return;
+  }
+
+  const card = Array.isArray(listing.card) ? listing.card[0] : listing.card;
+  const item = card?.item;
+  const sku = item?.sku;
+  const consignorId = item?.consignor_id;
+
+  if (!card || !item || !sku || !consignorId) {
+    console.error('[email] submission_approved — incomplete listing data:', { listingId, listing });
+    return;
+  }
+
+  const { data: consignor, error: consignorError } = await supabase
+    .from('users')
+    .select('email, handle')
+    .eq('id', consignorId)
+    .maybeSingle();
+
+  if (consignorError || !consignor?.email) {
+    console.error('[email] submission_approved — could not load consignor:', { consignorId, error: consignorError });
+    return;
+  }
+
+  const listingUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://flexsoar.net'}/market/${card.id}`;
+
+  await sendSubmissionApprovedEmail({
+    consignorEmail: consignor.email,
+    consignorHandle: consignor.handle,
+    shoeBrand: sku.brand,
+    shoeModel: sku.model,
+    shoeColorway: sku.colorway,
+    shoeSizeUs: sku.size_us,
+    listingUrl,
+  });
 }
 
 /**
