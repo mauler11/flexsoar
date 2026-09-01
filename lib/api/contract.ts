@@ -3031,6 +3031,106 @@ export async function updateSkuVariant(
   return result.data as Sku;
 }
 
+/**
+ * Delete a SKU variant. Direct table write under skus_admin_write.
+ * Only succeeds if no cards or items reference this variant
+ * (FKs on cards.sku_id and items.sku_id are RESTRICT).
+ * sku_float_curve rows cascade; watchlists.sku_id is nullable.
+ *
+ * @throws FORBIDDEN, NOT_FOUND, WRONG_STATUS (cards/items exist).
+ */
+export async function deleteSkuVariant(skuId: UUID): Promise<void> {
+  const supabase = await createServerSupabase();
+
+  const cards = unwrap(
+    await supabase.from('cards').select('id').eq('sku_id', skuId).limit(1),
+    'cards',
+  ) as { id: UUID }[] | null;
+
+  if (cards && cards.length > 0) {
+    throw new ContractError(
+      'WRONG_STATUS',
+      'Cannot delete SKU variant: minted cards exist for this size',
+      { skuId },
+    );
+  }
+
+  const items = unwrap(
+    await supabase.from('items').select('id').eq('sku_id', skuId).limit(1),
+    'items',
+  ) as { id: UUID }[] | null;
+
+  if (items && items.length > 0) {
+    throw new ContractError(
+      'WRONG_STATUS',
+      'Cannot delete SKU variant: intake items exist for this size',
+      { skuId },
+    );
+  }
+
+  const result = await supabase
+    .from('skus')
+    .delete()
+    .eq('id', skuId)
+    .select('id');
+
+  if (result.error) fail(result.error, 'skus');
+  if (!result.data || result.data.length === 0) {
+    const exists = await supabase.from('skus').select('id').eq('id', skuId).maybeSingle();
+    if (exists.data) {
+      throw new ContractError(
+        'FORBIDDEN',
+        `sku ${skuId} exists but the delete wrote nothing — the session is not an admin`,
+        { skuId },
+      );
+    }
+    throw new ContractError('NOT_FOUND', `sku ${skuId} not found`, { skuId });
+  }
+}
+
+/**
+ * Delete a SKU model. Direct table write under sku_models_admin_write.
+ * Only succeeds if no variants (skus) reference this model
+ * (FK on skus.model_id is RESTRICT).
+ *
+ * @throws FORBIDDEN, NOT_FOUND, WRONG_STATUS (variants exist).
+ */
+export async function deleteSkuModel(modelId: UUID): Promise<void> {
+  const supabase = await createServerSupabase();
+
+  const variants = unwrap(
+    await supabase.from('skus').select('id').eq('model_id', modelId).limit(1),
+    'skus',
+  ) as { id: UUID }[] | null;
+
+  if (variants && variants.length > 0) {
+    throw new ContractError(
+      'WRONG_STATUS',
+      'Cannot delete model: size variants exist. Delete all variants first.',
+      { modelId },
+    );
+  }
+
+  const result = await supabase
+    .from('sku_models')
+    .delete()
+    .eq('id', modelId)
+    .select('id');
+
+  if (result.error) fail(result.error, 'sku_models');
+  if (!result.data || result.data.length === 0) {
+    const exists = await supabase.from('sku_models').select('id').eq('id', modelId).maybeSingle();
+    if (exists.data) {
+      throw new ContractError(
+        'FORBIDDEN',
+        `sku_model ${modelId} exists but the delete wrote nothing — the session is not an admin`,
+        { modelId },
+      );
+    }
+    throw new ContractError('NOT_FOUND', `sku_model ${modelId} not found`, { modelId });
+  }
+}
+
 // ============================================================
 // PLATFORM EARNINGS — added by 020
 // ============================================================

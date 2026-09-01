@@ -26,9 +26,16 @@ import { ListForm } from "@/components/market/ListForm";
 import { RedeemForm } from "@/components/market/RedeemForm";
 import { ProvenanceChain } from "@/components/market/ProvenanceChain";
 import { Countdown } from "@/components/market/Countdown";
+import { ExpandableSection } from "@/components/ui/ExpandableSection";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { formatUsd } from "@/components/card/format";
+
+/** Parse the photos JSON field into a string array. */
+function parsePhotos(json: unknown): string[] {
+  if (Array.isArray(json)) return json.filter((p): p is string => typeof p === "string");
+  return [];
+}
 
 /**
  * 023a_card_status_pending_vault.sql added 'pending_vault' to the live
@@ -137,9 +144,10 @@ export default async function CardPage({
     : null;
   const oracleCents = detail.oracle_value_cents;
   const item = detail.item;
+  const photos = parsePhotos(item.photos);
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-8">
       {sp.error && (
         <Banner tone="error" title="Couldn't do that">
           {sp.error}
@@ -157,41 +165,38 @@ export default async function CardPage({
         sku={sku}
         priceCents={listing?.price_cents}
         listing={listingForCard}
+        photos={photos}
       />
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <section className="flex flex-col gap-4">
+      <div className="grid gap-8 lg:grid-cols-2">
+        <section className="flex flex-col gap-6">
           <div>
-            <h2 className="mb-2 font-mono text-[10px] font-bold uppercase tracking-tight text-muted">
+            <h2 className="mb-3 font-mono text-[10px] font-bold uppercase tracking-tight text-muted">
               Provenance
             </h2>
             <ProvenanceChain provenance={detail.provenance} />
           </div>
 
-          {(oracleCents != null || item.grading_notes) && (
-            <div className="flex flex-col gap-2 border border-line bg-overlay p-3">
+          <ExpandableSection title="Oracle & grading details">
+            <div className="flex flex-col gap-3 text-sm">
               {oracleCents != null && (
-                <div className="flex items-baseline justify-between font-mono text-[10px] uppercase tracking-tight text-muted">
+                <div className="flex items-baseline justify-between font-mono tracking-tight text-muted">
                   <span>Oracle fair value</span>
-                  <span className="text-foreground">
-                    {formatUsd(oracleCents)}
-                  </span>
+                  <span className="text-foreground font-medium">{formatUsd(oracleCents)}</span>
                 </div>
               )}
               {item.grading_notes && (
-                <p className="font-mono text-[10px] leading-snug tracking-tight text-muted">
-                  {item.grading_notes}
-                </p>
+                <p className="leading-snug tracking-tight text-muted">{item.grading_notes}</p>
               )}
-              <p className="font-mono text-[9px] uppercase tracking-tight text-muted">
+              <p className="font-mono text-[10px] uppercase tracking-tight text-muted">
                 Graded {item.graded_at?.slice(0, 10) ?? "—"} · Authenticated{" "}
                 {item.authenticated_at?.slice(0, 10) ?? "—"}
               </p>
             </div>
-          )}
+          </ExpandableSection>
         </section>
 
-        <section className="flex flex-col gap-4">
+        <section className="flex flex-col gap-6">
           {isOwner ? (
             listing ? (
               <OwnerListingPanel listing={listing} />
