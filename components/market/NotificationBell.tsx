@@ -28,10 +28,12 @@ export function NotificationBell({
   unreadCount,
 }: NotificationBellProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
+    setMounted(true);
     function handleClickOutside(event: MouseEvent) {
       if (
         dropdownRef.current &&
@@ -51,6 +53,7 @@ export function NotificationBell({
   };
 
   const formatTime = (iso: string): string => {
+    if (!mounted) return "";
     const date = new Date(iso);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
@@ -191,7 +194,7 @@ export function NotificationBell({
                         {notification.title}
                       </p>
                       <span className="shrink-0 font-mono text-[9px] uppercase tracking-tight text-muted">
-                        {formatTime(notification.createdAt)}
+                        {mounted ? formatTime(notification.createdAt) : ""}
                       </span>
                     </div>
                     <p className={cn(
