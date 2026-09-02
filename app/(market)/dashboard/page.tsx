@@ -28,7 +28,8 @@
  */
 
 import type { Metadata } from "next";
-import { getConsignment, getConsignments, getRedemptions } from "@/lib/api/contract";
+import { getCards, getConsignment, getConsignments, getRedemptions } from "@/lib/api/contract";
+import type { CardSummary } from "@/lib/api/contract";
 import type { RedemptionSummary } from "@/lib/api/contract";
 import type { ItemSummary } from "@/lib/api/contract";
 import { currentUserId, getMySubmittedItems } from "@/app/(market)/queries";
@@ -61,6 +62,8 @@ const HELD_STATUSES: readonly ItemSummary["status"][] = [
 ];
 
 const OWED_STATUSES: readonly RedemptionSummary["status"][] = ["requested", "picking"];
+
+const HELD_CARD_STATUSES: readonly CardSummary["status"][] = ["active", "locked"];
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -110,9 +113,11 @@ export default async function DashboardPage() {
     })),
   );
 
-  const heldItems = details
+  const preMintHeldItems = details
     .flatMap(({ detail }) => detail?.items ?? [])
     .filter((item) => HELD_STATUSES.includes(item.status));
+
+  const heldCards = await getCards({ ownerId: me, status: HELD_CARD_STATUSES, limit: 200 });
 
   const redemptions = await getRedemptions({ userId: me });
   const owed = redemptions.filter((r) => OWED_STATUSES.includes(r.status as RedemptionSummary["status"]));
@@ -212,15 +217,15 @@ export default async function DashboardPage() {
       {/* Held items */}
       <section className="flex flex-col gap-2">
         <h2 className="font-mono text-[11px] font-black uppercase tracking-tight text-foreground">
-          Held items ({heldItems.length})
+          Held items ({preMintHeldItems.length + heldCards.length})
         </h2>
-        {heldItems.length === 0 ? (
+        {(preMintHeldItems.length + heldCards.length) === 0 ? (
           <p className="border border-dashed border-line-strong px-3 py-4 font-mono text-[10px] tracking-tight text-muted">
             Nothing in custody right now.
           </p>
         ) : (
           <div className="flex flex-col gap-1.5">
-            {heldItems.map((item) => (
+            {preMintHeldItems.map((item) => (
               <div
                 key={item.id}
                 className="flex items-center justify-between gap-3 border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[11px] tracking-tight"
@@ -232,6 +237,21 @@ export default async function DashboardPage() {
                 <span className="shrink-0 text-muted">{item.status}</span>
                 <span className="shrink-0 text-muted">
                   {item.float_value != null ? item.float_value.toFixed(3) : "not graded"}
+                </span>
+              </div>
+            ))}
+            {heldCards.map((card) => (
+              <div
+                key={card.id}
+                className="flex items-center justify-between gap-3 border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[11px] tracking-tight"
+              >
+                <span className="min-w-0 truncate font-bold text-foreground">
+                  {card.sku.brand} {card.sku.model} · {card.sku.colorway} · US{" "}
+                  {card.sku.size_us}
+                </span>
+                <span className="shrink-0 text-muted">{card.status}</span>
+                <span className="shrink-0 text-muted">
+                  {card.float_value != null ? card.float_value.toFixed(3) : "not graded"}
                 </span>
               </div>
             ))}

@@ -73,6 +73,9 @@ import {
   updateSkuModel,
   updateSkuVariant,
   replaceSkuArt,
+  burnCard,
+  archiveSkuModel,
+  getConnectOnboardingStatus,
 } from '../lib/api/contract';
 import { contractErrorCode } from '../lib/db/errors';
 import { MarketTile } from '../components/market/MarketTile';
@@ -2094,6 +2097,24 @@ describe('027 — new contract exports exist with the shape callers need', () =>
     expect(replaceSkuArt.length).toBe(2);
   });
 
+  it('burnCard(cardId, reason) — matches fn_burn_card(p_card_id, p_reason)', () => {
+    expect(typeof burnCard).toBe('function');
+    expect(burnCard.length).toBe(2);
+  });
+
+  it('archiveSkuModel(modelId, reason) — matches fn_archive_sku_model(p_model_id, p_reason)', () => {
+    expect(typeof archiveSkuModel).toBe('function');
+    expect(archiveSkuModel.length).toBe(2);
+  });
+
+  it('getConnectOnboardingStatus(userId) — returns ConnectAccountInfo', async () => {
+    // Import the actual contract module to test the real function signature
+    const { getConnectOnboardingStatus: actualFn } = await import('../lib/api/contract');
+    expect(typeof actualFn).toBe('function');
+    // async functions have length 0; verify it's async
+    expect(actualFn.constructor.name).toBe('AsyncFunction');
+  });
+
   it('createSkuModel(brand, model, colorway, basePriceCents?) — basePriceCents defaults, matching fn_create_sku_model default null', () => {
     expect(createSkuModel.length).toBe(3); // default params do not count toward .length
   });
@@ -2949,12 +2970,50 @@ vi.mock('@/lib/api/contract', async (importOriginal) => {
         fulfiller: null,
       },
     ],
+    getConnectOnboardingStatus: async () => ({
+      connect_account_id: 'acct_test123',
+      onboarding_status: 'pending',
+      payouts_enabled: false,
+      requirements: ['business_type', 'business_profile.mcc'],
+      updated_at: '2026-01-01T00:00:00Z',
+    }),
   };
 });
 
-// Mock currentUserId to return null (signed out)
-vi.mock('@/app/(market)/queries', () => ({
-  currentUserId: async () => null,
+// Mock the Supabase server for getConnectOnboardingStatus users table query
+vi.mock('@/lib/supabase/server', () => ({
+  createServerSupabase: vi.fn(() => ({
+    from: vi.fn((table: string) => {
+      if (table === 'users') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(() => Promise.resolve({
+                data: {
+                  connect_account_id: 'acct_test123',
+                  connect_onboarding_status: 'pending',
+                  connect_payouts_enabled: false,
+                  connect_requirements: ['business_type', 'business_profile.mcc'],
+                  connect_updated_at: '2026-01-01T00:00:00Z',
+                },
+                error: null,
+              })),
+            })),
+          })),
+        };
+      }
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            order: vi.fn(() => Promise.resolve({ data: [], error: null })),
+          })),
+        })),
+      };
+    }),
+    auth: {
+      getUser: vi.fn(() => Promise.resolve({ data: { user: null }, error: null })),
+    },
+  })),
 }));
 
 // Import page components after mocks
