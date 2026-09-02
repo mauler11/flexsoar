@@ -243,10 +243,10 @@ function ConnectStatusBadge({ connect }: { connect: Awaited<ReturnType<typeof ge
     payout_ready: "Payout ready",
   };
 
-  const statusTones: Record<typeof connect.onboarding_status, "info" | "warn" | "success" | "danger" | "neutral"> = {
+  const statusTones: Record<typeof connect.onboarding_status, "info" | "warn" | "accent" | "danger" | "neutral"> = {
     not_started: "neutral",
     pending: "warn",
-    payout_ready: "success",
+    payout_ready: "accent",
   };
 
   return (
@@ -260,7 +260,7 @@ function ConnectStatusBadge({ connect }: { connect: Awaited<ReturnType<typeof ge
           <span className="text-muted text-[10px]">{connect.connect_account_id.slice(0, 20)}…</span>
         )}
         {connect.payouts_enabled && (
-          <Badge tone="success">Payouts enabled</Badge>
+          <Badge tone="accent">Payouts enabled</Badge>
         )}
         {connect.requirements && connect.requirements.length > 0 && (
           <span className="text-muted text-[10px]">

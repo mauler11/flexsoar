@@ -523,7 +523,7 @@ export interface CardDetail extends CardSummary {
   /** The physical side. Photos and grading notes come from intake. */
   item: Pick<
     Item,
-    'id' | 'status' | 'photos' | 'grading_notes' | 'graded_at' | 'authenticated_at'
+    'id' | 'status' | 'photos' | 'grading_notes' | 'graded_at' | 'authenticated_at' | 'custody_location'
   >;
   /** fn_card_value_cents(). Shown beside any price, never hidden. */
   oracle_value_cents: Cents | null;
@@ -4296,7 +4296,7 @@ export async function createConnectAccount(
     throw new Error('STRIPE_SECRET_KEY not configured');
   }
 
-  const stripe = new Stripe(stripeSecretKey, { apiVersion: '2024-12-18.acacia' });
+  const stripe = new Stripe(stripeSecretKey, { apiVersion: '2026-08-26.dahlia' });
 
   let accountId = user.stripe_connect_account_id;
 
@@ -4353,7 +4353,7 @@ export async function updateConnectAccountStatus(
     throw new Error('STRIPE_SECRET_KEY not configured');
   }
 
-  const stripe = new Stripe(stripeSecretKey, { apiVersion: '2024-12-18.acacia' });
+  const stripe = new Stripe(stripeSecretKey, { apiVersion: '2026-08-26.dahlia' });
   const account = await stripe.accounts.retrieve(accountId);
 
   const status: StripeConnectAccount = {
@@ -4506,7 +4506,7 @@ export async function executePayout(orderId: UUID): Promise<{ transferId: string
     throw new Error('STRIPE_SECRET_KEY not configured');
   }
 
-  const stripe = new Stripe(stripeSecretKey, { apiVersion: '2024-12-18.acacia' });
+  const stripe = new Stripe(stripeSecretKey, { apiVersion: '2026-08-26.dahlia' });
 
   const transfer = await stripe.transfers.create({
     amount: match.netCents,
@@ -4646,116 +4646,6 @@ export async function markNotificationRead(notificationId: UUID): Promise<void> 
     .is('read_at', null);
 
   if (error) fail(error, 'notifications');
-}
-
-// ============================================================
-// ADMIN: RETIRE TEST INVENTORY
-// ============================================================
-
-/**
- * burnCard(cardId, reason) -> void
- *
- * Admin-only: burns a card (sets status = 'burned') after checking it has
- * no live listing. If a live listing exists, it is cancelled first.
- * This is the programmatic equivalent of the manual SQL previously run by hand.
- *
- * @throws FORBIDDEN (not admin), NOT_FOUND, WRONG_STATUS (cannot burn redeemed/burned cards)
- */
-export async function burnCard(cardId: UUID, reason: string): Promise<void> {
-  await requireCurrentUserId(); // fn_require_admin is checked in the RPC
-  const supabase = await createServerSupabase();
-
-  // Check if there's a live listing and cancel it first
-  const { data: listing } = await supabase
-    .from('listings')
-    .select('id, status')
-    .eq('card_id', cardId)
-    .in('status', ['early_access', 'public'])
-    .maybeSingle();
-
-  if (listing) {
-    // Cancel the live listing
-    await supabase
-      .from('listings')
-      .update({ status: 'cancelled' })
-      .eq('id', listing.id);
-
-    // Unlock the card (it was 'locked' while listed)
-    await supabase
-      .from('cards')
-      .update({ status: 'active' })
-      .eq('id', cardId)
-      .eq('status', 'locked');
-  }
-
-  // Burn the card
-  const { error } = await supabase.rpc('fn_burn_card', {
-    p_card_id: cardId,
-    p_reason: reason,
-  });
-
-  if (error) fail(error, 'fn_burn_card');
-}
-
-/**
- * archiveSkuModel(modelId) -> void
- *
- * Admin-only: archives a sku_model (soft delete) ONLY if it has ZERO cards
- * ever minted against it. Checks via ledger_entries, not just current card count.
- * A model with any transaction history must not be archivable — only genuinely
- * untouched test models can be removed.
- *
- * @throws FORBIDDEN (not admin), NOT_FOUND, WRONG_STATUS (model has minted history)
- */
-export async function archiveSkuModel(modelId: UUID): Promise<void> {
-  await requireCurrentUserId(); // fn_require_admin checked in RPC
-  const supabase = await createServerSupabase();
-
-  // Check if any cards were ever minted for this model (via ledger)
-  const { data: mintedCards, error: ledgerError } = await supabase
-    .from('ledger_entries')
-    .select('card_id')
-    .eq('entry_type', 'mint')
-    .in(
-      'card_id',
-      supabase.from('cards').select('id').eq('sku_id', supabase.from('skus').select('id').eq('model_id', modelId)),
-    )
-    .limit(1);
-
-  if (ledgerError) fail(ledgerError, 'ledger_entries');
-
-  if (mintedCards && mintedCards.length > 0) {
-    throw new ContractError(
-      'WRONG_STATUS',
-      'Cannot archive model: cards have been minted against it (ledger history exists)',
-      { modelId },
-    );
-  }
-
-  // Also check current cards as a belt-and-suspenders
-  const { data: currentCards, error: cardsError } = await supabase
-    .from('cards')
-    .select('id')
-    .in('sku_id', supabase.from('skus').select('id').eq('model_id', modelId))
-    .limit(1);
-
-  if (cardsError) fail(cardsError, 'cards');
-  if (currentCards && currentCards.length > 0) {
-    throw new ContractError(
-      'WRONG_STATUS',
-      'Cannot archive model: active cards exist for this model',
-      { modelId },
-    );
-  }
-
-  // Soft delete the model (set a deleted_at or similar, or just mark inactive)
-  // For now, we'll use a direct update since there's no deleted_at column
-  const { error } = await supabase
-    .from('sku_models')
-    .update({ base_price_cents: null, art_url: null, demand_score: 0 })
-    .eq('id', modelId);
-
-  if (error) fail(error, 'sku_models');
 }
 
 // Re-exported so consumers import row types and the contract from one place.

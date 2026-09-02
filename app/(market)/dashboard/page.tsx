@@ -63,7 +63,7 @@ const HELD_STATUSES: readonly ItemSummary["status"][] = [
 
 const OWED_STATUSES: readonly RedemptionSummary["status"][] = ["requested", "picking"];
 
-const HELD_CARD_STATUSES: readonly CardSummary["status"][] = ["active", "locked"];
+const HELD_CARD_STATUSES: CardSummary["status"][] = ["active", "locked"];
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";

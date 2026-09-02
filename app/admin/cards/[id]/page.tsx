@@ -28,8 +28,8 @@ const STATUS_LABELS: Record<CardStatus, string> = {
   pending_vault: "Pending vault",
 };
 
-const STATUS_TONES: Record<CardStatus, "info" | "warn" | "danger" | "success" | "neutral"> = {
-  active: "success",
+const STATUS_TONES: Record<CardStatus, "info" | "warn" | "danger" | "accent" | "neutral"> = {
+  active: "accent",
   locked: "info",
   burned: "danger",
   redeemed: "neutral",
@@ -181,7 +181,7 @@ function RetireCardForm({ cardId, cardLabel }: RetireCardFormProps) {
             </div>
             <Button
               type="submit"
-              variant="destructive"
+              variant="danger"
               className="whitespace-nowrap"
               disabled={!document.querySelector('input[name="confirm"]:checked')}
             >

@@ -138,7 +138,7 @@ function ArchiveModelForm({ modelId, modelLabel }: ArchiveModelFormProps) {
             </div>
             <Button
               type="submit"
-              variant="destructive"
+              variant="danger"
               className="whitespace-nowrap"
               disabled={!document.querySelector('input[name="confirm"]:checked')}
             >

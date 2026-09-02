@@ -107,15 +107,14 @@ describe('Payout eligibility logic (pure functions)', () => {
       expect(result.reason).toBe('Order already paid out');
     });
 
-    it('evaluates each condition independently', () => {
+it('evaluates each condition independently', () => {
       // Each condition should be able to block independently
+      // Note: alreadyPaidOut blocks when TRUE (not when false like the others)
       const conditions: (keyof EligibilityInput)[] = [
-        'holdElapsed',
-        'vaultReceived',
-        'connectReady',
-        'hasConnectAccount',
+        "holdElapsed",
+        "vaultReceived",
+        "hasConnectAccount",
       ];
-
       for (const condition of conditions) {
         const input: EligibilityInput = {
           holdElapsed: true,
@@ -124,12 +123,24 @@ describe('Payout eligibility logic (pure functions)', () => {
           hasConnectAccount: true,
           alreadyPaidOut: false,
         };
-        (input as Record<string, boolean>)[condition] = false;
+        const testInput = { ...input, [condition]: false } as EligibilityInput;
 
-        const result = checkEligibility(input);
+        const result = checkEligibility(testInput);
         expect(result.eligible).toBe(false);
         expect(result.reason).toBeTruthy();
       }
+
+      // alreadyPaidOut blocks when TRUE
+      const paidOutInput: EligibilityInput = {
+        holdElapsed: true,
+        vaultReceived: true,
+        connectReady: true,
+        hasConnectAccount: true,
+        alreadyPaidOut: true,
+      };
+      const paidOutResult = checkEligibility(paidOutInput);
+      expect(paidOutResult.eligible).toBe(false);
+      expect(paidOutResult.reason).toBe('Order already paid out');
     });
   });
 });

@@ -3005,6 +3005,9 @@ vi.mock('@/lib/supabase/server', () => ({
       return {
         select: vi.fn(() => ({
           eq: vi.fn(() => ({
+            in: vi.fn(() => ({
+              order: vi.fn(() => Promise.resolve({ data: [], error: null })),
+            })),
             order: vi.fn(() => Promise.resolve({ data: [], error: null })),
           })),
         })),

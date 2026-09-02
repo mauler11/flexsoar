@@ -114,7 +114,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   let stripe: Stripe;
   try {
-    stripe = new Stripe(STRIPE_SECRET_KEY!, { apiVersion: '2024-12-18.acacia' });
+    stripe = new Stripe(STRIPE_SECRET_KEY!, { apiVersion: '2026-08-26.dahlia' });
   } catch {
     return NextResponse.json({ error: 'Stripe not configured' }, { status: 500 });
   }
