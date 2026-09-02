@@ -36,6 +36,17 @@ import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatUsd } from "@/components/card/format";
 
+/** Placeholder for Connect status contract export — replace when Connect integration lands. */
+async function getConnectStatus(_userId: string): Promise<{
+  connected: boolean;
+  accountId?: string;
+  chargesEnabled?: boolean;
+  payoutsEnabled?: boolean;
+  onboardingUrl?: string;
+}> {
+  return { connected: false };
+}
+
 export const metadata: Metadata = {
   title: "Dashboard — FlexSoar Market",
 };
@@ -73,6 +84,9 @@ function isOverdue(deadline: Date): boolean {
 
 export default async function DashboardPage() {
   const me = await currentUserId();
+
+  const connectStatus = me ? await getConnectStatus(me) : { connected: false };
+
   if (!me) {
     return (
       <div className="flex flex-col gap-4">
@@ -118,6 +132,49 @@ export default async function DashboardPage() {
           list a shoe
         </Button>
       </div>
+
+      {/* Connect Payout Setup */}
+      <section className="flex flex-col gap-2">
+        <h2 className="font-mono text-[11px] font-black uppercase tracking-tight text-foreground">
+          Payout setup
+        </h2>
+        {connectStatus.connected ? (
+          <div className="border border-line bg-overlay/50 px-3 py-3 font-mono text-[11px] tracking-tight">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-green-500" aria-hidden="true" />
+                <span className="font-medium text-green-500">Connected</span>
+                <span className="text-muted">Account <code className="text-[10px] bg-overlay px-1 rounded">{connectStatus.accountId?.slice(-8)}</code></span>
+              </div>
+              <div className="flex items-center gap-2 text-[10px] text-muted">
+                <span>Charges: {connectStatus.chargesEnabled ? "enabled" : "disabled"}</span>
+                <span>Payouts: {connectStatus.payoutsEnabled ? "enabled" : "disabled"}</span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="border border-dashed border-line-strong px-3 py-3 font-mono text-[11px] tracking-tight">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#FF4444]" aria-hidden="true" />
+                <span className="font-medium text-[#FF4444]">Not connected</span>
+              </div>
+              <Button
+                variant="primary"
+                size="sm"
+                href={connectStatus.onboardingUrl ?? "#"}
+                disabled={!connectStatus.onboardingUrl}
+              >
+                Set up payouts
+              </Button>
+            </div>
+            <p className="mt-2 text-[9px] text-muted">
+              Connect your Stripe account to receive payouts. Payout method (cash vs
+              credit) is determined by your country — see TERMS.md §10.
+            </p>
+          </div>
+        )}
+      </section>
 
       {/* Submissions */}
       <section className="flex flex-col gap-2">

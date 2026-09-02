@@ -13,12 +13,30 @@ import { getUser } from "@/lib/api/contract";
 import { signOut } from "@/app/(auth)/actions";
 import { currentUserId } from "@/app/(market)/queries";
 import { MarketNav, type MarketNavItem } from "@/components/market/MarketNav";
+import { NotificationBell } from "@/components/market/NotificationBell";
 
 export const metadata: Metadata = {
   title: "FlexSoar Market",
   description:
     "Level-gated, oracle-priced card market. Mint cards into claims, list them, and settle sales through Stripe.",
 };
+
+/** Placeholder for notification contract export — replace when listNotifications/markNotificationRead land. */
+async function getNotifications(_userId: string): Promise<{
+  notifications: Array<{
+    id: string;
+    type: "submission_approved" | "card_sold" | "card_redeemed" | "payout_sent";
+    title: string;
+    body: string;
+    createdAt: string;
+    read: boolean;
+    link?: string;
+    linkLabel?: string;
+  }>;
+  unreadCount: number;
+}> {
+  return { notifications: [], unreadCount: 0 };
+}
 
 export default async function MarketLayout({
   children,
@@ -39,6 +57,10 @@ export default async function MarketLayout({
       : []),
   ];
 
+  const { notifications, unreadCount } = meId
+    ? await getNotifications(meId)
+    : { notifications: [], unreadCount: 0 };
+
   return (
     <div className="flex min-h-screen flex-col">
       <ToastProvider>
@@ -54,6 +76,11 @@ export default async function MarketLayout({
             <div className="flex items-center gap-2">
               {me ? (
                 <>
+                  <NotificationBell
+                    notifications={notifications}
+                    onMarkRead={() => {}}
+                    unreadCount={unreadCount}
+                  />
                   <a
                     href={`/u/${me.handle}`}
                     className="font-mono text-[11px] tracking-tight text-muted hover:text-foreground"
