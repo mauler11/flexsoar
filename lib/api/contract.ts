@@ -2065,6 +2065,46 @@ export async function redeemCard(
 }
 
 /**
+ * fn_burn_card(p_card_id, p_reason) -> void
+ *
+ * Permanently burns a card, setting its status to 'burned'. This is a one-way
+ * operation — the card can never be restored. Requires a written reason for
+ * the audit trail.
+ *
+ * ADMIN ONLY. Runs on the session client with fn_require_admin() guard.
+ *
+ * @throws FORBIDDEN ("admin privileges required"), NOT_FOUND, WRONG_STATUS
+ *         (card already burned or redeemed).
+ */
+export async function burnCard(cardId: UUID, reason: string): Promise<void> {
+  const supabase = await createServerSupabase();
+  unwrap(
+    await supabase.rpc('fn_burn_card', { p_card_id: cardId, p_reason: reason }),
+    'fn_burn_card',
+  );
+}
+
+/**
+ * fn_archive_sku_model(p_model_id, p_reason) -> void
+ *
+ * Archives a SKU model (soft delete). The model and its variants become hidden
+ * from the catalog and cannot be used for new mints. Existing cards are
+ * unaffected. This is a one-way operation — the model can never be restored.
+ * Requires a written reason for the audit trail.
+ *
+ * ADMIN ONLY. Runs on the session client with fn_require_admin() guard.
+ *
+ * @throws FORBIDDEN ("admin privileges required"), NOT_FOUND.
+ */
+export async function archiveSkuModel(modelId: UUID, reason: string): Promise<void> {
+  const supabase = await createServerSupabase();
+  unwrap(
+    await supabase.rpc('fn_archive_sku_model', { p_model_id: modelId, p_reason: reason }),
+    'fn_archive_sku_model',
+  );
+}
+
+/**
  * fn_advance_consignment(p_id, p_to, p_actor, p_note) -> void
  *
  * The state machine lives in the CASE block of the SQL function. Read it
@@ -3759,6 +3799,74 @@ export async function getUser(lookup: UserLookup): Promise<User | null> {
   if (result.error && !isNoRows(result.error)) fail(result.error, 'users');
 
   return (result.data as User | null) ?? null;
+}
+
+/**
+ * Stripe Connect onboarding status for a user.
+ * Sourced from the account.updated webhook data stored on the user row.
+ */
+export type ConnectOnboardingStatus =
+  | 'not_started'
+  | 'pending'
+  | 'payout_ready';
+
+/**
+ * Connect account details stored on the user.
+ */
+export interface ConnectAccountInfo {
+  /** The Stripe Connect account id, if created. */
+  connect_account_id: string | null;
+  /** Current onboarding state. */
+  onboarding_status: ConnectOnboardingStatus;
+  /** Whether the account can receive payouts. */
+  payouts_enabled: boolean;
+  /** Details on what's needed to complete onboarding, if pending. */
+  requirements: string[] | null;
+  /** When onboarding was last updated. */
+  updated_at: Timestamptz | null;
+}
+
+/**
+ * Get the Stripe Connect onboarding status for a user.
+ * Reads the Connect webhook data landed on the user row.
+ * Session client — users_self_read (006) allows self-read; admin reads any.
+ *
+ * @throws UNAUTHENTICATED (no session), FORBIDDEN (not self or admin).
+ */
+export async function getConnectOnboardingStatus(
+  userId: UUID,
+): Promise<ConnectAccountInfo | null> {
+  const supabase = await createServerSupabase();
+
+  const result = await supabase
+    .from('users')
+    .select(
+      'connect_account_id, connect_onboarding_status, connect_payouts_enabled, connect_requirements, connect_updated_at',
+    )
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (result.error) fail(result.error, 'users');
+
+  const row = result.data as
+    | {
+        connect_account_id: string | null;
+        connect_onboarding_status: ConnectOnboardingStatus | null;
+        connect_payouts_enabled: boolean | null;
+        connect_requirements: string[] | null;
+        connect_updated_at: Timestamptz | null;
+      }
+    | null;
+
+  if (!row) return null;
+
+  return {
+    connect_account_id: row.connect_account_id,
+    onboarding_status: row.connect_onboarding_status ?? 'not_started',
+    payouts_enabled: row.connect_payouts_enabled ?? false,
+    requirements: row.connect_requirements,
+    updated_at: row.connect_updated_at,
+  };
 }
 
 /**

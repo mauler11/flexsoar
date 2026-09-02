@@ -20,7 +20,7 @@ import { formatUsd } from "@/components/card/format";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Table, TBody, THead, Td, Th, Tr } from "@/components/ui/Table";
-import { getConsignment } from "@/lib/api/contract";
+import { getConnectOnboardingStatus, getConsignment } from "@/lib/api/contract";
 import type { ItemStatus } from "@/lib/db/types";
 
 export const metadata: Metadata = {
@@ -60,6 +60,12 @@ export default async function ConsignmentDetailPage({
   const consignment = await getConsignment(id);
   if (!consignment) notFound();
 
+  const connect = consignment.consignor?.id
+    ? await getConnectOnboardingStatus(consignment.consignor.id)
+    : null;
+
+  if (!consignment) notFound();
+
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-6">
       <nav className="font-mono text-[10px] uppercase tracking-tight text-muted">
@@ -88,6 +94,10 @@ export default async function ConsignmentDetailPage({
           status={consignment.status}
         />
       </header>
+
+      {connect && (
+        <ConnectStatusBadge connect={connect} />
+      )}
 
       <dl className="grid grid-cols-2 gap-2 border border-line bg-raised p-3 font-mono text-[11px] tracking-tight sm:grid-cols-4">
         <Field label="Items" value={String(consignment.item_count)} />
@@ -212,6 +222,57 @@ function Field({ label, value }: { label: string; value: string }) {
     <div className="flex flex-col">
       <dt className="text-[10px] uppercase tracking-tight text-muted">{label}</dt>
       <dd className="tabular-nums">{value}</dd>
+    </div>
+  );
+}
+
+function ConnectStatusBadge({ connect }: { connect: Awaited<ReturnType<typeof getConnectOnboardingStatus>> }) {
+
+  if (!connect) {
+    return (
+      <div className="border border-line bg-raised p-3 font-mono text-[11px] tracking-tight">
+        <dt className="text-[10px] uppercase tracking-tight text-muted">Connect onboarding</dt>
+        <dd className="text-muted">No data</dd>
+      </div>
+    );
+  }
+
+  const statusLabels: Record<typeof connect.onboarding_status, string> = {
+    not_started: "Not started",
+    pending: "Pending",
+    payout_ready: "Payout ready",
+  };
+
+  const statusTones: Record<typeof connect.onboarding_status, "info" | "warn" | "success" | "danger" | "neutral"> = {
+    not_started: "neutral",
+    pending: "warn",
+    payout_ready: "success",
+  };
+
+  return (
+    <div className="border border-line bg-raised p-3 font-mono text-[11px] tracking-tight">
+      <div className="flex flex-wrap items-center gap-2">
+        <dt className="text-[10px] uppercase tracking-tight text-muted">Connect onboarding</dt>
+        <Badge tone={statusTones[connect.onboarding_status]}>
+          {statusLabels[connect.onboarding_status]}
+        </Badge>
+        {connect.connect_account_id && (
+          <span className="text-muted text-[10px]">{connect.connect_account_id.slice(0, 20)}…</span>
+        )}
+        {connect.payouts_enabled && (
+          <Badge tone="success">Payouts enabled</Badge>
+        )}
+        {connect.requirements && connect.requirements.length > 0 && (
+          <span className="text-muted text-[10px]">
+            Requirements: {connect.requirements.join(", ")}
+          </span>
+        )}
+      </div>
+      {connect.updated_at && (
+        <dd className="text-[10px] text-muted mt-1">
+          Last updated: {formatTimestamp(connect.updated_at)}
+        </dd>
+      )}
     </div>
   );
 }
