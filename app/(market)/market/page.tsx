@@ -64,11 +64,21 @@ export default async function BrowsePage({
   if (sizeUs != null && Number.isFinite(sizeUs)) query.sizeUs = sizeUs;
   if (tier.length) query.tier = tier as Tier[];
 
-  const [listings, skus, platformConfig] = await Promise.all([
-    getListings(query),
-    getSkus({ limit: 400 }),
-    getPlatformConfig(),
-  ]);
+  let listings = [] as Awaited<ReturnType<typeof getListings>>;
+  let skus = [] as Awaited<ReturnType<typeof getSkus>>;
+  let platformConfig = { show_numeric_float: false };
+  let loadError: string | null = null;
+
+  try {
+    [listings, skus, platformConfig] = await Promise.all([
+      getListings(query),
+      getSkus({ limit: 400 }),
+      getPlatformConfig(),
+    ]);
+  } catch (err) {
+    loadError = err instanceof Error ? err.message : String(err);
+    console.error('[market] load error:', loadError);
+  }
 
   const brands = [...new Set(skus.map((s) => s.brand))].sort();
   const modelsByBrand: Record<string, string[]> = {};
@@ -100,6 +110,12 @@ export default async function BrowsePage({
       {params.error && (
         <Banner tone="error" title="Couldn't do that">
           {params.error}
+        </Banner>
+      )}
+
+      {loadError && (
+        <Banner tone="error" title="Failed to load market">
+          <pre className="font-mono text-[10px] whitespace-pre-wrap">{loadError}</pre>
         </Banner>
       )}
 
