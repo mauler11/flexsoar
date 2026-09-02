@@ -9,34 +9,78 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ToastProvider } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
-import { getUser } from "@/lib/api/contract";
+import type { Notification as ContractNotification } from "@/lib/api/contract";
+import type { Json } from "@/lib/db/types";
+import { getUser, listNotifications } from "@/lib/api/contract";
 import { signOut } from "@/app/(auth)/actions";
 import { currentUserId } from "@/app/(market)/queries";
 import { MarketNav, type MarketNavItem } from "@/components/market/MarketNav";
 import { NotificationBell } from "@/components/market/NotificationBell";
+
+interface NotificationPayload {
+  sku?: { brand?: string; model?: string; colorway?: string; size_us?: number };
+  card_id?: string;
+  price_cents?: number;
+  amount_cents?: number;
+}
+
+function notificationTitle(type: ContractNotification["type"], payload: Json): string {
+  switch (type) {
+    case "submission_approved":
+      return "Submission approved";
+    case "card_sold":
+      return "Card sold";
+    case "card_redeemed":
+      return "Card redeemed";
+    case "payout_sent":
+      return "Payout sent";
+  }
+}
+
+function notificationBody(type: ContractNotification["type"], payload: Json): string {
+  const p = payload as NotificationPayload;
+  switch (type) {
+    case "submission_approved":
+      return `Your submission for ${p.sku?.brand ?? "a shoe"} ${p.sku?.model ?? ""} was approved and minted.`;
+    case "card_sold":
+      return `Your ${p.sku?.brand ?? "card"} ${p.sku?.model ?? ""} sold for ${p.price_cents ? `$${(p.price_cents / 100).toFixed(2)}` : "an undisclosed amount"}.`;
+    case "card_redeemed":
+      return `Your ${p.sku?.brand ?? "card"} ${p.sku?.model ?? ""} was redeemed and is being shipped.`;
+    case "payout_sent":
+      return `A payout of ${p.amount_cents ? `$${(p.amount_cents / 100).toFixed(2)}` : "funds"} was sent to your account.`;
+  }
+}
+
+function notificationLink(type: ContractNotification["type"], payload: Json): string | undefined {
+  const p = payload as NotificationPayload;
+  switch (type) {
+    case "submission_approved":
+      return p.card_id ? `/card/${p.card_id}` : undefined;
+    case "card_sold":
+      return p.card_id ? `/card/${p.card_id}` : undefined;
+    case "card_redeemed":
+      return p.card_id ? `/card/${p.card_id}` : undefined;
+    case "payout_sent":
+      return "/dashboard";
+  }
+}
+
+function notificationLinkLabel(type: ContractNotification["type"]): string | undefined {
+  switch (type) {
+    case "submission_approved":
+    case "card_sold":
+    case "card_redeemed":
+      return "View card";
+    case "payout_sent":
+      return "View dashboard";
+  }
+}
 
 export const metadata: Metadata = {
   title: "FlexSoar Market",
   description:
     "Level-gated, oracle-priced card market. Mint cards into claims, list them, and settle sales through Stripe.",
 };
-
-/** Placeholder for notification contract export — replace when listNotifications/markNotificationRead land. */
-async function getNotifications(_userId: string): Promise<{
-  notifications: Array<{
-    id: string;
-    type: "submission_approved" | "card_sold" | "card_redeemed" | "payout_sent";
-    title: string;
-    body: string;
-    createdAt: string;
-    read: boolean;
-    link?: string;
-    linkLabel?: string;
-  }>;
-  unreadCount: number;
-}> {
-  return { notifications: [], unreadCount: 0 };
-}
 
 export default async function MarketLayout({
   children,
@@ -57,9 +101,21 @@ export default async function MarketLayout({
       : []),
   ];
 
-  const { notifications, unreadCount } = meId
-    ? await getNotifications(meId)
+  const { notifications: rawNotifications, unreadCount } = meId
+    ? await listNotifications({ userId: meId, limit: 10 })
     : { notifications: [], unreadCount: 0 };
+
+  // Transform contract notifications to NotificationBell format
+  const notifications = rawNotifications.map((n: ContractNotification) => ({
+    id: n.id,
+    type: n.type,
+    title: notificationTitle(n.type, n.payload),
+    body: notificationBody(n.type, n.payload),
+    createdAt: n.created_at,
+    read: n.read_at !== null,
+    link: notificationLink(n.type, n.payload),
+    linkLabel: notificationLinkLabel(n.type),
+  }));
 
   return (
     <div className="flex min-h-screen flex-col">
