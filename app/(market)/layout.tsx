@@ -78,7 +78,6 @@ export default async function MarketLayout({
                 <>
                   <NotificationBell
                     notifications={notifications}
-                    onMarkRead={() => {}}
                     unreadCount={unreadCount}
                   />
                   <a

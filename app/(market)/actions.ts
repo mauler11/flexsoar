@@ -33,6 +33,7 @@ import {
   releaseCreditHold,
   purchaseCardSplit,
   setCountry,
+  markNotificationRead,
 } from '@/lib/api/contract';
 import type { ShippingAddress } from '@/lib/api/contract';
 import type { UUID } from '@/lib/db/types';
@@ -459,4 +460,24 @@ export async function redeemCardAction(formData: FormData): Promise<void> {
   }
 
   redirect(`${backTo}?redeemed=1`);
+}
+
+// ------------------------------------------------------------
+// NOTIFICATIONS
+// ------------------------------------------------------------
+
+/**
+ * Marks a notification as read. Called directly from NotificationBell client component.
+ */
+export async function markNotificationReadAction(notificationId: string): Promise<void> {
+  const me = await currentUserId();
+  if (!me) {
+    redirect('/sign-in');
+  }
+
+  try {
+    await markNotificationRead(notificationId);
+  } catch (thrown) {
+    redirectWithError('/market', errorText(thrown));
+  }
 }

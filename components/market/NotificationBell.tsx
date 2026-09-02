@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { cn } from "@/components/ui/cn";
 import { Button } from "@/components/ui/Button";
 import { formatUsd } from "@/components/card/format";
+import { markNotificationReadAction } from "@/app/(market)/actions";
 
 export interface Notification {
   id: string;
@@ -18,13 +19,11 @@ export interface Notification {
 
 interface NotificationBellProps {
   notifications: Notification[];
-  onMarkRead: (id: string) => void;
   unreadCount: number;
 }
 
 export function NotificationBell({
   notifications,
-  onMarkRead,
   unreadCount,
 }: NotificationBellProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -48,8 +47,10 @@ export function NotificationBell({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleMarkRead = (id: string) => {
-    onMarkRead(id);
+  const handleMarkRead = async (id: string) => {
+    await markNotificationReadAction(id);
+    // Optimistic update would be nice but this is a full page refresh action
+    window.location.reload();
   };
 
   const formatTime = (iso: string): string => {
@@ -165,7 +166,7 @@ export function NotificationBell({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => notifications.filter(n => !n.read).forEach(n => onMarkRead(n.id))}
+                onClick={() => notifications.filter(n => !n.read).forEach(n => handleMarkRead(n.id))}
                 className="text-[10px] text-accent hover:text-accent/80"
               >
                 Mark all read

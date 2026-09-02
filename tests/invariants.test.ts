@@ -3107,7 +3107,7 @@ describe('NotificationBell — signed out render', () => {
   it('renders without crashing when no notifications', async () => {
     const { NotificationBell } = await import('@/components/market/NotificationBell');
     const html = renderToStaticMarkup(
-      createElement(NotificationBell, { notifications: [], onMarkRead: () => {}, unreadCount: 0 })
+      createElement(NotificationBell, { notifications: [], unreadCount: 0 })
     );
     // Static render only shows the button (dropdown is client-side interactive)
     expect(html).toContain('aria-label="No notifications"');
@@ -3119,7 +3119,6 @@ describe('NotificationBell — signed out render', () => {
     const html = renderToStaticMarkup(
       createElement(NotificationBell, {
         notifications: [{ id: '1', type: 'card_sold', title: 'Sold', body: 'Your card sold', createdAt: new Date().toISOString(), read: false }],
-        onMarkRead: () => {},
         unreadCount: 3,
       })
     );
@@ -3138,7 +3137,6 @@ describe('NotificationBell — signed out render', () => {
           { id: '1', type: 'submission_approved', title: 'Approved', body: 'Your submission was approved', createdAt: new Date().toISOString(), read: false },
           { id: '2', type: 'card_sold', title: 'Sold', body: 'Your card sold for $200', createdAt: new Date().toISOString(), read: true },
         ],
-        onMarkRead: () => {},
         unreadCount: 1,
       })
     );
