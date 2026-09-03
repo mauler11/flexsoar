@@ -7,9 +7,10 @@ interface PhotoCarouselProps {
   photos: string[];
   alt?: string;
   className?: string;
+  onImageClick?: (index: number) => void;
 }
 
-export function PhotoCarousel({ photos, alt = "Product", className }: PhotoCarouselProps) {
+export function PhotoCarousel({ photos, alt = "Product", className, onImageClick }: PhotoCarouselProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
 
   if (!photos || photos.length === 0) {
@@ -26,6 +27,10 @@ export function PhotoCarousel({ photos, alt = "Product", className }: PhotoCarou
     setCurrentIndex((prev) => (prev === photos.length - 1 ? 0 : prev + 1));
   };
 
+  const handleImageClick = () => {
+    onImageClick?.(currentIndex);
+  };
+
   return (
     <div className={cn("relative aspect-[3/2] bg-[#050505] rounded-lg overflow-hidden", className)}>
       <button
@@ -38,11 +43,11 @@ export function PhotoCarousel({ photos, alt = "Product", className }: PhotoCarou
         </svg>
       </button>
 
-      <div className="absolute inset-0">
+      <div className="absolute inset-0" onClick={handleImageClick}>
         <img
           src={photos[currentIndex]}
           alt={`${alt} - image ${currentIndex + 1} of ${photos.length}`}
-          className="absolute inset-0 h-full w-full object-contain transition-opacity duration-300"
+          className="absolute inset-0 h-full w-full object-contain transition-opacity duration-300 cursor-zoom-in"
         />
       </div>
 

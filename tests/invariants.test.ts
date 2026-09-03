@@ -2985,22 +2985,23 @@ vi.mock('@/lib/api/contract', async (importOriginal) => {
 vi.mock('@/lib/supabase/server', () => ({
   createServerSupabase: vi.fn(() => {
     const mockSelect = () => ({
-      eq: () => ({
-        in: () => ({
+      select: () => ({
+        eq: () => ({
+          in: () => ({
+            order: () => Promise.resolve({ data: [], error: null }),
+          }),
           order: () => Promise.resolve({ data: [], error: null }),
+          maybeSingle: () => Promise.resolve({
+            data: {
+              connect_account_id: 'acct_test123',
+              connect_onboarding_status: 'pending',
+              connect_payouts_enabled: false,
+              connect_requirements: ['business_type', 'business_profile.mcc'],
+              connect_updated_at: '2026-01-01T00:00:00Z',
+            },
+            error: null,
+          }),
         }),
-        order: () => Promise.resolve({ data: [], error: null }),
-        maybeSingle: () => Promise.resolve({
-          data: {
-            connect_account_id: 'acct_test123',
-            connect_onboarding_status: 'pending',
-            connect_payouts_enabled: false,
-            connect_requirements: ['business_type', 'business_profile.mcc'],
-            connect_updated_at: '2026-01-01T00:00:00Z',
-          },
-          error: null,
-        }),
-        select: () => Promise.resolve({ data: [], error: null }),
       }),
     });
     return {

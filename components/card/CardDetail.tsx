@@ -11,6 +11,7 @@
 "use client";
 
 import type { Card, Listing, Sku } from "@/lib/db/types";
+import { useState } from "react";
 import { cn } from "@/components/ui/cn";
 import { CardArt } from "./CardArt";
 import { CardFrame } from "./CardFrame";
@@ -71,6 +72,15 @@ export function CardDetail({
     ...photos,
   ].filter(Boolean);
 
+  // Zoom modal state
+  const [zoomOpen, setZoomOpen] = useState(false);
+  const [zoomIndex, setZoomIndex] = useState(0);
+
+  const openZoom = (index: number) => {
+    setZoomIndex(index);
+    setZoomOpen(true);
+  };
+
   return (
     <CardFrame
       tier={card.tier}
@@ -80,21 +90,23 @@ export function CardDetail({
       <div className="grid gap-6 p-5 sm:grid-cols-2">
         <div className="flex items-center justify-center">
           {zoomImages.length > 0 ? (
-            <ImageZoom images={zoomImages} alt={`${productName} ${sku.colorway}`} initialIndex={0}>
-              {hasArt ? (
-                <CardArt sku={sku} className="w-full sm:w-auto sm:min-w-[320px]" px={8} />
-              ) : (
-                <img
-                  src={zoomImages[0]}
-                  alt={`${productName} ${sku.colorway}`}
-                  className="w-full sm:w-auto sm:min-w-[320px] object-contain"
-                />
-              )}
-            </ImageZoom>
+            <>
+              <PhotoCarousel
+                photos={zoomImages}
+                alt={`${productName} ${sku.colorway}`}
+                className="w-full sm:w-auto sm:min-w-[320px]"
+                onImageClick={openZoom}
+              />
+              <ImageZoom
+                images={zoomImages}
+                isOpen={zoomOpen}
+                onClose={() => setZoomOpen(false)}
+                initialIndex={zoomIndex}
+                alt={`${productName} ${sku.colorway}`}
+              />
+            </>
           ) : (
-            <ImageZoom images={[]} alt={`${productName} ${sku.colorway}`}>
-              <CardArt sku={sku} className="w-full sm:w-auto sm:min-w-[320px]" px={8} />
-            </ImageZoom>
+            <CardArt sku={sku} className="w-full sm:w-auto sm:min-w-[320px]" px={8} />
           )}
         </div>
 
