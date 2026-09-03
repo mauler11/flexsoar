@@ -1500,41 +1500,30 @@ export async function mintCard(itemId: UUID, ownerId: UUID): Promise<UUID> {
 }
 
 /**
- * fn_list_card(p_card_id, p_seller_id, p_price_cents) -> uuid
+ * fn_list_card(p_card_id, p_seller_id, p_price_cents, p_payout_method, p_fair_price_cents) -> uuid
  *
- * Locks the card and opens an early-access window sized by the seller's level.
- *
- * fn_list_card does NOT accept a payout method yet — the migration is filed in
- * docs/handoff/data.md — so listing as 'credit' or 'either' is refused loudly
- * here rather than silently recording a 'cash' listing the seller never
- * elected. Once the migration lands, this guard is deleted and
- * `p_payout_method` is passed straight through.
+ * Lists a card. For vaulted items (custody = 'warehouse'), the listing goes
+ * straight to 'public' and the card stays 'active'. For regular items,
+ * early_access window applies and card is locked.
  *
  * @returns the new listing id.
- * @throws NOT_OWNER, WRONG_STATUS, UNKNOWN (a payout_method other than 'cash',
- *         pending the migration).
+ * @throws NOT_OWNER, WRONG_STATUS, UNKNOWN (payout_method other than 'credit').
  */
 export async function listCard(
   cardId: UUID,
   sellerId: UUID,
   priceCents: Cents,
-  payoutMethod: PayoutMethod = 'cash',
+  payoutMethod: PayoutMethod = 'credit',
+  fairPriceCents: Cents | null = null,
 ): Promise<UUID> {
-  if (payoutMethod !== 'cash') {
-    throw new ContractError(
-      'UNKNOWN',
-      `cannot list as '${payoutMethod}': fn_list_card has no payout_method argument yet. ` +
-        'The migration is filed in docs/handoff/data.md; list as cash or promote it.',
-      { payoutMethod },
-    );
-  }
-
   const supabase = await createServerSupabase();
   return unwrap(
     await supabase.rpc('fn_list_card', {
       p_card_id: cardId,
       p_seller_id: sellerId,
       p_price_cents: priceCents,
+      p_payout_method: payoutMethod,
+      p_fair_price_cents: fairPriceCents,
     }),
     'fn_list_card',
   ) as UUID;
