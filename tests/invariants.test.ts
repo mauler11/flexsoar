@@ -1727,6 +1727,7 @@ describe('MarketTile -> CardTile showNumericFloat wiring (docs/handoff/design.md
     card_id: 'card-1',
     seller_id: 'seller-1',
     price_cents: 21000,
+    fair_price_cents: 19000,
     status: 'public',
     early_access_level: 0,
     public_at: '2026-01-01T00:00:00Z',

@@ -26,6 +26,7 @@ export interface BuyPanelListing {
   id: string;
   cardId: string;
   priceCents: number;
+  fairPriceCents: number | null;
   oracleValueCents: number | null;
   status: string;
   earlyAccessLevel: number;
@@ -130,6 +131,11 @@ export function BuyPanel({
       {listing.oracleValueCents != null && (
         <p className="font-mono text-[10px] tracking-tight text-muted">
           Oracle fair value {formatUsd(listing.oracleValueCents)}
+        </p>
+      )}
+      {listing.fairPriceCents != null && (
+        <p className="font-mono text-[10px] tracking-tight text-muted">
+          Fair price (this condition) {formatUsd(listing.fairPriceCents)}
         </p>
       )}
 

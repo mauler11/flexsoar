@@ -185,6 +185,12 @@ export default async function CardPage({
                   <span className="text-foreground font-medium">{formatUsd(oracleCents)}</span>
                 </div>
               )}
+              {listing?.fair_price_cents != null && (
+                <div className="flex items-baseline justify-between font-mono tracking-tight text-muted">
+                  <span>Fair price (this condition)</span>
+                  <span className="text-foreground font-medium">{formatUsd(listing.fair_price_cents)}</span>
+                </div>
+              )}
               {item.grading_notes && (
                 <p className="leading-snug tracking-tight text-muted">{item.grading_notes}</p>
               )}
@@ -232,6 +238,7 @@ export default async function CardPage({
                 id: listing.id,
                 cardId: listing.card_id,
                 priceCents: listing.price_cents,
+                fairPriceCents: listing.fair_price_cents,
                 oracleValueCents: listing.oracle_value_cents,
                 status: listing.status,
                 earlyAccessLevel: listing.early_access_level,
@@ -336,6 +343,11 @@ function OwnerListingPanel({
       {listing.oracle_value_cents != null && (
         <p className="font-mono text-[10px] tracking-tight text-muted">
           Oracle fair value {formatUsd(listing.oracle_value_cents)}
+        </p>
+      )}
+      {listing.fair_price_cents != null && (
+        <p className="font-mono text-[10px] tracking-tight text-muted">
+          Fair price {formatUsd(listing.fair_price_cents)}
         </p>
       )}
 

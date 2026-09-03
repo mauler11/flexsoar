@@ -535,6 +535,7 @@ export interface ListingSummary {
   card_id: UUID;
   seller_id: UUID;
   price_cents: Cents;
+  fair_price_cents: Cents | null;
   status: ListingStatus;
   early_access_level: number;
   public_at: Timestamptz;
@@ -1020,7 +1021,7 @@ const LISTING_REF_COLUMNS =
   'id, price_cents, status, early_access_level, public_at, oracle_value_cents';
 
 const LISTING_COLUMNS =
-  'id, card_id, seller_id, price_cents, status, early_access_level, public_at, ' +
+  'id, card_id, seller_id, price_cents, fair_price_cents, status, early_access_level, public_at, ' +
   'oracle_value_cents, created_at, sold_at';
 
 const ORDER_COLUMNS =
@@ -1175,6 +1176,7 @@ interface ListingRow {
   card_id: UUID;
   seller_id: UUID;
   price_cents: Cents;
+  fair_price_cents: Cents | null;
   status: ListingStatus;
   early_access_level: number;
   public_at: Timestamptz;
@@ -3584,6 +3586,7 @@ function toListingSummary(row: ListingRow): ListingSummary {
     card_id: row.card_id,
     seller_id: row.seller_id,
     price_cents: row.price_cents,
+    fair_price_cents: row.fair_price_cents ?? null,
     status: row.status,
     early_access_level: row.early_access_level,
     public_at: row.public_at,
