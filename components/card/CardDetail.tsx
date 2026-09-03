@@ -61,6 +61,9 @@ export function CardDetail({
     (c) => c.toUpperCase()
   );
 
+  // Determine if SKU has art (uploaded PNG or sprite)
+  const hasArt = !!sku.art_url || !!sku.sprite_key;
+
   return (
     <CardFrame
       tier={card.tier}
@@ -69,7 +72,14 @@ export function CardDetail({
     >
       <div className="grid gap-6 p-5 sm:grid-cols-2">
         <div className="flex items-center justify-center">
-          {photos.length > 0 ? (
+          {photos.length > 0 && !hasArt ? (
+            // No pixel art — use first photo as fallback
+            <img
+              src={photos[0]}
+              alt={`${productName} ${sku.colorway}`}
+              className="w-full sm:w-auto sm:min-w-[320px] object-contain"
+            />
+          ) : photos.length > 0 ? (
             <PhotoCarousel
               photos={photos}
               alt={`${productName} ${sku.colorway}`}
