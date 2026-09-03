@@ -8,10 +8,14 @@
 begin;
 
 -- ---------------------------------------------------------------------------
--- 1. Update fn_approve_submission to accept and store fair_price_cents
+-- 1. Drop old overloads of fn_approve_submission, then create new 3-param version
+--    (CREATE OR REPLACE with different param count creates overloads, not replacement)
 -- ---------------------------------------------------------------------------
 
-create or replace function fn_approve_submission(
+drop function if exists fn_approve_submission(uuid, integer);
+drop function if exists fn_approve_submission(uuid, integer, integer);
+
+create function fn_approve_submission(
   p_item_id uuid, p_price_cents integer default null, p_fair_price_cents integer default null)
 returns uuid language plpgsql security definer as $$
 declare
@@ -60,9 +64,6 @@ grant execute on function fn_approve_submission(uuid, integer, integer) to authe
 -- 2. Update fn_list_card to accept fair_price_cents (for direct listings)
 -- ---------------------------------------------------------------------------
 
--- Check current fn_list_card signature first
--- If it already has fair_price_cents parameter, skip. Otherwise add it.
-
 do $$
 declare v_sig text;
 begin
@@ -72,10 +73,7 @@ begin
     and pronamespace = 'public'::regnamespace;
   
   if v_sig not like '%fair_price_cents%' then
-    -- We need to update fn_list_card. Let's check its full definition first.
-    -- For now, assume it needs updating. The actual update will be in a separate migration
-    -- if needed, since fn_list_card might be in a different migration file.
-    raise notice 'fn_list_card signature: %', v_sig;
+    raise notice 'fn_list_card signature: % (needs fair_price_cents)', v_sig;
   else
     raise notice 'fn_list_card already has fair_price_cents';
   end if;
@@ -94,7 +92,7 @@ begin
     and pronamespace = 'public'::regnamespace;
   
   if v_sig not like '%fair_price_cents%' then
-    raise exception '030: fn_approve_submission missing fair_price_cents parameter';
+    raise exception '030: fn_approve_submission missing fair_price_cents parameter. Got: %', v_sig;
   end if;
   
   if not exists (select 1 from information_schema.columns
