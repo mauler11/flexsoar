@@ -116,16 +116,15 @@ export async function approveSubmission(
   itemId: UUID,
   priceCents: Cents,
   fairPriceCents: Cents | null = null,
-): Promise<void> {
+): Promise<UUID> {
   const supabase = await createServerSupabase();
-  unwrapRpc(
-    await supabase.rpc("fn_approve_submission", {
-      p_item_id: itemId,
-      p_price_cents: priceCents,
-      p_fair_price_cents: fairPriceCents,
-    }),
-    "fn_approve_submission",
-  );
+  const result = await supabase.rpc("fn_approve_submission", {
+    p_item_id: itemId,
+    p_price_cents: priceCents,
+    p_fair_price_cents: fairPriceCents,
+  });
+  unwrapRpc(result, "fn_approve_submission");
+  return result.data as UUID;
 }
 
 /**

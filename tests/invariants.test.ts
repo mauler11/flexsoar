@@ -3000,6 +3000,7 @@ vi.mock('@/lib/supabase/server', () => ({
           },
           error: null,
         }),
+        select: () => Promise.resolve({ data: [], error: null }),
       }),
     });
     return {

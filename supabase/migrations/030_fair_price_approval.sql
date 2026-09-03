@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 030_fair_price_approval.sql
 --
--- Add fair_price_cents to fn_approve_submission
+-- Add fair_price_cents to fn_approve_submission + send notification to consignor
 -- RUN IN: Supabase SQL editor, "Run without RLS". Single pass.
 -- ============================================================================
 
@@ -55,7 +55,27 @@ begin
   returning id into v_listing;
 
   update cards set status = 'locked' where id = v_card;
-  return v_listing;
+
+  -- Notify the consignor that their submission was approved
+  if v_item.consignor_id is not null then
+    perform fn_notify(
+      v_item.consignor_id,
+      'submission_approved',
+      jsonb_build_object(
+        'card_id', v_card,
+        'listing_id', v_listing,
+        'item_id', p_item_id,
+        'brand', v_item.sku.brand,
+        'model', v_item.sku.model,
+        'colorway', v_item.sku.colorway,
+        'size_us', v_item.sku.size_us,
+        'price_cents', v_price,
+        'fair_price_cents', v_fair
+      )
+    );
+  end if;
+
+  return v_card;
 end $$;
 
 grant execute on function fn_approve_submission(uuid, integer, integer) to authenticated;
@@ -102,7 +122,7 @@ begin
     raise exception '030: fair_price_cents column missing from listings';
   end if;
 
-  raise notice '030 ok: fn_approve_submission updated with fair_price_cents';
+  raise notice '030 ok: fn_approve_submission updated with fair_price_cents + notification';
 end $$;
 
 commit;
