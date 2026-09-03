@@ -35,6 +35,8 @@ export interface ApproveSubmissionInput {
   itemId: UUID;
   /** The listing price, in USD cents. */
   priceCents: Cents;
+  /** Optional admin-set fair price for this card's condition, in USD cents. */
+  fairPriceCents?: Cents;
 }
 
 /**
@@ -71,7 +73,17 @@ export async function approveSubmissionAction(
       };
     }
 
-    await approveSubmission(input.itemId, price);
+    if (input.fairPriceCents !== undefined) {
+      const fair = input.fairPriceCents;
+      if (!Number.isInteger(fair) || fair <= 0) {
+        return {
+          ok: false,
+          message: "fair price must be a positive integer (cents) or omitted",
+        };
+      }
+    }
+
+    await approveSubmission(input.itemId, price, input.fairPriceCents ?? null);
 
     revalidatePath("/admin/submissions");
     revalidatePath(`/admin/submissions/${input.itemId}`);

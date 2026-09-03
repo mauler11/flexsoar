@@ -115,12 +115,14 @@ function unwrapRpc(
 export async function approveSubmission(
   itemId: UUID,
   priceCents: Cents,
+  fairPriceCents: Cents | null = null,
 ): Promise<void> {
   const supabase = await createServerSupabase();
   unwrapRpc(
     await supabase.rpc("fn_approve_submission", {
       p_item_id: itemId,
       p_price_cents: priceCents,
+      p_fair_price_cents: fairPriceCents,
     }),
     "fn_approve_submission",
   );

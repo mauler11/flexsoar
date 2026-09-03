@@ -2982,41 +2982,32 @@ vi.mock('@/lib/api/contract', async (importOriginal) => {
 
 // Mock the Supabase server for getConnectOnboardingStatus users table query
 vi.mock('@/lib/supabase/server', () => ({
-  createServerSupabase: vi.fn(() => ({
-    from: vi.fn((table: string) => {
-      if (table === 'users') {
-        return {
-          select: vi.fn(() => ({
-            eq: vi.fn(() => ({
-              maybeSingle: vi.fn(() => Promise.resolve({
-                data: {
-                  connect_account_id: 'acct_test123',
-                  connect_onboarding_status: 'pending',
-                  connect_payouts_enabled: false,
-                  connect_requirements: ['business_type', 'business_profile.mcc'],
-                  connect_updated_at: '2026-01-01T00:00:00Z',
-                },
-                error: null,
-              })),
-            })),
-          })),
-        };
-      }
-      return {
-        select: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            in: vi.fn(() => ({
-              order: vi.fn(() => Promise.resolve({ data: [], error: null })),
-            })),
-            order: vi.fn(() => Promise.resolve({ data: [], error: null })),
-          })),
-        })),
-      };
-    }),
-    auth: {
-      getUser: vi.fn(() => Promise.resolve({ data: { user: null }, error: null })),
-    },
-  })),
+  createServerSupabase: vi.fn(() => {
+    const mockSelect = () => ({
+      eq: () => ({
+        in: () => ({
+          order: () => Promise.resolve({ data: [], error: null }),
+        }),
+        order: () => Promise.resolve({ data: [], error: null }),
+        maybeSingle: () => Promise.resolve({
+          data: {
+            connect_account_id: 'acct_test123',
+            connect_onboarding_status: 'pending',
+            connect_payouts_enabled: false,
+            connect_requirements: ['business_type', 'business_profile.mcc'],
+            connect_updated_at: '2026-01-01T00:00:00Z',
+          },
+          error: null,
+        }),
+      }),
+    });
+    return {
+      from: () => mockSelect(),
+      auth: {
+        getUser: vi.fn(() => Promise.resolve({ data: { user: null }, error: null })),
+      },
+    };
+  }),
 }));
 
 // Import page components after mocks
