@@ -18,6 +18,7 @@ import { ConditionBadge } from "./ConditionBadge";
 import { FloatBar } from "./FloatBar";
 import { TierBadge } from "./TierBadge";
 import { PhotoCarousel } from "./PhotoCarousel";
+import { ImageZoom } from "./ImageZoom";
 import { formatUsd } from "./format";
 import { displayPriceCents } from "./value";
 import { conditionGradeBand, floatBand, publishedConditionLabel } from "@/lib/domain/rarity";
@@ -64,6 +65,12 @@ export function CardDetail({
   // Determine if SKU has art (uploaded PNG or sprite)
   const hasArt = !!sku.art_url || !!sku.sprite_key;
 
+  // Build images array for zoom: art first, then photos
+  const zoomImages = [
+    ...(sku.art_url ? [sku.art_url] : []),
+    ...photos,
+  ].filter(Boolean);
+
   return (
     <CardFrame
       tier={card.tier}
@@ -72,21 +79,22 @@ export function CardDetail({
     >
       <div className="grid gap-6 p-5 sm:grid-cols-2">
         <div className="flex items-center justify-center">
-          {photos.length > 0 && !hasArt ? (
-            // No pixel art — use first photo as fallback
-            <img
-              src={photos[0]}
-              alt={`${productName} ${sku.colorway}`}
-              className="w-full sm:w-auto sm:min-w-[320px] object-contain"
-            />
-          ) : photos.length > 0 ? (
-            <PhotoCarousel
-              photos={photos}
-              alt={`${productName} ${sku.colorway}`}
-              className="w-full sm:w-auto sm:min-w-[320px]"
-            />
+          {zoomImages.length > 0 ? (
+            <ImageZoom images={zoomImages} alt={`${productName} ${sku.colorway}`} initialIndex={0}>
+              {hasArt ? (
+                <CardArt sku={sku} className="w-full sm:w-auto sm:min-w-[320px]" px={8} />
+              ) : (
+                <img
+                  src={zoomImages[0]}
+                  alt={`${productName} ${sku.colorway}`}
+                  className="w-full sm:w-auto sm:min-w-[320px] object-contain"
+                />
+              )}
+            </ImageZoom>
           ) : (
-            <CardArt sku={sku} className="w-full sm:w-auto sm:min-w-[320px]" px={8} />
+            <ImageZoom images={[]} alt={`${productName} ${sku.colorway}`}>
+              <CardArt sku={sku} className="w-full sm:w-auto sm:min-w-[320px]" px={8} />
+            </ImageZoom>
           )}
         </div>
 
