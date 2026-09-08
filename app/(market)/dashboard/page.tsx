@@ -33,19 +33,45 @@ import type { CardSummary } from "@/lib/api/contract";
 import type { RedemptionSummary } from "@/lib/api/contract";
 import type { ItemSummary } from "@/lib/api/contract";
 import { currentUserId, getMySubmittedItems } from "@/app/(market)/queries";
+import { createServerSupabase } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/Button";
+import { PayoutSetup } from "@/components/market/PayoutSetup";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatUsd } from "@/components/card/format";
 
-/** Placeholder for Connect status contract export — replace when Connect integration lands. */
-async function getConnectStatus(_userId: string): Promise<{
-  connected: boolean;
-  accountId?: string;
-  chargesEnabled?: boolean;
-  payoutsEnabled?: boolean;
-  onboardingUrl?: string;
+/**
+ * Stored Connect status for the dashboard. Reads the webhook-landed columns
+ * (028) — the live check happens on /consignor/connect/return and via the
+ * account.updated webhook. Never pre-mints an onboarding link here: account
+ * links expire, so the link is minted on button click (PayoutSetup POSTs to
+ * /api/consignor/connect).
+ */
+async function getConnectStatus(userId: string): Promise<{
+  accountId: string | null;
+  payoutsEnabled: boolean;
+  isConsignor: boolean;
+  countryCode: string | null;
 }> {
-  return { connected: false };
+  const supabase = await createServerSupabase();
+  const { data } = await supabase
+    .from("users")
+    .select(
+      "stripe_connect_account_id, stripe_connect_payouts_enabled, is_consignor, country_code",
+    )
+    .eq("id", userId)
+    .maybeSingle();
+  const row = (data ?? {}) as {
+    stripe_connect_account_id?: string | null;
+    stripe_connect_payouts_enabled?: boolean | null;
+    is_consignor?: boolean | null;
+    country_code?: string | null;
+  };
+  return {
+    accountId: row.stripe_connect_account_id ?? null,
+    payoutsEnabled: row.stripe_connect_payouts_enabled ?? false,
+    isConsignor: row.is_consignor ?? false,
+    countryCode: row.country_code ?? null,
+  };
 }
 
 export const metadata: Metadata = {
@@ -88,7 +114,9 @@ function isOverdue(deadline: Date): boolean {
 export default async function DashboardPage() {
   const me = await currentUserId();
 
-  const connectStatus = me ? await getConnectStatus(me) : { connected: false };
+  const connectStatus = me
+    ? await getConnectStatus(me)
+    : { accountId: null, payoutsEnabled: false, isConsignor: false, countryCode: null };
 
   if (!me) {
     return (
@@ -143,42 +171,12 @@ export default async function DashboardPage() {
         <h2 className="font-mono text-[11px] font-black uppercase tracking-tight text-foreground">
           Payout setup
         </h2>
-        {connectStatus.connected ? (
-          <div className="border border-line bg-overlay/50 px-3 py-3 font-mono text-[11px] tracking-tight">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-green-500" aria-hidden="true" />
-                <span className="font-medium text-green-500">Connected</span>
-                <span className="text-muted">Account <code className="text-[10px] bg-overlay px-1 rounded">{connectStatus.accountId?.slice(-8)}</code></span>
-              </div>
-              <div className="flex items-center gap-2 text-[10px] text-muted">
-                <span>Charges: {connectStatus.chargesEnabled ? "enabled" : "disabled"}</span>
-                <span>Payouts: {connectStatus.payoutsEnabled ? "enabled" : "disabled"}</span>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="border border-dashed border-line-strong px-3 py-3 font-mono text-[11px] tracking-tight">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-[#FF4444]" aria-hidden="true" />
-                <span className="font-medium text-[#FF4444]">Not connected</span>
-              </div>
-              <Button
-                variant="primary"
-                size="sm"
-                href={connectStatus.onboardingUrl ?? "#"}
-                disabled={!connectStatus.onboardingUrl}
-              >
-                Set up payouts
-              </Button>
-            </div>
-            <p className="mt-2 text-[9px] text-muted">
-              Connect your Stripe account to receive payouts. Payout method (cash vs
-              credit) is determined by your country — see TERMS.md §10.
-            </p>
-          </div>
-        )}
+        <PayoutSetup
+          accountId={connectStatus.accountId}
+          payoutsEnabled={connectStatus.payoutsEnabled}
+          isConsignor={connectStatus.isConsignor}
+          countryCode={connectStatus.countryCode}
+        />
       </section>
 
       {/* Submissions */}
