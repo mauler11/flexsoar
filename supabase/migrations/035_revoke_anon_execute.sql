@@ -29,17 +29,22 @@ GRANT EXECUTE ON FUNCTION public.trg_sku_model_propagate() TO service_role;
 
 COMMIT;
 
--- Verify (simple version)
+-- Verify (simplified - just count from pg_proc directly)
 DO $$
 DECLARE
   v_count integer;
 BEGIN
   SELECT count(*) INTO v_count
-  FROM information_schema.routine_privileges a
-  JOIN pg_proc p ON p.oid = a.specific_name::regprocedure::oid
-  WHERE p.pronamespace = 'public'::regnamespace
-    AND a.grantee IN ('anon', 'authenticated')
-    AND a.privilege_type = 'EXECUTE'
-    AND p.proname IN ('fn_approve_submission', 'fn_list_card', 'fn_current_user_id', 'fn_is_admin', 'trg_sku_model_propagate');
-  RAISE NOTICE 'Remaining EXECUTE grants to anon/authenticated: %', v_count;
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = 'public'
+    AND p.proname IN ('fn_approve_submission', 'fn_list_card', 'fn_current_user_id', 'fn_is_admin', 'trg_sku_model_propagate')
+    AND EXISTS (
+      SELECT 1 FROM pg_proc p2
+      JOIN pg_namespace n2 ON n2.oid = p2.pronamespace
+      WHERE p2.proname = p.proname
+        AND n2.nspname = 'public'
+        AND has_function_privilege('anon', p2.oid, 'EXECUTE')
+    );
+  RAISE NOTICE 'Functions still with EXECUTE for anon: %', v_count;
 END $$;
