@@ -479,8 +479,6 @@ export interface ListingRef {
   id: UUID;
   price_cents: Cents;
   status: ListingStatus;
-  early_access_level: number;
-  public_at: Timestamptz;
   oracle_value_cents: Cents | null;
 }
 
@@ -537,8 +535,6 @@ export interface ListingSummary {
   price_cents: Cents;
   fair_price_cents: Cents | null;
   status: ListingStatus;
-  early_access_level: number;
-  public_at: Timestamptz;
   oracle_value_cents: Cents | null;
   created_at: Timestamptz;
   sold_at: Timestamptz | null;
@@ -766,12 +762,6 @@ export interface ListingsQuery {
   floatMax?: FloatValue;
   priceMinCents?: Cents;
   priceMaxCents?: Cents;
-  /**
-   * Who is looking. Early-access listings stay visible to a viewer whose level
-   * meets `early_access_level`, to the seller, and to nobody else until
-   * `public_at`. Omit for the anonymous view.
-   */
-  viewerId?: UUID;
   sort?: ListingSort;
   limit?: number;
   offset?: number;
@@ -1018,10 +1008,10 @@ const CARD_SUMMARY_COLUMNS =
   'is_exceptional, mint_number, status, minted_at, condition_grade';
 
 const LISTING_REF_COLUMNS =
-  'id, price_cents, status, early_access_level, public_at, oracle_value_cents';
+  'id, price_cents, status, oracle_value_cents';
 
 const LISTING_COLUMNS =
-  'id, card_id, seller_id, price_cents, fair_price_cents, status, early_access_level, public_at, ' +
+  'id, card_id, seller_id, price_cents, fair_price_cents, status, ' +
   'oracle_value_cents, created_at, sold_at';
 
 const ORDER_COLUMNS =
@@ -1045,7 +1035,7 @@ const CONSIGNMENT_EVENT_COLUMNS =
   'id, consignment_id, from_status, to_status, actor_id, note, created_at';
 
 /** The statuses that make a listing "live", per the partial unique index. */
-const LIVE_LISTING_STATUSES: readonly ListingStatus[] = ['early_access', 'public'];
+const LIVE_LISTING_STATUSES: readonly ListingStatus[] = ['public'];
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -1178,8 +1168,6 @@ interface ListingRow {
   price_cents: Cents;
   fair_price_cents: Cents | null;
   status: ListingStatus;
-  early_access_level: number;
-  public_at: Timestamptz;
   oracle_value_cents: Cents | null;
   created_at: Timestamptz;
   sold_at: Timestamptz | null;
@@ -1316,8 +1304,6 @@ function toListingRef(row: ListingRefRow | ListingRow): ListingRef {
     id: row.id,
     price_cents: row.price_cents,
     status: row.status,
-    early_access_level: row.early_access_level,
-    public_at: row.public_at,
     oracle_value_cents: row.oracle_value_cents,
   };
 }
@@ -1434,36 +1420,6 @@ async function floatCurvesFor(
   ) as FloatCurveRow[] | null;
 
   return rows ?? [];
-}
-
-/** The `.or()` arms that reproduce the `listings_visibility` RLS policy. */
-async function listingVisibilityFilter(
-  supabase: Supabase,
-  viewerId: UUID | undefined,
-): Promise<string> {
-  const arms = [`status.eq.public`, `public_at.lte.${new Date().toISOString()}`];
-
-  if (viewerId) {
-    arms.push(`seller_id.eq.${viewerId}`);
-
-    // public_profiles, not users: since 006 a session can only read its own
-    // `users` row, so looking the level up there returns nothing whenever
-    // viewerId is anyone but the caller. That failure is silent — the
-    // early-access arm would just be dropped and the listing would look
-    // invisible rather than locked. `level` is on the view, so this works for
-    // any viewerId the caller passes.
-    const result = await supabase
-      .from('public_profiles')
-      .select('level')
-      .eq('id', viewerId)
-      .maybeSingle();
-
-    if (result.error && !isNoRows(result.error)) fail(result.error, 'public_profiles');
-    const level = (result.data as { level: number } | null)?.level;
-    if (typeof level === 'number') arms.push(`early_access_level.lte.${level}`);
-  }
-
-  return arms.join(',');
 }
 
 // ============================================================
@@ -3497,7 +3453,7 @@ export async function getCards(query: CardsQuery = {}): Promise<CardSummary[]> {
   return rows.map((row) => toCardSummary(row, listings.get(row.id) ?? null));
 }
 
-/** Market grid. Pass `viewerId` so early-access visibility resolves correctly. */
+/** Market grid. All listings are public. */
 export async function getListings(query: ListingsQuery = {}): Promise<ListingSummary[]> {
   const supabase = await createServerSupabase();
   const page = pageBounds(query.limit, query.offset);
@@ -3524,10 +3480,6 @@ export async function getListings(query: ListingsQuery = {}): Promise<ListingSum
   if (query.brand !== undefined) builder = builder.eq('card.sku.brand', query.brand);
   if (query.model !== undefined) builder = builder.eq('card.sku.model', query.model);
   if (query.sizeUs !== undefined) builder = builder.eq('card.sku.size_us', query.sizeUs);
-
-  // Applied on top of the listings_visibility RLS policy, not instead of it —
-  // this is what makes an omitted viewerId mean "the anonymous view".
-  builder = builder.or(await listingVisibilityFilter(supabase, query.viewerId));
 
   if (byFloat) {
     // float_value is on the embedded card; PostgREST cannot order a parent by
@@ -3577,8 +3529,6 @@ function toListingSummary(row: ListingRow): ListingSummary {
     price_cents: row.price_cents,
     fair_price_cents: row.fair_price_cents ?? null,
     status: row.status,
-    early_access_level: row.early_access_level,
-    public_at: row.public_at,
     oracle_value_cents: row.oracle_value_cents,
     created_at: row.created_at,
     sold_at: row.sold_at,

@@ -10,7 +10,6 @@ import type { Metadata } from "next";
 import { getListings, getPlatformConfig, getSkus } from "@/lib/api/contract";
 import type { ListingSort, ListingsQuery } from "@/lib/api/contract";
 import type { Tier } from "@/lib/db/types";
-import { currentUserId } from "@/app/(market)/queries";
 import { MarketFilters } from "@/components/market/MarketFilters";
 import { MarketTile } from "@/components/market/MarketTile";
 import { Banner } from "@/components/market/Banner";
@@ -43,7 +42,6 @@ export default async function BrowsePage({
   searchParams: Promise<BrowseSearchParams>;
 }) {
   const params = await searchParams;
-  const viewerId = await currentUserId();
 
   const brand = params.brand?.trim() || undefined;
   const model = params.model?.trim() || undefined;
@@ -58,7 +56,7 @@ export default async function BrowsePage({
     ? (params.sort as ListingSort)
     : "recent";
 
-  const query: ListingsQuery = { viewerId: viewerId ?? undefined, sort };
+  const query: ListingsQuery = { sort };
   if (brand) query.brand = brand;
   if (model) query.model = model;
   if (sizeUs != null && Number.isFinite(sizeUs)) query.sizeUs = sizeUs;

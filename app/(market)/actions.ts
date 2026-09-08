@@ -227,23 +227,8 @@ export async function createCheckoutAction(
   if (listing.seller_id === me) {
     redirectWithError(cardLink, 'cannot buy your own listing');
   }
-  if (listing.status !== 'early_access' && listing.status !== 'public') {
+  if (listing.status !== 'public') {
     redirectWithError(cardLink, `listing is ${listing.status}`);
-  }
-
-  // Early-access gate, re-checked before money moves. fn_purchase_card raises
-  // the same EARLY_ACCESS_LOCKED at webhook time, but by then the buyer has
-  // paid — refusing here is the actual protection.
-  const now = Date.now();
-  if (listing.status === 'early_access' && new Date(listing.public_at).getTime() > now) {
-    const level = (await currentUserLevel()) ?? 0;
-    if (level < listing.early_access_level) {
-      redirectWithError(
-        cardLink,
-        `listing ${listingId} is in early access until ${listing.public_at} — ` +
-          `level ${listing.early_access_level} required`,
-      );
-    }
   }
 
   // The FSC leg. getCreditAvailable() (never getCreditBalance() — AGENT_RULES.md
@@ -317,6 +302,7 @@ export async function createCheckoutAction(
   const holdMinutes =
     (await getPlatformConfig().catch(() => null))?.credit_hold_minutes ??
     CREDIT_HOLD_MINUTES_FALLBACK;
+  const now = Date.now();
   const expiresAtSeconds = checkoutExpiresAtSeconds(now, holdMinutes);
 
   try {

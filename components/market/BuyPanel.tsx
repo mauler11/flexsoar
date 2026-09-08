@@ -18,7 +18,6 @@ import { createCheckoutAction } from "@/app/(market)/actions";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Banner } from "@/components/market/Banner";
-import { Countdown } from "@/components/market/Countdown";
 import { OrderPoll } from "@/components/market/OrderPoll";
 import { formatFsc, formatUsd } from "@/components/card/format";
 
@@ -29,15 +28,11 @@ export interface BuyPanelListing {
   fairPriceCents: number | null;
   oracleValueCents: number | null;
   status: string;
-  earlyAccessLevel: number;
-  publicAt: string;
   sellerId: string;
 }
 
 export interface BuyPanelProps {
   listing: BuyPanelListing;
-  viewerId: string | null;
-  viewerLevel: number | null;
   /** The listing this page returned from checkout for; poll it to settle. */
   checkoutActive: boolean;
   /**
@@ -58,8 +53,6 @@ export interface BuyPanelProps {
 
 export function BuyPanel({
   listing,
-  viewerId,
-  viewerLevel,
   checkoutActive,
   availableCreditCents,
   firstSalePending,
@@ -80,13 +73,8 @@ export function BuyPanel({
     );
   }
 
-  const isPublic =
-    listing.status === "public" || unlocked;
-  const earlyEligible =
-    viewerId != null &&
-    viewerLevel != null &&
-    viewerLevel >= listing.earlyAccessLevel;
-  const buyable = isPublic || earlyEligible;
+  const isPublic = true;
+  const buyable = isPublic;
   const underOracle =
     listing.oracleValueCents != null &&
     listing.priceCents < listing.oracleValueCents * 0.85;
@@ -114,12 +102,7 @@ export function BuyPanel({
   return (
     <div className="flex flex-col gap-3 border border-line bg-overlay p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge tone={isPublic ? "accent" : "info"}>
-          {isPublic ? "Public" : "Early access"}
-        </Badge>
-        {!isPublic && (
-          <Badge tone="info">LV {listing.earlyAccessLevel}+</Badge>
-        )}
+        <Badge tone="accent">Public</Badge>
       </div>
 
       <div>
@@ -155,7 +138,7 @@ export function BuyPanel({
         </Banner>
       )}
 
-      {viewerId != null && buyable && (
+      {buyable && (
         <div className="flex flex-col gap-1.5 border border-line-strong bg-raised p-2">
           <div className="flex items-center justify-between gap-2">
             <label
@@ -190,17 +173,6 @@ export function BuyPanel({
         </div>
       )}
 
-      {!isPublic && (
-        <div className="flex items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-tight text-muted">
-          <span>Unlocks</span>
-          <Countdown
-            target={listing.publicAt}
-            className="text-accent"
-            onUnlock={() => setUnlocked(true)}
-          />
-        </div>
-      )}
-
       <Button
         type="button"
         size="lg"
@@ -217,9 +189,7 @@ export function BuyPanel({
               : creditCents > 0
                 ? `Pay ${formatUsd(cashCents)} + ${formatFsc(creditCents)}`
                 : "Buy with Stripe"
-            : viewerId == null
-              ? `Sign in · LV ${listing.earlyAccessLevel}+`
-              : `Level ${listing.earlyAccessLevel} required · you are LV ${viewerLevel ?? 0}`}
+            : "Sign in"}
       </Button>
       <p className="font-mono text-[9px] uppercase tracking-tight text-muted">
         {fscOnly

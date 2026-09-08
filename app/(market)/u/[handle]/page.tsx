@@ -42,7 +42,7 @@ export default async function ProfilePage({
   if (!profile) notFound();
 
   const [live, trades, platformConfig] = await Promise.all([
-    getListings({ sellerId: profile.id, viewerId: viewerId ?? undefined }),
+    getListings({ sellerId: profile.id }),
     getTradeHistory(profile.id),
     getPlatformConfig(),
   ]);

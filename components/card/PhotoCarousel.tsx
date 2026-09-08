@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { cn } from "@/components/ui/cn";
 
 interface PhotoCarouselProps {
@@ -12,6 +12,9 @@ interface PhotoCarouselProps {
 
 export function PhotoCarousel({ photos, alt = "Product", className, onImageClick }: PhotoCarouselProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   if (!photos || photos.length === 0) {
     return (
@@ -31,8 +34,49 @@ export function PhotoCarousel({ photos, alt = "Product", className, onImageClick
     onImageClick?.(currentIndex);
   };
 
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (touchStartX.current === null || touchStartY.current === null) return;
+    const deltaX = e.touches[0].clientX - touchStartX.current;
+    const deltaY = e.touches[0].clientY - touchStartY.current;
+    // Only handle horizontal swipes (more horizontal than vertical movement)
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 30) {
+      e.preventDefault();
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null) return;
+    const deltaX = e.changedTouches[0].clientX - touchStartX.current;
+    if (Math.abs(deltaX) > 50) {
+      if (deltaX > 0) goToPrev();
+      else goToNext();
+    }
+    touchStartX.current = null;
+    touchStartY.current = null;
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowLeft") goToPrev();
+    if (e.key === "ArrowRight") goToNext();
+  };
+
   return (
-    <div className={cn("relative aspect-[3/2] bg-[#050505] rounded-lg overflow-hidden", className)}>
+    <div
+      ref={containerRef}
+      className={cn("relative aspect-[3/2] bg-[#050505] rounded-lg overflow-hidden", className)}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onKeyDown={handleKeyDown}
+      tabIndex={0}
+      role="region"
+      aria-label="Image carousel"
+    >
       <button
         onClick={goToPrev}
         className="absolute left-2 top-1/2 -translate-y-1/2 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors focus:outline-none focus:ring-2 focus:ring-accent"

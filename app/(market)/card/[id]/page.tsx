@@ -12,7 +12,6 @@ import { getCard, getListing, getItem, getCreditAvailable, getPayoutMethodForUse
 import type { CardStatus } from "@/lib/db/types";
 import {
   currentUserId,
-  currentUserLevel,
   REDEMPTION_HANDLING_FEE_CENTS,
   getVaultIntakeForCard,
   type VaultIntakeStatus,
@@ -94,7 +93,6 @@ export default async function CardPage({
   if (!detail) notFound();
 
   const meId = await currentUserId();
-  const viewerLevel = await currentUserLevel();
   const isOwner = meId != null && detail.owner.id === meId;
 
   const listing = detail.listing
@@ -241,12 +239,8 @@ export default async function CardPage({
                 fairPriceCents: listing.fair_price_cents,
                 oracleValueCents: listing.oracle_value_cents,
                 status: listing.status,
-                earlyAccessLevel: listing.early_access_level,
-                publicAt: listing.public_at,
                 sellerId: listing.seller_id,
               }}
-              viewerId={meId}
-              viewerLevel={viewerLevel}
               checkoutActive={sp.order === listing.id}
               availableCreditCents={availableCreditCents}
               firstSalePending={firstSalePending}
@@ -328,9 +322,6 @@ function OwnerListingPanel({
         <Badge tone={listing.status === "public" ? "accent" : "info"}>
           {listing.status}
         </Badge>
-        {listing.status === "early_access" && (
-          <Badge tone="info">early access LV {listing.early_access_level}</Badge>
-        )}
         {sold && <Badge tone="warn">sold</Badge>}
       </div>
 
