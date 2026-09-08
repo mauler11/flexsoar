@@ -19,8 +19,12 @@ DO $$
 DECLARE
   v_anon boolean;
   v_auth boolean;
+  v_oid oid;
 BEGIN
-  SELECT has_function_privilege('anon', 'public.fn_is_admin'::regprocedure, 'EXECUTE') INTO v_anon;
-  SELECT has_function_privilege('authenticated', 'public.fn_is_admin'::regprocedure, 'EXECUTE') INTO v_auth;
+  SELECT p.oid INTO v_oid FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = 'public' AND p.proname = 'fn_is_admin' LIMIT 1;
+  SELECT has_function_privilege('anon', v_oid, 'EXECUTE') INTO v_anon;
+  SELECT has_function_privilege('authenticated', v_oid, 'EXECUTE') INTO v_auth;
   RAISE NOTICE 'fn_is_admin EXECUTE: anon=%, authenticated=%', v_anon, v_auth;
 END $$;
