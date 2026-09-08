@@ -32,11 +32,11 @@ COMMIT;
 -- Verify
 DO $$
 DECLARE
-  v_func text;
-  v_priv text;
+  r record;
 BEGIN
-  FOR v_func, v_priv IN
-    SELECT p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')', a.privilege_type
+  FOR r IN
+    SELECT p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' AS func_sig,
+           a.privilege_type
     FROM information_schema.routine_privileges a
     JOIN pg_proc p ON p.oid = a.specific_name::regprocedure::oid
     WHERE p.pronamespace = 'public'::regnamespace
@@ -44,6 +44,6 @@ BEGIN
       AND a.privilege_type = 'EXECUTE'
       AND p.proname IN ('fn_approve_submission', 'fn_list_card', 'fn_current_user_id', 'fn_is_admin', 'trg_sku_model_propagate')
   LOOP
-    RAISE NOTICE '% still has EXECUTE for %', v_func, v_priv;
+    RAISE NOTICE '% still has EXECUTE for %', r.func_sig, r.privilege_type;
   END LOOP;
 END $$;
