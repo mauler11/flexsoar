@@ -15,6 +15,9 @@ begin;
 -- 1. Update listings: remove early_access_level, set all to public
 -- ---------------------------------------------------------------------------
 
+-- First, drop the policy that depends on early_access_level
+drop policy if exists listings_visibility on listings;
+
 -- First, update existing early_access listings to public
 update listings set status = 'public' where status = 'early_access';
 
@@ -80,11 +83,11 @@ begin
   v_oracle := fn_card_value_cents(p_card_id);
 
   insert into listings (card_id, seller_id, price_cents, fair_price_cents, status,
-                        early_access_level, public_at, oracle_value_cents,
+                        oracle_value_cents,
                         payout_method)
   values (p_card_id, p_seller_id, p_price_cents, p_fair_price_cents,
           'public',
-          0, now(), v_oracle,
+          v_oracle,
           p_payout_method)
   returning id into v_listing;
 
@@ -97,10 +100,8 @@ end $$;
 grant execute on function fn_list_card(uuid, uuid, integer, payout_method, integer) to authenticated;
 
 -- ---------------------------------------------------------------------------
--- 5. Update listing_visibility policy to not check early_access_level
+-- 5. Create new listing_visibility policy (no early_access check)
 -- ---------------------------------------------------------------------------
-
-drop policy if exists listings_visibility on listings;
 
 create policy listings_visibility on listings
   for select using (
