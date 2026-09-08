@@ -34,7 +34,6 @@ END $$;
 DO $$
 DECLARE
   func_sig text;
-  v_err text;
 BEGIN
   FOR func_sig IN
     SELECT 'public.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')'
@@ -64,12 +63,9 @@ BEGIN
   LOOP
     BEGIN
       EXECUTE format('ALTER FUNCTION %s SET search_path = ''public''', func_sig);
-    EXCEPTION WHEN undefined_function THEN
-      -- function doesn't exist, skip silently
-      NULL;
     EXCEPTION WHEN OTHERS THEN
-      GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
-      RAISE NOTICE 'Failed to alter %: %', func_sig, v_err;
+      -- ignore errors (function may not exist, or already has search_path)
+      NULL;
     END;
   END LOOP;
 END $$;
