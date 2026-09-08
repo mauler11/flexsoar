@@ -4290,11 +4290,16 @@ export async function createConnectAccount(
     });
     accountId = account.id;
 
-    // Store the account ID on the user
-    await supabase
+    // Store the account ID on the user. Service client: the session client
+    // only holds UPDATE(handle) per 007, so a session write of this column
+    // fails — and the old code ignored the error, minting an onboarding link
+    // for an account nothing could ever link back (orphan account, "No
+    // Connect account found" on return, webhook finds no user).
+    const { error: linkError } = await createServiceSupabase()
       .from('users')
       .update({ stripe_connect_account_id: accountId })
       .eq('id', consignorId);
+    if (linkError) fail(linkError, 'users');
   }
 
   // Create an account onboarding link
