@@ -30,7 +30,7 @@ BEGIN
   RAISE NOTICE 'Auto-fixed % functions, skipped %', fixed_count, skipped_count;
 END $$;
 
--- Explicitly fix critical admin functions using dynamic SQL
+-- Explicitly fix critical admin functions using dynamic SQL with proper error handling
 DO $$
 DECLARE
   func_sig text;
@@ -65,7 +65,7 @@ BEGIN
     BEGIN
       EXECUTE format('ALTER FUNCTION %s SET search_path = ''public''', func_sig);
     EXCEPTION WHEN undefined_function THEN
-      -- function doesn't exist, skip
+      -- function doesn't exist, skip silently
       NULL;
     EXCEPTION WHEN OTHERS THEN
       GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
