@@ -32,11 +32,11 @@ CREATE POLICY items_holder_read ON public.items
     (select auth.uid()) = custody_holder_id
   );
 
--- items_public_read
+-- items_public_read (use valid item_status enum values)
 DROP POLICY IF EXISTS items_public_read ON public.items;
 CREATE POLICY items_public_read ON public.items
   FOR SELECT USING (
-    status IN ('graded', 'authenticated', 'in_custody', 'listed', 'sold')
+    status IN ('minted', 'redemption_hold', 'shipped', 'released')
   );
 
 -- ============================================================================
