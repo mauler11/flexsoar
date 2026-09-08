@@ -36,9 +36,15 @@ async function handleAccountUpdated(
 ): Promise<NextResponse> {
   const account = event.data.object as Stripe.Account;
 
-  // Only care about Express accounts that have completed onboarding
-  if (account.type !== 'express') {
-    return acknowledge('non-express account, ignoring', { accountId: account.id, type: account.type });
+  // Only care about Express-dashboard accounts that have completed
+  // onboarding. Accounts created via explicit controller properties report
+  // top-level type 'none', so check the dashboard type (falling back to the
+  // legacy type field for accounts created the old way).
+  const dashboardType =
+    account.controller?.stripe_dashboard?.type ??
+    (account.type === 'express' ? 'express' : undefined);
+  if (dashboardType !== 'express') {
+    return acknowledge('non-express account, ignoring', { accountId: account.id, type: account.type, dashboardType });
   }
 
   const isOnboardingComplete = account.charges_enabled && account.payouts_enabled;

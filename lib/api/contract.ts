@@ -4266,14 +4266,25 @@ export async function createConnectAccount(
 
   // Create a new Connect account if one doesn't exist
   if (!accountId) {
+    // MY platforms cannot create platform-loss-liable accounts, and
+    // `type: 'express'` maps to losses.payments='application' (platform
+    // liable). So we spell out the controller explicitly: Stripe absorbs
+    // negative balances, the account pays its own Stripe fees (standard
+    // pricing), Stripe collects requirements, Express dashboard.
+    // (Unblocked for v1 by Stripe's 2026-06-24 changelog.)
     const account = await stripe.accounts.create({
-      type: 'express',
       country: 'MY',
       email: user.email,
       capabilities: {
         transfers: { requested: true },
       },
       business_type: 'individual',
+      controller: {
+        stripe_dashboard: { type: 'express' },
+        fees: { payer: 'account' },
+        losses: { payments: 'stripe' },
+        requirement_collection: 'stripe',
+      },
     });
     accountId = account.id;
 
