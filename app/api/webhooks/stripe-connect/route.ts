@@ -36,18 +36,21 @@ async function handleAccountUpdated(
 ): Promise<NextResponse> {
   const account = event.data.object as Stripe.Account;
 
-  // Only care about Express-dashboard accounts that have completed
-  // onboarding. Accounts created via explicit controller properties report
-  // top-level type 'none', so check the dashboard type (falling back to the
-  // legacy type field for accounts created the old way).
+  // Only care about our dashboard accounts (Standard 'full' going forward,
+  // legacy 'express' for accounts created before the MY-liability fix).
+  // Controller-created accounts report top-level type 'none', so check the
+  // dashboard type with fallback to the legacy type field.
   const dashboardType =
     account.controller?.stripe_dashboard?.type ??
     (account.type === 'express' ? 'express' : undefined);
-  if (dashboardType !== 'express') {
-    return acknowledge('non-express account, ignoring', { accountId: account.id, type: account.type, dashboardType });
+  if (dashboardType !== 'full' && dashboardType !== 'express') {
+    return acknowledge('unexpected dashboard type, ignoring', { accountId: account.id, type: account.type, dashboardType });
   }
 
-  const isOnboardingComplete = account.charges_enabled && account.payouts_enabled;
+  // Payout readiness = payouts_enabled. We only request the transfers
+  // capability (buyers pay the platform; consignors get transfers), so
+  // charges_enabled never turns true and must not gate onboarding.
+  const isOnboardingComplete = account.payouts_enabled;
 
   console.log(`[stripe-connect-webhook] account.updated`, {
     accountId: account.id,

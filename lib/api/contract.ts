@@ -4266,12 +4266,12 @@ export async function createConnectAccount(
 
   // Create a new Connect account if one doesn't exist
   if (!accountId) {
-    // MY platforms cannot create platform-loss-liable accounts, and
-    // `type: 'express'` maps to losses.payments='application' (platform
-    // liable). So we spell out the controller explicitly: Stripe absorbs
-    // negative balances, the account pays its own Stripe fees (standard
-    // pricing), Stripe collects requirements, Express dashboard.
-    // (Unblocked for v1 by Stripe's 2026-06-24 changelog.)
+    // MY platforms cannot be loss-liable, and the API rejects
+    // stripe_dashboard=express unless the platform takes liability — so
+    // Express is unavailable to us. We create Standard accounts instead
+    // (Stripe-liable + full dashboard, the pairing Stripe's risk docs
+    // prescribe). Onboarding UX is heavier than Express, but the transfers
+    // capability we pay out through works identically.
     const account = await stripe.accounts.create({
       country: 'MY',
       email: user.email,
@@ -4280,7 +4280,7 @@ export async function createConnectAccount(
       },
       business_type: 'individual',
       controller: {
-        stripe_dashboard: { type: 'express' },
+        stripe_dashboard: { type: 'full' },
         fees: { payer: 'account' },
         losses: { payments: 'stripe' },
         requirement_collection: 'stripe',
@@ -4336,8 +4336,9 @@ export async function updateConnectAccountStatus(
     chargesEnabled: account.charges_enabled ?? false,
     payoutsEnabled: account.payouts_enabled ?? false,
     detailsSubmitted: account.details_submitted ?? false,
-    onboardingComplete:
-      (account.charges_enabled ?? false) && (account.payouts_enabled ?? false),
+    // Payout readiness = payouts_enabled only. We request just the transfers
+    // capability, so charges_enabled stays false forever and must not gate.
+    onboardingComplete: account.payouts_enabled ?? false,
   };
 
   // Update the user's payouts_enabled flag
