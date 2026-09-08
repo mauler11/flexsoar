@@ -6,19 +6,21 @@
 
 BEGIN;
 
--- Admin-only functions that anon should NEVER call
+-- Admin-only functions that anon should NEVER call directly
 REVOKE EXECUTE ON FUNCTION public.fn_approve_submission(uuid, integer, integer) FROM anon;
 REVOKE EXECUTE ON FUNCTION public.fn_list_card(uuid, uuid, integer, payout_method, integer) FROM anon;
 REVOKE EXECUTE ON FUNCTION public.fn_current_user_id() FROM anon;
-REVOKE EXECUTE ON FUNCTION public.fn_is_admin() FROM anon;
 REVOKE EXECUTE ON FUNCTION public.trg_sku_model_propagate() FROM anon;
 
 -- Also revoke from authenticated for truly admin-only functions
 -- (these should only be callable by service_role or explicit admin checks)
 REVOKE EXECUTE ON FUNCTION public.fn_approve_submission(uuid, integer, integer) FROM authenticated;
 REVOKE EXECUTE ON FUNCTION public.fn_current_user_id() FROM authenticated;
-REVOKE EXECUTE ON FUNCTION public.fn_is_admin() FROM authenticated;
 REVOKE EXECUTE ON FUNCTION public.trg_sku_model_propagate() FROM authenticated;
+
+-- fn_is_admin() MUST remain executable by anon/authenticated
+-- because RLS policies call it (e.g., users_admin_read, consignments_read, etc.)
+-- DO NOT REVOKE fn_is_admin() from anon or authenticated
 
 -- Grant back to service_role (for server-side admin operations)
 GRANT EXECUTE ON FUNCTION public.fn_approve_submission(uuid, integer, integer) TO service_role;
@@ -29,7 +31,7 @@ GRANT EXECUTE ON FUNCTION public.trg_sku_model_propagate() TO service_role;
 
 COMMIT;
 
--- Verify (simplified - just count from pg_proc directly)
+-- Verify
 DO $$
 DECLARE
   v_count integer;
@@ -38,7 +40,7 @@ BEGIN
   FROM pg_proc p
   JOIN pg_namespace n ON n.oid = p.pronamespace
   WHERE n.nspname = 'public'
-    AND p.proname IN ('fn_approve_submission', 'fn_list_card', 'fn_current_user_id', 'fn_is_admin', 'trg_sku_model_propagate')
+    AND p.proname IN ('fn_approve_submission', 'fn_list_card', 'fn_current_user_id', 'trg_sku_model_propagate')
     AND EXISTS (
       SELECT 1 FROM pg_proc p2
       JOIN pg_namespace n2 ON n2.oid = p2.pronamespace
@@ -46,5 +48,5 @@ BEGIN
         AND n2.nspname = 'public'
         AND has_function_privilege('anon', p2.oid, 'EXECUTE')
     );
-  RAISE NOTICE 'Functions still with EXECUTE for anon: %', v_count;
+  RAISE NOTICE 'Admin functions still with EXECUTE for anon: %', v_count;
 END $$;
