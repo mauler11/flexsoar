@@ -30,10 +30,11 @@ BEGIN
   RAISE NOTICE 'Auto-fixed % functions, skipped %', fixed_count, skipped_count;
 END $$;
 
--- Explicitly fix critical admin functions using dynamic SQL (handles IF EXISTS properly)
+-- Explicitly fix critical admin functions using dynamic SQL
 DO $$
 DECLARE
   func_sig text;
+  v_err text;
 BEGIN
   FOR func_sig IN
     SELECT 'public.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')'
@@ -67,7 +68,8 @@ BEGIN
       -- function doesn't exist, skip
       NULL;
     EXCEPTION WHEN OTHERS THEN
-      RAISE NOTICE 'Failed to alter %: %', func_sig, SQLERRM;
+      GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+      RAISE NOTICE 'Failed to alter %: %', func_sig, v_err;
     END;
   END LOOP;
 END $$;
