@@ -79,6 +79,7 @@ CREATE POLICY users_admin_read ON public.users
 -- consignments: merge admin_read + own_read
 DROP POLICY IF EXISTS consignments_admin_read ON public.consignments;
 DROP POLICY IF EXISTS consignments_own_read ON public.consignments;
+DROP POLICY IF EXISTS consignments_read ON public.consignments;
 CREATE POLICY consignments_read ON public.consignments
   FOR SELECT USING (
     (select auth.jwt() ->> 'role') = 'service_role'
@@ -89,6 +90,7 @@ CREATE POLICY consignments_read ON public.consignments
 -- redemptions: merge admin_read + own_read
 DROP POLICY IF EXISTS redemptions_admin_read ON public.redemptions;
 DROP POLICY IF EXISTS redemptions_own_read ON public.redemptions;
+DROP POLICY IF EXISTS redemptions_read ON public.redemptions;
 CREATE POLICY redemptions_read ON public.redemptions
   FOR SELECT USING (
     (select auth.jwt() ->> 'role') = 'service_role'
@@ -99,6 +101,8 @@ CREATE POLICY redemptions_read ON public.redemptions
 -- platform_config: merge admin_write + read
 DROP POLICY IF EXISTS config_admin_write ON public.platform_config;
 DROP POLICY IF EXISTS config_read ON public.platform_config;
+DROP POLICY IF EXISTS config_read ON public.platform_config;
+DROP POLICY IF EXISTS config_admin_write ON public.platform_config;
 CREATE POLICY config_read ON public.platform_config
   FOR SELECT USING (true);
 CREATE POLICY config_admin_write ON public.platform_config
@@ -110,6 +114,8 @@ CREATE POLICY config_admin_write ON public.platform_config
 -- skus: merge admin_write + read
 DROP POLICY IF EXISTS skus_admin_write ON public.skus;
 DROP POLICY IF EXISTS skus_read ON public.skus;
+DROP POLICY IF EXISTS skus_read ON public.skus;
+DROP POLICY IF EXISTS skus_admin_write ON public.skus;
 CREATE POLICY skus_read ON public.skus
   FOR SELECT USING (true);
 CREATE POLICY skus_admin_write ON public.skus
@@ -121,6 +127,8 @@ CREATE POLICY skus_admin_write ON public.skus
 -- sku_models: merge admin_write + read
 DROP POLICY IF EXISTS sku_models_admin_write ON public.sku_models;
 DROP POLICY IF EXISTS sku_models_read ON public.sku_models;
+DROP POLICY IF EXISTS sku_models_read ON public.sku_models;
+DROP POLICY IF EXISTS sku_models_admin_write ON public.sku_models;
 CREATE POLICY sku_models_read ON public.sku_models
   FOR SELECT USING (true);
 CREATE POLICY sku_models_admin_write ON public.sku_models
@@ -132,6 +140,8 @@ CREATE POLICY sku_models_admin_write ON public.sku_models
 -- condition_bands: merge admin_write + read
 DROP POLICY IF EXISTS condition_bands_admin_write ON public.condition_bands;
 DROP POLICY IF EXISTS condition_bands_read ON public.condition_bands;
+DROP POLICY IF EXISTS condition_bands_read ON public.condition_bands;
+DROP POLICY IF EXISTS condition_bands_admin_write ON public.condition_bands;
 CREATE POLICY condition_bands_read ON public.condition_bands
   FOR SELECT USING (true);
 CREATE POLICY condition_bands_admin_write ON public.condition_bands
@@ -143,6 +153,8 @@ CREATE POLICY condition_bands_admin_write ON public.condition_bands
 -- sku_float_curve: merge admin_write + read
 DROP POLICY IF EXISTS curve_admin_write ON public.sku_float_curve;
 DROP POLICY IF EXISTS curve_read ON public.sku_float_curve;
+DROP POLICY IF EXISTS curve_read ON public.sku_float_curve;
+DROP POLICY IF EXISTS curve_admin_write ON public.sku_float_curve;
 CREATE POLICY curve_read ON public.sku_float_curve
   FOR SELECT USING (true);
 CREATE POLICY curve_admin_write ON public.sku_float_curve
@@ -154,6 +166,8 @@ CREATE POLICY curve_admin_write ON public.sku_float_curve
 -- cash_payout_countries: merge admin_write + read
 DROP POLICY IF EXISTS cash_payout_countries_admin_write ON public.cash_payout_countries;
 DROP POLICY IF EXISTS cash_payout_countries_read ON public.cash_payout_countries;
+DROP POLICY IF EXISTS cash_payout_countries_read ON public.cash_payout_countries;
+DROP POLICY IF EXISTS cash_payout_countries_admin_write ON public.cash_payout_countries;
 CREATE POLICY cash_payout_countries_read ON public.cash_payout_countries
   FOR SELECT USING (true);
 CREATE POLICY cash_payout_countries_admin_write ON public.cash_payout_countries
