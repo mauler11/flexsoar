@@ -4223,7 +4223,29 @@ export async function createConnectAccount(
     throw new ContractError('NOT_FOUND', 'Consignor not found', { consignorId });
   }
   if (!user.is_consignor) {
-    throw new ContractError('FORBIDDEN', 'User is not a consignor', { consignorId });
+    // Self-heal: nothing in the app sets is_consignor on first listing (only
+    // seed scripts do), so a seller with live stock would otherwise be locked
+    // out of payouts. Ownership is verified through session-readable rows
+    // first; the flag flip uses the service client because the session client
+    // only holds UPDATE(handle) per 007.
+    const [{ count: listingCount }, { count: cardCount }] = await Promise.all([
+      supabase
+        .from('listings')
+        .select('id', { count: 'exact', head: true })
+        .eq('seller_id', consignorId),
+      supabase
+        .from('cards')
+        .select('id', { count: 'exact', head: true })
+        .eq('owner_id', consignorId),
+    ]);
+    if ((listingCount ?? 0) + (cardCount ?? 0) === 0) {
+      throw new ContractError('FORBIDDEN', 'User is not a consignor', { consignorId });
+    }
+    const { error: flagError } = await createServiceSupabase()
+      .from('users')
+      .update({ is_consignor: true })
+      .eq('id', consignorId);
+    if (flagError) fail(flagError, 'users');
   }
   if (!user.country_code || user.country_code.toUpperCase() !== 'MY') {
     throw new ContractError(
