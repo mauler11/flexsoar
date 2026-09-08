@@ -25,11 +25,11 @@ CREATE POLICY items_consignor_read ON public.items
     (select auth.uid()) = consignor_id
   );
 
--- items_holder_read
+-- items_holder_read (column is custody_holder_id, not holder_id)
 DROP POLICY IF EXISTS items_holder_read ON public.items;
 CREATE POLICY items_holder_read ON public.items
   FOR SELECT USING (
-    (select auth.uid()) = holder_id
+    (select auth.uid()) = custody_holder_id
   );
 
 -- items_public_read
