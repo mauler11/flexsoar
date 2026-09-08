@@ -30,7 +30,7 @@ BEGIN
   RAISE NOTICE 'Auto-fixed % functions, skipped %', fixed_count, skipped_count;
 END $$;
 
--- Explicitly fix critical admin functions using dynamic SQL with proper error handling
+-- Explicitly fix critical admin functions using dynamic SQL
 DO $$
 DECLARE
   func_sig text;
