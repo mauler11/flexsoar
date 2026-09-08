@@ -15,7 +15,7 @@ DROP POLICY IF EXISTS items_admin_read ON public.items;
 CREATE POLICY items_admin_read ON public.items
   FOR SELECT USING (
     (select auth.jwt() ->> 'role') = 'service_role'
-    OR (select auth.uid()) IN (SELECT id FROM users WHERE is_admin)
+    OR public.fn_is_admin()
   );
 
 -- items_consignor_read
@@ -64,12 +64,12 @@ CREATE POLICY users_self_update ON public.users
     (select auth.uid()) = id
   );
 
--- users_admin_read (keep, but optimize)
+-- users_admin_read (keep, but optimize - use fn_is_admin() to avoid recursion)
 DROP POLICY IF EXISTS users_admin_read ON public.users;
 CREATE POLICY users_admin_read ON public.users
   FOR SELECT USING (
     (select auth.jwt() ->> 'role') = 'service_role'
-    OR (select auth.uid()) IN (SELECT id FROM users WHERE is_admin)
+    OR public.fn_is_admin()
   );
 
 -- ============================================================================
@@ -82,7 +82,7 @@ DROP POLICY IF EXISTS consignments_own_read ON public.consignments;
 CREATE POLICY consignments_read ON public.consignments
   FOR SELECT USING (
     (select auth.jwt() ->> 'role') = 'service_role'
-    OR (select auth.uid()) IN (SELECT id FROM users WHERE is_admin)
+    OR public.fn_is_admin()
     OR (select auth.uid()) = consignor_id
   );
 
@@ -92,7 +92,7 @@ DROP POLICY IF EXISTS redemptions_own_read ON public.redemptions;
 CREATE POLICY redemptions_read ON public.redemptions
   FOR SELECT USING (
     (select auth.jwt() ->> 'role') = 'service_role'
-    OR (select auth.uid()) IN (SELECT id FROM users WHERE is_admin)
+    OR public.fn_is_admin()
     OR (select auth.uid()) = user_id
   );
 
@@ -104,7 +104,7 @@ CREATE POLICY config_read ON public.platform_config
 CREATE POLICY config_admin_write ON public.platform_config
   FOR ALL USING (
     (select auth.jwt() ->> 'role') = 'service_role'
-    OR (select auth.uid()) IN (SELECT id FROM users WHERE is_admin)
+    OR public.fn_is_admin()
   );
 
 -- skus: merge admin_write + read
@@ -115,7 +115,7 @@ CREATE POLICY skus_read ON public.skus
 CREATE POLICY skus_admin_write ON public.skus
   FOR ALL USING (
     (select auth.jwt() ->> 'role') = 'service_role'
-    OR (select auth.uid()) IN (SELECT id FROM users WHERE is_admin)
+    OR public.fn_is_admin()
   );
 
 -- sku_models: merge admin_write + read
@@ -126,7 +126,7 @@ CREATE POLICY sku_models_read ON public.sku_models
 CREATE POLICY sku_models_admin_write ON public.sku_models
   FOR ALL USING (
     (select auth.jwt() ->> 'role') = 'service_role'
-    OR (select auth.uid()) IN (SELECT id FROM users WHERE is_admin)
+    OR public.fn_is_admin()
   );
 
 -- condition_bands: merge admin_write + read
@@ -137,7 +137,7 @@ CREATE POLICY condition_bands_read ON public.condition_bands
 CREATE POLICY condition_bands_admin_write ON public.condition_bands
   FOR ALL USING (
     (select auth.jwt() ->> 'role') = 'service_role'
-    OR (select auth.uid()) IN (SELECT id FROM users WHERE is_admin)
+    OR public.fn_is_admin()
   );
 
 -- sku_float_curve: merge admin_write + read
@@ -148,7 +148,7 @@ CREATE POLICY curve_read ON public.sku_float_curve
 CREATE POLICY curve_admin_write ON public.sku_float_curve
   FOR ALL USING (
     (select auth.jwt() ->> 'role') = 'service_role'
-    OR (select auth.uid()) IN (SELECT id FROM users WHERE is_admin)
+    OR public.fn_is_admin()
   );
 
 -- cash_payout_countries: merge admin_write + read
@@ -159,7 +159,7 @@ CREATE POLICY cash_payout_countries_read ON public.cash_payout_countries
 CREATE POLICY cash_payout_countries_admin_write ON public.cash_payout_countries
   FOR ALL USING (
     (select auth.jwt() ->> 'role') = 'service_role'
-    OR (select auth.uid()) IN (SELECT id FROM users WHERE is_admin)
+    OR public.fn_is_admin()
   );
 
 COMMIT;
