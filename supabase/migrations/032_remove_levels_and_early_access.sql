@@ -46,6 +46,9 @@ comment on table levels is 'UNUSED — levels system removed. Kept for future re
 -- 4. Update fn_list_card to not lock cards and not use early_access
 -- ---------------------------------------------------------------------------
 
+-- Drop all possible overloads from previous migrations
+drop function if exists fn_list_card(uuid, uuid, integer);
+drop function if exists fn_list_card(uuid, uuid, integer, payout_method);
 drop function if exists fn_list_card(uuid, uuid, integer, payout_method, integer);
 
 create function fn_list_card(
