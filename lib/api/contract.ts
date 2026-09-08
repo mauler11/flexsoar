@@ -4276,6 +4276,8 @@ export async function createConnectAccount(
       country: 'MY',
       email: user.email,
       capabilities: {
+        // Standard (dashboard=full) rejects transfers without card_payments.
+        card_payments: { requested: true },
         transfers: { requested: true },
       },
       business_type: 'individual',
