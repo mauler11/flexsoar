@@ -106,7 +106,6 @@ grant execute on function fn_list_card(uuid, uuid, integer, payout_method, integ
 create policy listings_visibility on listings
   for select using (
     status = 'public'
-    and (public_at is null or public_at <= now())
   );
 
 -- ---------------------------------------------------------------------------
