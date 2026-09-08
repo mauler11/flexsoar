@@ -35,10 +35,15 @@ export function AuthForm({ mode, next = "/" }: AuthFormProps) {
     setError("");
     setSuccessMessage("");
 
+    // OAuth must land on /callback (not `next` directly): only the
+    // callback route exchanges ?code= for a session via
+    // exchangeCodeForSession() and provisions the users row. Sending the
+    // code to / or /market leaves it unexchanged — the user lands back
+    // signed out, exactly the reported symptom.
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}${next}`,
+        redirectTo: `${window.location.origin}/callback?next=${encodeURIComponent(next)}`,
       },
     });
 
