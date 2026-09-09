@@ -1,24 +1,30 @@
 /**
  * components/market/ListingCard.tsx
  *
- * One live listing in the market grid, in the marketplace's card language:
- * rounded panel, tier pill over the art, name/colorway/size, big price with
- * the oracle value beside it, and a single Buy now action into the card
- * page (the buy itself — cash/FSC legs — lives in BuyPanel there).
+ * One live listing in the market grid: tier pill over the art, shoe name,
+ * variant · size, colour-coded condition, big price with a below/above-fair
+ * indication, and a Buy now call-to-action. The whole card links to the
+ * detail page — the button is the visual affordance, not a separate target.
  *
- * No wishlist hearts (no watchlist UI exists), no trend deltas (no price
- * history exists), no make-offer (not a real flow). Everything rendered
- * here comes from the ListingSummary.
+ * Only real data is rendered: no wishlist hearts (no watchlist UI), no trend
+ * deltas (no price history), no make-offer (not a real flow). "Fair" anchors
+ * on fair_price_cents (condition-adjusted) with oracle_value_cents as the
+ * fallback; with neither, the indication line is omitted, never invented.
  */
 import Link from "next/link";
 
 import type { ListingSummary } from "@/lib/api/contract";
-import { toCard, toSku } from "@/components/market/bridge";
+import { toSku } from "@/components/market/bridge";
 import { CardArt } from "@/components/card/CardArt";
+import { ConditionBadge } from "@/components/card/ConditionBadge";
 import { FloatBar } from "@/components/card/FloatBar";
 import { TierBadge } from "@/components/card/TierBadge";
 import { formatMyr } from "@/components/card/format";
-import { publishedConditionLabel } from "@/lib/domain/rarity";
+import {
+  conditionGradeBand,
+  floatBand,
+  publishedConditionLabel,
+} from "@/lib/domain/rarity";
 
 export interface ListingCardProps {
   listing: ListingSummary;
@@ -30,9 +36,14 @@ export interface ListingCardProps {
   showNumericFloat?: boolean;
 }
 
-export function ListingCard({ listing, showNumericFloat = false }: ListingCardProps) {
-  const card = toCard(listing.card);
+export function ListingCard({
+  listing,
+  showNumericFloat = false,
+}: ListingCardProps) {
   const sku = toSku(listing.card.sku);
+  const band = listing.card.condition_grade
+    ? conditionGradeBand(listing.card.condition_grade)
+    : floatBand(listing.card.float_value);
   const condition = publishedConditionLabel(
     listing.card.float_value,
     listing.card.condition_grade,
@@ -42,8 +53,23 @@ export function ListingCard({ listing, showNumericFloat = false }: ListingCardPr
       ? null
       : listing.card.float_percentile.toFixed(2);
 
+  const fairAnchor =
+    listing.fair_price_cents ?? listing.oracle_value_cents ?? null;
+  const fairDeltaPct =
+    fairAnchor != null && fairAnchor > 0
+      ? Math.round(
+          ((listing.price_cents - fairAnchor) / fairAnchor) * 100,
+        )
+      : null;
+
+  const detailHref = `/card/${listing.card_id}`;
+
   return (
-    <article className="group flex flex-col overflow-hidden rounded-2xl border border-line bg-raised transition-colors hover:border-line-strong hover:shadow-soft">
+    <Link
+      href={detailHref}
+      aria-label={`${listing.card.sku.brand} ${listing.card.sku.model} ${listing.card.sku.colorway}, ${formatMyr(listing.price_cents)}`}
+      className="group flex flex-col overflow-hidden rounded-2xl border border-line bg-raised transition-colors hover:border-line-strong hover:shadow-soft"
+    >
       <div className="relative">
         <CardArt sku={sku} aspect="aspect-[4/3]" />
         <div className="absolute left-2 top-2">
@@ -59,45 +85,45 @@ export function ListingCard({ listing, showNumericFloat = false }: ListingCardPr
           {listing.card.sku.brand} {listing.card.sku.model}
         </h3>
         <p className="truncate text-[13px] text-muted">
-          {listing.card.sku.colorway}
+          {listing.card.sku.colorway} · US {listing.card.sku.size_us}
         </p>
         {showNumericFloat ? (
           <>
             <FloatBar float={listing.card.float_value} />
             <p className="text-xs text-muted">
-              US {listing.card.sku.size_us} · PCT {percentile ?? "—"} · Mint #
-              {String(card.mint_number).padStart(2, "0")}
+              PCT {percentile ?? "—"}
             </p>
           </>
         ) : (
-          <p className="text-xs text-muted">
-            US {listing.card.sku.size_us} · {condition} · Mint #
-            {String(card.mint_number).padStart(2, "0")}
-          </p>
+          <ConditionBadge
+            band={band}
+            label={condition}
+            className="mt-0.5 w-fit"
+          />
         )}
 
         <div className="mt-1 flex items-baseline gap-2">
           <span className="text-lg font-extrabold tracking-tight">
             {formatMyr(listing.price_cents)}
           </span>
-          {listing.oracle_value_cents != null && (
-            <span
-              className="truncate text-xs text-muted"
-              title="Oracle fair value"
-            >
-              Oracle {formatMyr(listing.oracle_value_cents)}
-            </span>
-          )}
         </div>
+        {fairDeltaPct != null && fairDeltaPct !== 0 && (
+          <p
+            className={
+              fairDeltaPct < 0
+                ? "text-xs font-semibold text-accent"
+                : "text-xs font-semibold text-[#E8B33A]"
+            }
+          >
+            {Math.abs(fairDeltaPct)}% {fairDeltaPct < 0 ? "below" : "above"}{" "}
+            fair
+          </p>
+        )}
 
-        <Link
-          href={`/card/${listing.card_id}`}
-          aria-label={`Buy ${listing.card.sku.brand} ${listing.card.sku.model} for ${formatMyr(listing.price_cents)}`}
-          className="mt-2 inline-flex items-center justify-center rounded-xl bg-accent px-3 py-2 text-sm font-bold text-[#0B0B0B] transition hover:brightness-110"
-        >
+        <span className="mt-2 inline-flex items-center justify-center rounded-lg bg-accent px-3 py-2 text-sm font-bold text-[#0B0B0B] transition group-hover:brightness-110">
           Buy now
-        </Link>
+        </span>
       </div>
-    </article>
+    </Link>
   );
 }

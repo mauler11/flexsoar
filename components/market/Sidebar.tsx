@@ -89,7 +89,7 @@ export function Sidebar({ items }: SidebarProps) {
   return (
     <nav
       aria-label="Primary"
-      className="flex w-16 shrink-0 flex-col gap-1 border-r border-line bg-raised/40 px-2 py-4 lg:w-52 lg:px-3"
+      className="sticky top-16 flex h-[calc(100vh-4rem)] w-16 shrink-0 flex-col gap-1 self-start overflow-y-auto border-r border-line bg-raised/40 px-2 py-4 lg:w-52 lg:px-3"
     >
       {items.map((item) => {
         const active = isActive(pathname, item.href);

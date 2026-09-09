@@ -7,7 +7,7 @@
  * feeds the card links.
  */
 import type { Metadata } from "next";
-import { getListings, getPlatformConfig, getSkus } from "@/lib/api/contract";
+import { BRAND_PILL_EXCLUSIONS, getListings, getPlatformConfig, getSkus } from "@/lib/api/contract";
 import type { ListingSort, ListingsQuery } from "@/lib/api/contract";
 import type { Tier } from "@/lib/db/types";
 import { MarketFilters } from "@/components/market/MarketFilters";
@@ -57,7 +57,8 @@ export default async function BrowsePage({
     : "recent";
 
   const query: ListingsQuery = { sort };
-  if (brand) query.brand = brand;
+  if (brand === "Other") query.excludeBrands = [...BRAND_PILL_EXCLUSIONS];
+  else if (brand) query.brand = brand;
   if (model) query.model = model;
   const search = params.q?.trim() || undefined;
   if (search) query.search = search;

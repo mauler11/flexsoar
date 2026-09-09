@@ -748,6 +748,13 @@ export type ListingSort =
   | 'float_asc'
   | 'float_desc';
 
+/**
+ * The fixed brand pills on the market filter bar (defined in
+ * lib/domain/rarity.ts so client components can share it). Anything outside
+ * the set is reached through the "Other" pill (excludeBrands below).
+ */
+export { BRAND_PILL_EXCLUSIONS } from '@/lib/domain/rarity';
+
 export interface ListingsQuery {
   status?: ListingStatus[];
   sellerId?: UUID;
@@ -756,6 +763,12 @@ export interface ListingsQuery {
   tier?: Tier[];
   brand?: string;
   model?: string;
+  /**
+   * Match skus whose brand is NOT in this list (the "Other" pill). Resolved
+   * through the skus table like search — PostgREST rejects not.in() on
+   * two-level embed paths, but accepts it on local columns.
+   */
+  excludeBrands?: string[];
   /**
    * Free-text match against the embedded sku's brand OR model (ilike,
    * case-insensitive). Combines with the exact brand/model filters above.
@@ -3483,19 +3496,25 @@ export async function getListings(query: ListingsQuery = {}): Promise<ListingSum
   if (query.priceMaxCents !== undefined) builder = builder.lte('price_cents', query.priceMaxCents);
   if (query.brand !== undefined) builder = builder.eq('card.sku.brand', query.brand);
   if (query.model !== undefined) builder = builder.eq('card.sku.model', query.model);
-  if (query.search !== undefined && query.search.trim() !== '') {
-    // Two-step: PostgREST or() rejects two-level embed paths
-    // (card.sku.brand — the gateway kills the request), so resolve matching
-    // skus first (local columns, proven or()), then filter listings by
+  if (
+    (query.search !== undefined && query.search.trim() !== '') ||
+    (query.excludeBrands !== undefined && query.excludeBrands.length > 0)
+  ) {
+    // Two-step: PostgREST rejects or() and not.in() on two-level embed paths
+    // (card.sku.brand — verified live: or() 400s, not.in() 400s), so resolve
+    // matching skus first (local columns only), then filter listings by
     // card.sku_id (local-column in(), already used for skuId above).
     // LIKE metacharacters (and the comma separating OR terms) are stripped
     // so user input cannot break out of the pattern.
-    const term = `%${query.search.trim().replace(/[\\%,_]/g, '')}%`;
-    const skuHits = await supabase
-      .from('skus')
-      .select('id')
-      .or(`brand.ilike.${term},model.ilike.${term}`)
-      .limit(100);
+    let skuQuery = supabase.from('skus').select('id');
+    if (query.excludeBrands !== undefined && query.excludeBrands.length > 0) {
+      skuQuery = skuQuery.not('brand', 'in', `(${query.excludeBrands.join(',')})`);
+    }
+    if (query.search !== undefined && query.search.trim() !== '') {
+      const term = `%${query.search.trim().replace(/[\\%,_]/g, '')}%`;
+      skuQuery = skuQuery.or(`brand.ilike.${term},model.ilike.${term}`);
+    }
+    const skuHits = await skuQuery.limit(100);
     if (skuHits.error) fail(skuHits.error, 'skus');
     const skuIds = ((skuHits.data ?? []) as Array<{ id: UUID }>).map((r) => r.id);
     if (skuIds.length === 0) return [];

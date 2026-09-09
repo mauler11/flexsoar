@@ -137,64 +137,64 @@ export default async function MarketLayout({
   return (
     <div className="flex min-h-screen flex-col">
       <ToastProvider>
+        <header className="sticky top-0 z-40 border-b border-line bg-background/80 backdrop-blur">
+          <div className="flex w-full items-center gap-3 px-4 py-3">
+            <Link
+              href="/"
+              aria-label="FlexSoar home"
+              className="shrink-0"
+            >
+              <Image
+                src="/logo-white-big.png"
+                alt="FlexSoar"
+                width={120}
+                height={40}
+                priority
+              />
+            </Link>
+            <div className="min-w-0 flex-1">
+              <Suspense>
+                <SearchInput />
+              </Suspense>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {me ? (
+                <>
+                  <NotificationBell
+                    notifications={notifications}
+                    unreadCount={unreadCount}
+                  />
+                  <Link
+                    href="/dashboard"
+                    title="Your XP"
+                    className="hidden rounded-lg border border-accent/50 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/10 sm:inline-block"
+                  >
+                    {(me.xp_total ?? 0).toLocaleString()} XP
+                  </Link>
+                  <a
+                    href={`/u/${me.handle}`}
+                    className="hidden text-xs text-muted hover:text-foreground md:inline"
+                  >
+                    @{me.handle} · LV {me.level}
+                  </a>
+                  <form action={signOut}>
+                    <Button type="submit" variant="ghost" size="sm">
+                      Sign out
+                    </Button>
+                  </form>
+                </>
+              ) : (
+                <Button href="/sign-in" size="sm" variant="secondary">
+                  Sign in
+                </Button>
+              )}
+            </div>
+          </div>
+        </header>
+
         <div className="flex flex-1">
           <Sidebar items={sidebarItems} />
           <div className="flex min-w-0 flex-1 flex-col">
-            <header className="border-b border-line bg-background/80 backdrop-blur">
-              <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-3">
-                <Link
-                  href="/"
-                  aria-label="FlexSoar home"
-                  className="shrink-0"
-                >
-                  <Image
-                    src="/logo-white-big.png"
-                    alt="FlexSoar"
-                    width={120}
-                    height={40}
-                    priority
-                  />
-                </Link>
-                <div className="min-w-0 flex-1">
-                  <Suspense>
-                    <SearchInput />
-                  </Suspense>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {me ? (
-                    <>
-                      <NotificationBell
-                        notifications={notifications}
-                        unreadCount={unreadCount}
-                      />
-                      <Link
-                        href="/dashboard"
-                        title="Your XP"
-                        className="hidden rounded-full border border-accent/50 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/10 sm:inline-block"
-                      >
-                        {(me.xp_total ?? 0).toLocaleString()} XP
-                      </Link>
-                      <a
-                        href={`/u/${me.handle}`}
-                        className="hidden text-xs text-muted hover:text-foreground md:inline"
-                      >
-                        @{me.handle} · LV {me.level}
-                      </a>
-                      <form action={signOut}>
-                        <Button type="submit" variant="ghost" size="sm">
-                          Sign out
-                        </Button>
-                      </form>
-                    </>
-                  ) : (
-                    <Button href="/sign-in" size="sm" variant="secondary">
-                      Sign in
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </header>
-
             <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
               {children}
             </main>

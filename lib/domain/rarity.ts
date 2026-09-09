@@ -19,6 +19,21 @@ import type { Cents, ConditionGrade, FloatValue, Tier } from '@/lib/db/types';
 
 export type TierName = 'Common' | 'Uncommon' | 'Rare' | 'Epic' | 'Legendary';
 
+/**
+ * The fixed brand pills on the market filter bar. Anything outside this set
+ * is reached through the "Other" pill, which the server resolves as
+ * excludeBrands (see ListingsQuery). Client-safe: imported by both the
+ * contract (server) and MarketFilters (client).
+ */
+export const BRAND_PILL_EXCLUSIONS: readonly string[] = [
+  'Jordan',
+  'Nike',
+  'Adidas',
+  'New Balance',
+  'Yeezy',
+  'Asics',
+];
+
 export interface TierBandSpec {
   tier: Tier;
   name: TierName;

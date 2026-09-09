@@ -22,7 +22,7 @@ export function ConditionBadge({ band, label, className }: ConditionBadgeProps) 
   return (
     <span
       className={cn(
-        "inline-flex items-center border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-tight",
+        "inline-flex items-center rounded-md border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide",
         className,
       )}
       style={{ borderColor: FLOAT_BAND_COLORS[band], color: FLOAT_BAND_COLORS[band] }}

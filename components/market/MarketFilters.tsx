@@ -14,7 +14,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
-import { tierName } from "@/lib/domain/rarity";
+import { BRAND_PILL_EXCLUSIONS, tierName } from "@/lib/domain/rarity";
 import type { Tier } from "@/lib/db/types";
 
 export interface MarketFiltersProps {
@@ -75,47 +75,62 @@ export function MarketFilters({
       ? modelsByBrand[initial.brand]
       : [];
 
-  function onBrandChange(value: string) {
-    const nextBrand = value || null;
-    if (
-      nextBrand &&
-      initial.model &&
-      !(modelsByBrand[nextBrand] ?? []).includes(initial.model)
-    ) {
-      push({ brand: nextBrand, model: null });
-      return;
-    }
-    push({ brand: nextBrand });
-  }
-
   const pillActive =
     "border-transparent bg-accent font-semibold text-[#0B0B0B]";
   const pillIdle =
     "border-line-strong bg-raised text-muted hover:border-muted hover:text-foreground";
+  const pills = ["", ...BRAND_PILL_EXCLUSIONS, "Other"];
+
+  function onPillClick(value: string) {
+    if (value === "") {
+      push({ brand: null, model: null });
+      return;
+    }
+    // Model options are brand-scoped; switching pills drops a stale model.
+    // "Other" has no model list, so it always resets the model too.
+    push({ brand: value, model: null });
+  }
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-line bg-raised/40 p-3">
-      <div
-        role="group"
-        aria-label="Filter by brand"
-        className="flex gap-2 overflow-x-auto pb-1"
-      >
-        {["", ...brands].map((b) => {
-          const active = (initial.brand ?? "") === b;
-          return (
-            <button
-              key={b || "all"}
-              type="button"
-              aria-pressed={active}
-              onClick={() => onBrandChange(b)}
-              className={`shrink-0 rounded-full border px-3.5 py-1.5 text-[13px] transition-colors ${
-                active ? pillActive : pillIdle
-              }`}
-            >
-              {b || "All"}
-            </button>
-          );
-        })}
+      <div className="flex items-center gap-2">
+        <div
+          role="group"
+          aria-label="Filter by brand"
+          className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1"
+        >
+          {pills.map((b) => {
+            const active = (initial.brand ?? "") === b;
+            return (
+              <button
+                key={b || "all"}
+                type="button"
+                aria-pressed={active}
+                onClick={() => onPillClick(b)}
+                className={`shrink-0 rounded-lg border px-3.5 py-1.5 text-[13px] transition-colors ${
+                  active ? pillActive : pillIdle
+                }`}
+              >
+                {b || "All"}
+              </button>
+            );
+          })}
+        </div>
+        <label className="flex shrink-0 items-center gap-1.5 text-[13px] text-muted">
+          <span className="hidden sm:inline">Sort</span>
+          <select
+            aria-label="Sort listings"
+            value={initial.sort}
+            onChange={(e) => push({ sort: e.target.value })}
+            className="rounded-lg border border-line-strong bg-raised px-2 py-1.5 text-[13px] text-foreground"
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value} className="bg-raised">
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
       {initial.q && (
         <p className="text-[13px] text-muted">
@@ -131,16 +146,10 @@ export function MarketFilters({
       )}
       <div className="flex flex-wrap items-end gap-3">
       <Select
-        label="Brand"
-        options={[{ value: "", label: "All" }, ...brands.map((b) => ({ value: b, label: b }))]}
-        value={initial.brand ?? ""}
-        onChange={(e) => onBrandChange(e.target.value)}
-      />
-      <Select
         label="Model"
         options={[{ value: "", label: "All" }, ...models.map((m) => ({ value: m, label: m }))]}
         value={initial.model ?? ""}
-        disabled={!initial.brand}
+        disabled={!initial.brand || initial.brand === "Other"}
         onChange={(e) => push({ model: e.target.value || null })}
       />
       <Select
@@ -154,12 +163,6 @@ export function MarketFilters({
         options={[{ value: "", label: "All" }, ...tierOptions]}
         value={initial.tier.length === 1 ? String(initial.tier[0]) : initial.tier.length > 1 ? "Tier" : ""}
         onChange={(e) => push({ tier: e.target.value || null })}
-      />
-      <Select
-        label="Sort"
-        options={SORT_OPTIONS}
-        value={initial.sort}
-        onChange={(e) => push({ sort: e.target.value })}
       />
       <Button
         type="button"
