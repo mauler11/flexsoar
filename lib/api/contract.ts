@@ -4385,10 +4385,14 @@ export interface PayoutEligibility {
 export async function checkPayoutEligibility(): Promise<PayoutEligibility[]> {
   const supabase = createServiceSupabase();
 
-  const payoutHoldDays = 7; // fallback; could read from platform_config
-  const holdCutoff = new Date(Date.now() - payoutHoldDays * 24 * 60 * 60 * 1000).toISOString();
-
   // Find settled orders not yet paid out where hold has elapsed.
+  // payout_release_at already encodes the hold (settlement + payout_hold_days,
+  // stamped by fn_purchase_card_core), so eligibility is simply release <= now.
+  // (An earlier revision compared against now - 7d, double-counting the hold
+  // into 14 days and contradicting this docstring. The fast-forward test that
+  // exposed it: release set 1h ago stayed ineligible under the old comparison.)
+  const nowIso = new Date().toISOString();
+
   // Cash-method only: credit (FSC) sellers are paid instantly in-ledger via
   // credit_sale_net at purchase time — a Stripe transfer on top would pay
   // them twice. Their payout_release_at is null, which the lte() below also
@@ -4401,7 +4405,7 @@ export async function checkPayoutEligibility(): Promise<PayoutEligibility[]> {
     .eq('status', 'settled')
     .eq('paid_out', false)
     .eq('seller_payout', 'cash')
-    .lte('payout_release_at', holdCutoff);
+    .lte('payout_release_at', nowIso);
 
   if (error) fail(error, 'orders');
 
