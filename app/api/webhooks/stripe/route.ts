@@ -70,8 +70,8 @@ const HANDLED_EVENTS: ReadonlySet<string> = new Set([
   'checkout.session.expired',
 ]);
 
-/** Every *_cents column in the schema is USD. 1 FSC = 1 USD. */
-const SETTLEMENT_CURRENCY = 'usd';
+/** Every *_cents column in the schema is MYR sen. 1 FSC = RM1. */
+const SETTLEMENT_CURRENCY = 'myr';
 
 /**
  * Refusals that will reproduce identically on redelivery — the metadata and
@@ -259,7 +259,7 @@ async function handleCheckoutCompleted(
     // the Stripe amount entirely, so if the two disagree the ledger would
     // record money that did not move.
     if (intent.currency?.toLowerCase() !== SETTLEMENT_CURRENCY) {
-      return acknowledge('settled in a currency other than USD', {
+      return acknowledge('settled in a currency other than MYR', {
         listingId,
         currency: intent.currency,
         paymentIntent: intent.id,

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { cn } from "@/components/ui/cn";
 import type { ProvenanceEntry } from "@/lib/api/contract";
-import { formatUsd } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 
 export interface ProvenanceChainProps {
   provenance: ProvenanceEntry[];
@@ -96,7 +96,7 @@ export function ProvenanceChain({ provenance }: ProvenanceChainProps) {
                   LV {entry.owner_level}
                 </span>
                 {entry.price_cents != null && (
-                  <span className="text-foreground font-medium">{formatUsd(entry.price_cents)}</span>
+                  <span className="text-foreground font-medium">{formatMyr(entry.price_cents)}</span>
                 )}
                 {released && (
                   <span className="text-xs text-muted">→ sold {released}</span>

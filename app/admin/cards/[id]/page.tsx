@@ -12,7 +12,7 @@ import { requireAdminPage } from "@/components/admin/auth";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { formatUsd } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 import { getCard } from "@/lib/api/contract";
 import type { CardStatus } from "@/lib/db/types";
 
@@ -80,10 +80,10 @@ export default async function CardDetailPage({
         <Field label="Float" value={Number(card.float_value).toFixed(3)} />
         <Field label="Condition" value={card.condition_grade?.replace(/_/g, " ") ?? "—"} />
         <Field label="Minted" value={formatTimestamp(card.minted_at)} />
-        <Field label="Oracle value" value={card.oracle_value_cents != null ? formatUsd(card.oracle_value_cents) : "—"} />
+        <Field label="Oracle value" value={card.oracle_value_cents != null ? formatMyr(card.oracle_value_cents) : "—"} />
         <Field label="Owner" value={`${card.owner.handle} (L${card.owner.level})`} />
         {card.listing && (
-          <Field label="Listing" value={`${card.listing.status} · ${formatUsd(card.listing.price_cents)}`} />
+          <Field label="Listing" value={`${card.listing.status} · ${formatMyr(card.listing.price_cents)}`} />
         )}
       </dl>
 
@@ -131,7 +131,7 @@ export default async function CardDetailPage({
                   )}
                 </span>
                 {hop.price_cents != null && (
-                  <span className="text-muted">{formatUsd(hop.price_cents)}</span>
+                  <span className="text-muted">{formatMyr(hop.price_cents)}</span>
                 )}
               </li>
             ))}

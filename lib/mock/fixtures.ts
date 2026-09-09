@@ -7,7 +7,7 @@
  *
  * Import these for rendering. Never fetch from them, never write to them.
  *
- * All *_cents values are USD cents. 1 FSC = 1 USD. Ringgit is display only.
+ * All *_cents values are MYR sen. 1 FSC = RM1.
  *
  * Internal consistency held on purpose, so the fixtures behave like real rows:
  *   - `cards.tier` is always tierForPrice(sku.market_price_cents). Float never
@@ -155,7 +155,7 @@ export const users: User[] = [
 ];
 
 // ------------------------------------------------------------
-// SKUS — market_price_cents (USD) places each one in a tier band
+// SKUS — market_price_cents (MYR) places each one in a tier band
 // ------------------------------------------------------------
 //
 // `palette` is the char -> hex map lib/sprites consumes, and it must carry

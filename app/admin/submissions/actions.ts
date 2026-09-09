@@ -33,9 +33,9 @@ import type { Cents, UUID } from "@/lib/db/types";
 
 export interface ApproveSubmissionInput {
   itemId: UUID;
-  /** The listing price, in USD cents. */
+  /** The listing price, in MYR sen. */
   priceCents: Cents;
-  /** Optional admin-set fair price for this card's condition, in USD cents. */
+  /** Optional admin-set fair price for this card's condition, in MYR sen. */
   fairPriceCents?: Cents;
 }
 

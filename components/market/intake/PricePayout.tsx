@@ -37,7 +37,7 @@
 
 import type { Sku } from "@/lib/db/types";
 import { floatMultiplier } from "@/components/card/value";
-import { formatUsd } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 import { Input } from "@/components/ui/Input";
 import { Banner } from "@/components/market/Banner";
 import {
@@ -123,7 +123,7 @@ export function PricePayout({
 
       {previewedPayoutMethod === "credit" && (
         <Banner tone="info" title="You'll be paid in FSC, not cash">
-          FSC is store credit — 1 FSC = 1 USD, earned by selling, spendable on
+          FSC is store credit — 1 FSC = RM1, earned by selling, spendable on
           FlexSoar. It cannot be cashed out to a bank. Your country is outside
           the Stripe corridor this platform can settle cash through, so a sale
           here pays out in FSC, not cash. Know that now, before you list, not
@@ -145,7 +145,7 @@ export function PricePayout({
             Oracle reference value (deadstock)
           </span>
           <span className="font-mono text-[13px] font-bold tracking-tight text-accent">
-            {oracle != null ? formatUsd(oracle) : "unpriced"}
+            {oracle != null ? formatMyr(oracle) : "unpriced"}
           </span>
         </div>
         {estimate != null && (
@@ -154,7 +154,7 @@ export function PricePayout({
               At your self-declared condition
             </span>
             <span className="font-mono text-[11px] font-bold tracking-tight text-foreground">
-              ≈ {formatUsd(estimate)}
+              ≈ {formatMyr(estimate)}
             </span>
           </div>
         )}
@@ -162,7 +162,7 @@ export function PricePayout({
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Input
-          label="Your price (USD)"
+          label="Your price (MYR)"
           type="number"
           min="0"
           step="0.01"

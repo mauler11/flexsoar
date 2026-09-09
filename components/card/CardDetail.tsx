@@ -2,7 +2,7 @@
  * components/card/CardDetail.tsx
  *
  * Hero card: full-width rarity frame with the photo carousel at scale, condition,
- * mint number, ownership status, and the price in USD — the marketplace's
+ * mint number, ownership status, and the price in MYR — the marketplace's
  * unit of account (AGENT_RULES.md §6). No ringgit conversion. Oracle value
  * is always shown beside an ask — never hidden.
  *
@@ -20,7 +20,7 @@ import { FloatBar } from "./FloatBar";
 import { TierBadge } from "./TierBadge";
 import { PhotoCarousel } from "./PhotoCarousel";
 import { ImageZoom } from "./ImageZoom";
-import { formatUsd } from "./format";
+import { formatMyr } from "./format";
 import { displayPriceCents } from "./value";
 import { conditionGradeBand, floatBand, publishedConditionLabel } from "@/lib/domain/rarity";
 
@@ -173,12 +173,12 @@ export function CardDetail({
           <div className="mt-auto border-t border-line pt-4">
             {value != null && (
               <div className="text-2xl font-black tracking-tight text-foreground">
-                {formatUsd(value)}
+                {formatMyr(value)}
               </div>
             )}
             {listing && listing.oracle_value_cents != null && (
               <div className="mt-2 text-sm tracking-tight text-muted/70">
-                Oracle fair value {formatUsd(listing.oracle_value_cents)}
+                Oracle fair value {formatMyr(listing.oracle_value_cents)}
               </div>
             )}
           </div>

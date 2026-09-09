@@ -36,9 +36,10 @@ at cost. MY→US/JP on a sneaker is $40–80 plus customs, which pushes behaviou
 toward trading. Cost pass-through only — no artificial friction on top, or the
 physical backing becomes decorative.
 
-**Prices display in USD only.** No local-currency approximations; comparability
-across the market matters more, because the whole product is people judging
-whether a trade is fair.
+**Prices display in MYR only.** The corridor is Malaysia-only and Stripe
+charges/pays out in MYR — a USD unit of account used to cost ~4% in
+conversion on every sale. Comparability across the market still matters more,
+because the whole product is people judging whether a trade is fair.
 
 ---
 

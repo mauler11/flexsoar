@@ -34,7 +34,7 @@ import {
   conditionGradeBand,
   publishedConditionLabel,
 } from '../lib/domain/rarity';
-import { formatFsc, formatUsd, formatMyr } from '../components/card/format';
+import { formatFsc, formatMyr } from '../components/card/format';
 import {
   TRANSPARENT,
   paletteFromJson,
@@ -452,7 +452,7 @@ const soldListings = listings.filter((l) => l.status === 'sold');
 // ------------------------------------------------------------
 
 describe('tier_bands', () => {
-  it('mirrors the rows inserted by 001_schema.sql, in USD cents', () => {
+  it('mirrors the rows inserted by 001_schema.sql, in MYR sen', () => {
     expect(
       TIER_BANDS.map((b) => [b.tier, b.name, b.minCents, b.maxCents]),
     ).toEqual([
@@ -1666,27 +1666,27 @@ describe('PlatformConfig.credit_hold_minutes (021/024f)', () => {
 });
 
 // ------------------------------------------------------------
-// design: USD vs FSC formatting, published condition label
+// design: MYR vs FSC formatting, published condition label
 // ------------------------------------------------------------
 
 describe('price vs FSC formatting (components/card/format.ts)', () => {
-  // The market-grid bug this pass fixed: a USD-cents price rendered through
-  // formatFsc() reads as "174.64 FSC" instead of "$174.64". Pin the two
-  // formatters apart so a call-site regression fails here first.
-  it('formatUsd renders a dollar-prefixed price, never the FSC suffix', () => {
-    const usd = formatUsd(17464);
-    expect(usd).toBe('$174.64');
-    expect(usd).not.toContain('FSC');
+  // A sen price rendered through formatFsc() reads as "174.64 FSC" instead
+  // of "RM 174.64". Pin the two formatters apart so a call-site regression
+  // fails here first.
+  it('formatMyr renders an RM-prefixed price, never the FSC suffix', () => {
+    const myr = formatMyr(17464);
+    expect(myr).toBe('RM 174.64');
+    expect(myr).not.toContain('FSC');
   });
 
-  it('formatFsc renders the FSC suffix with no dollar sign — for an actual FSC amount, never a price', () => {
+  it('formatFsc renders the FSC suffix with no RM sign — for an actual FSC amount, never a price', () => {
     const fsc = formatFsc(46500);
     expect(fsc).toBe('465.00 FSC');
-    expect(fsc).not.toContain('$');
+    expect(fsc).not.toContain('RM');
   });
 
-  it('formatMyr (retained for existing callers only, no new call sites) still converts at the fixed preview rate', () => {
-    expect(formatMyr(10000)).toBe('RM 420.00');
+  it('formatMyr formats sen natively (no FX conversion)', () => {
+    expect(formatMyr(18000)).toBe('RM 180.00');
   });
 });
 
@@ -1886,7 +1886,7 @@ describe('PricePayout — country-driven payout disclosure (docs/handoff/market.
       }),
     );
     expect(html).toContain("You&#x27;ll be paid in FSC, not cash");
-    expect(html).toContain('1 FSC = 1 USD');
+    expect(html).toContain('1 FSC = RM1');
     expect(html).toContain('cannot be cashed out to a bank');
   });
 
@@ -2387,16 +2387,16 @@ describe('SkuModelForm — rendered output agrees with parseDraft', () => {
 
 // ------------------------------------------------------------
 // VariantsTable — the Price column and the override's "model base" text are
-// the oracle price (USD, integer cents), never FSC. FSC is earned-only store
+// the oracle price (MYR, integer cents), never FSC. FSC is earned-only store
 // credit (AGENT_RULES.md section 5/6) and is never the price of anything.
-// components/card/format.ts already draws this line (formatUsd vs formatFsc,
+// components/card/format.ts already draws this line (formatMyr vs formatFsc,
 // both asserted above) — this pins that VariantsTable actually calls through
 // it rather than rolling its own "X.XX FSC" string, which is exactly the bug
 // that shipped: a local money() helper duplicating formatFsc's suffix on a
 // price.
 // ------------------------------------------------------------
 
-describe('VariantsTable — price column and override helper text render USD, never FSC', () => {
+describe('VariantsTable — price column and override helper text render MYR, never FSC', () => {
   const baseVariant: Sku = {
     id: 'variant-1',
     model_id: 'model-1',
@@ -2428,11 +2428,11 @@ describe('VariantsTable — price column and override helper text render USD, ne
         cardCounts: { 'variant-1': 3 },
       }),
     );
-    expect(html).toContain(formatUsd(26000));
+    expect(html).toContain(formatMyr(26000));
     expect(html).not.toContain('FSC');
   });
 
-  it('the override row\'s "model base" helper text is the same USD figure, not FSC', () => {
+  it('the override row\'s "model base" helper text is the same MYR figure, not FSC', () => {
     const overriddenVariant: Sku = { ...baseVariant, price_override_cents: 8000 };
     const html = renderToStaticMarkup(
       createElement(VariantsTable, {
@@ -2443,7 +2443,7 @@ describe('VariantsTable — price column and override helper text render USD, ne
         cardCounts: { 'variant-1': 0 },
       }),
     );
-    expect(html).toContain(`model base ${formatUsd(26000)}`);
+    expect(html).toContain(`model base ${formatMyr(26000)}`);
     expect(html).not.toContain('FSC');
   });
 
@@ -2464,16 +2464,16 @@ describe('VariantsTable — price column and override helper text render USD, ne
 
 // ------------------------------------------------------------
 // docs/handoff/admin.md item 17 — every remaining "X.XX FSC" price outside
-// the SKU bench. Each of these had a real USD amount (an oracle price, a
+// the SKU bench. Each of these had a real MYR amount (an oracle price, a
 // seller's ask, an intake fee, a redemption handling fee) rendered through
 // either a local money()-shaped helper or an inline template literal that
-// happened to copy formatFsc's exact suffix. Fixed to call formatUsd; the
+// happened to copy formatFsc's exact suffix. Fixed to call formatMyr; the
 // local helpers are gone rather than kept beside it, per the same reasoning
 // as the section above: a second formatter is how these six drifted from
-// formatUsd in the first place.
+// formatMyr in the first place.
 // ------------------------------------------------------------
 
-describe('MintTable — oracle price column renders USD, never FSC', () => {
+describe('MintTable — oracle price column renders MYR, never FSC', () => {
   const baseItem: ItemSummary = {
     id: 'item-1',
     sku_id: 'sku-1',
@@ -2511,7 +2511,7 @@ describe('MintTable — oracle price column renders USD, never FSC', () => {
 
   it('a mintable item with an oracle price: the Oracle column shows a dollar amount, never FSC', () => {
     const html = renderToStaticMarkup(createElement(MintTable, { items: [baseItem] }));
-    expect(html).toContain(formatUsd(26000));
+    expect(html).toContain(formatMyr(26000));
     expect(html).not.toContain('FSC');
   });
 
@@ -2526,7 +2526,7 @@ describe('MintTable — oracle price column renders USD, never FSC', () => {
   });
 });
 
-describe('DecisionControls — oracle and asking price hint text render USD, never FSC', () => {
+describe('DecisionControls — oracle and asking price hint text render MYR, never FSC', () => {
   // Both price texts render only inside the approve confirm modal
   // (open={confirming === "approve"}), which starts closed and a static
   // render has no way to click open (no jsdom in this suite) — so a plain
@@ -2549,54 +2549,54 @@ describe('DecisionControls — oracle and asking price hint text render USD, nev
   });
 
   it('oracleHint renders the SKU oracle price in dollars, never FSC', () => {
-    expect(oracleHint(26000)).toBe(`Integer USD cents. SKU oracle price is ${formatUsd(26000)}.`);
+    expect(oracleHint(26000)).toBe(`Integer MYR sen. SKU oracle price is ${formatMyr(26000)}.`);
     expect(oracleHint(26000)).not.toContain('FSC');
     expect(oracleHint(null)).not.toContain('FSC');
   });
 
   it('askingNote renders the seller\'s ask in dollars, never FSC', () => {
-    expect(askingNote(21500)).toBe(`Seller asked ${formatUsd(21500)}. Prefilled, not binding.`);
+    expect(askingNote(21500)).toBe(`Seller asked ${formatMyr(21500)}. Prefilled, not binding.`);
     expect(askingNote(21500)).not.toContain('FSC');
     expect(askingNote(null)).toBeNull();
   });
 });
 
-describe('app/admin/submissions/page.tsx — Asking column renders USD, never FSC', () => {
+describe('app/admin/submissions/page.tsx — Asking column renders MYR, never FSC', () => {
   it('the pending-review queue shows the asking price in dollars, never FSC', async () => {
     const html = renderToStaticMarkup(await SubmissionsQueuePage());
-    expect(html).toContain(formatUsd(21500));
+    expect(html).toContain(formatMyr(21500));
     expect(html).not.toContain('FSC');
   });
 });
 
-describe('app/admin/submissions/[itemId]/page.tsx — asking/oracle price render USD, never FSC', () => {
+describe('app/admin/submissions/[itemId]/page.tsx — asking/oracle price render MYR, never FSC', () => {
   it('the header\'s Asking figure, the SKU oracle price, and the seller\'s earlier-submission Asked column are all dollar-formatted, never FSC', async () => {
     const element = await ReviewSubmissionPage({
       params: Promise.resolve({ itemId: 'submission-1' }),
     });
     const html = renderToStaticMarkup(element);
-    expect(html).toContain(formatUsd(21500)); // header Asking, and this submission's own ask
-    expect(html).toContain(formatUsd(26000)); // SKU oracle
-    expect(html).toContain(formatUsd(8000)); // seller's earlier-submission Asked column
+    expect(html).toContain(formatMyr(21500)); // header Asking, and this submission's own ask
+    expect(html).toContain(formatMyr(26000)); // SKU oracle
+    expect(html).toContain(formatMyr(8000)); // seller's earlier-submission Asked column
     expect(html).not.toContain('FSC');
   });
 });
 
-describe('app/admin/consignments/[id]/page.tsx — Intake fee renders USD, never FSC', () => {
+describe('app/admin/consignments/[id]/page.tsx — Intake fee renders MYR, never FSC', () => {
   it('the consignment detail page shows the intake fee in dollars, never FSC', async () => {
     const element = await ConsignmentDetailPage({ params: Promise.resolve({ id: 'consignment-1' }) });
     const html = renderToStaticMarkup(element);
-    expect(html).toContain(formatUsd(1500));
+    expect(html).toContain(formatMyr(1500));
     expect(html).not.toContain('FSC');
   });
 });
 
-describe('app/admin/fulfilment/page.tsx — redemption handling fee renders USD, never FSC', () => {
+describe('app/admin/fulfilment/page.tsx — redemption handling fee renders MYR, never FSC', () => {
   // fn_redeem_card books this fee as entry_type 'handling_fee' on asset
-  // 'currency', both legs — it was always USD, never FSC.
+  // 'currency', both legs — it was always MYR, never FSC.
   it('the warehouse queue\'s Fee column shows the handling fee in dollars, never FSC', async () => {
     const html = renderToStaticMarkup(await FulfilmentPage());
-    expect(html).toContain(formatUsd(995));
+    expect(html).toContain(formatMyr(995));
     expect(html).not.toContain('FSC');
   });
 });
@@ -3217,7 +3217,7 @@ describe('Market page (/market) — signed out render', () => {
     const element = await MarketPage({ searchParams: Promise.resolve({}) });
     const html = renderToStaticMarkup(element);
     expect(html).toContain('Market');
-    expect(html).toContain('Level-gated early access');
+    expect(html).toContain('Oracle-priced asks · instant listing');
   });
 
   it('shows empty state when no listings', async () => {

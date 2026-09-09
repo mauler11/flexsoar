@@ -84,7 +84,7 @@ describe('email templates', () => {
       expect(html).toContain('Air Jordan 1');
       expect(html).toContain('Chicago');
       expect(html).toContain('US 10.5');
-      expect(html).toContain('$250.00');
+      expect(html).toContain('RM 250.00');
       // formatDueBy outputs "Thu, Sep 3, 2026, 02:30 PM UTC" for 2026-09-03T14:30:00.000Z
       expect(html).toContain('Sep 3, 2026');
       expect(html).toContain('https://flexsoar.net/market/abc123');
@@ -148,22 +148,22 @@ describe('email templates', () => {
       expect(text).toContain('Sep 3, 2026');
     });
 
-    it('formats price correctly in dollars and cents', () => {
+    it('formats price correctly in ringgit and sen', () => {
       const { html, text } = buildCardSoldEmail({
         ...baseInput,
         salePriceCents: 12345,
       });
-      expect(html).toContain('$123.45');
-      expect(text).toContain('$123.45');
+      expect(html).toContain('RM 123.45');
+      expect(text).toContain('RM 123.45');
     });
 
-    it('formats price correctly for whole dollar amounts', () => {
+    it('formats price correctly for whole ringgit amounts', () => {
       const { html, text } = buildCardSoldEmail({
         ...baseInput,
         salePriceCents: 10000,
       });
-      expect(html).toContain('$100.00');
-      expect(text).toContain('$100.00');
+      expect(html).toContain('RM 100.00');
+      expect(text).toContain('RM 100.00');
     });
   });
 });

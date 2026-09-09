@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Banner } from "@/components/market/Banner";
 import { OrderPoll } from "@/components/market/OrderPoll";
-import { formatFsc, formatUsd } from "@/components/card/format";
+import { formatFsc, formatMyr } from "@/components/card/format";
 
 export interface BuyPanelListing {
   id: string;
@@ -107,18 +107,18 @@ export function BuyPanel({
 
       <div>
         <div className="text-2xl font-bold tracking-tight">
-          {formatUsd(listing.priceCents)}
+          {formatMyr(listing.priceCents)}
         </div>
       </div>
 
       {listing.oracleValueCents != null && (
         <p className="font-mono text-[10px] tracking-tight text-muted">
-          Oracle fair value {formatUsd(listing.oracleValueCents)}
+          Oracle fair value {formatMyr(listing.oracleValueCents)}
         </p>
       )}
       {listing.fairPriceCents != null && (
         <p className="font-mono text-[10px] tracking-tight text-muted">
-          Fair price (this condition) {formatUsd(listing.fairPriceCents)}
+          Fair price (this condition) {formatMyr(listing.fairPriceCents)}
         </p>
       )}
 
@@ -167,7 +167,7 @@ export function BuyPanel({
           <div className="flex items-baseline justify-between font-mono text-[10px] tracking-tight text-muted">
             <span>{fscOnly ? "Settles entirely in FSC" : "Due by card"}</span>
             <span className="text-foreground">
-              {fscOnly ? formatFsc(creditCents) : formatUsd(cashCents)}
+              {fscOnly ? formatFsc(creditCents) : formatMyr(cashCents)}
             </span>
           </div>
         </div>
@@ -187,7 +187,7 @@ export function BuyPanel({
             ? fscOnly
               ? "Pay with FSC"
               : creditCents > 0
-                ? `Pay ${formatUsd(cashCents)} + ${formatFsc(creditCents)}`
+                ? `Pay ${formatMyr(cashCents)} + ${formatFsc(creditCents)}`
                 : "Buy with Stripe"
             : "Sign in"}
       </Button>

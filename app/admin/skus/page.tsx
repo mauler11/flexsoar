@@ -18,7 +18,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Table, TBody, THead, Td, Th, Tr } from "@/components/ui/Table";
-import { formatUsd } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 import { listSkuModels } from "@/lib/api/contract";
 import { borderColorFor, tierForPrice, tierName } from "@/lib/domain/rarity";
 
@@ -26,9 +26,9 @@ export const metadata: Metadata = {
   title: "Models — FlexSoar admin",
 };
 
-/** base_price_cents is the oracle price — USD, never FSC. */
+/** base_price_cents is the oracle price — MYR, never FSC. */
 function money(cents: number | null): string {
-  return cents == null ? "—" : formatUsd(cents);
+  return cents == null ? "—" : formatMyr(cents);
 }
 
 export default async function SkuModelsPage() {

@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { cn } from "@/components/ui/cn";
 import { Button } from "@/components/ui/Button";
-import { formatUsd } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 import { markNotificationReadAction } from "@/app/(market)/actions";
 
 export interface Notification {

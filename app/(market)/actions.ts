@@ -313,7 +313,7 @@ export async function createCheckoutAction(
         {
           quantity: 1,
           price_data: {
-            currency: 'usd',
+            currency: 'myr',
             unit_amount: cashCents,
             product_data: { name: productName },
           },

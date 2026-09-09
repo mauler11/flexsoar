@@ -26,7 +26,7 @@ import { toPhotoList } from "@/components/admin/grading/photos";
 import { ArtUploader } from "@/components/admin/skus/ArtUploader";
 import { DecisionControls } from "@/components/admin/submissions/DecisionControls";
 import { DeclaredGrade } from "@/components/admin/submissions/DeclaredGrade";
-import { formatUsd } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 import { Badge } from "@/components/ui/Badge";
 import { Table, TBody, THead, Td, Th, Tr } from "@/components/ui/Table";
 
@@ -105,13 +105,13 @@ export default async function ReviewSubmissionPage({
           <p className="font-mono text-xl tabular-nums">
             {submission.asking_price_cents == null
               ? "—"
-              : formatUsd(submission.asking_price_cents)}
+              : formatMyr(submission.asking_price_cents)}
           </p>
           <p className="font-mono text-[10px] tracking-tight text-muted">
             paid as {submission.submitted_payout} · SKU oracle{" "}
             {submission.sku.market_price_cents == null
               ? "—"
-              : formatUsd(submission.sku.market_price_cents)}
+              : formatMyr(submission.sku.market_price_cents)}
           </p>
         </div>
       </header>
@@ -229,7 +229,7 @@ export default async function ReviewSubmissionPage({
                       <Td className="text-right tabular-nums">
                         {row.asking_price_cents == null
                           ? "—"
-                          : formatUsd(row.asking_price_cents)}
+                          : formatMyr(row.asking_price_cents)}
                       </Td>
                       <Td className="text-muted tabular-nums">
                         {formatTimestamp(row.created_at)}

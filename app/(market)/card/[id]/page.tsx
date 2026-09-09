@@ -28,7 +28,7 @@ import { Countdown } from "@/components/market/Countdown";
 import { ExpandableSection } from "@/components/ui/ExpandableSection";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { formatUsd } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 
 /** Parse the photos JSON field into a string array. */
 function parsePhotos(json: unknown): string[] {
@@ -180,13 +180,13 @@ export default async function CardPage({
               {oracleCents != null && (
                 <div className="flex items-baseline justify-between font-mono tracking-tight text-muted">
                   <span>Oracle fair value</span>
-                  <span className="text-foreground font-medium">{formatUsd(oracleCents)}</span>
+                  <span className="text-foreground font-medium">{formatMyr(oracleCents)}</span>
                 </div>
               )}
               {listing?.fair_price_cents != null && (
                 <div className="flex items-baseline justify-between font-mono tracking-tight text-muted">
                   <span>Fair price (this condition)</span>
-                  <span className="text-foreground font-medium">{formatUsd(listing.fair_price_cents)}</span>
+                  <span className="text-foreground font-medium">{formatMyr(listing.fair_price_cents)}</span>
                 </div>
               )}
               {item.grading_notes && (
@@ -328,17 +328,17 @@ function OwnerListingPanel({
       <div className="flex items-baseline justify-between font-mono text-[10px] uppercase tracking-tight text-muted">
         <span>Ask</span>
         <span className="text-lg font-bold tracking-tight text-foreground">
-          {formatUsd(listing.price_cents)}
+          {formatMyr(listing.price_cents)}
         </span>
       </div>
       {listing.oracle_value_cents != null && (
         <p className="font-mono text-[10px] tracking-tight text-muted">
-          Oracle fair value {formatUsd(listing.oracle_value_cents)}
+          Oracle fair value {formatMyr(listing.oracle_value_cents)}
         </p>
       )}
       {listing.fair_price_cents != null && (
         <p className="font-mono text-[10px] tracking-tight text-muted">
-          Fair price {formatUsd(listing.fair_price_cents)}
+          Fair price {formatMyr(listing.fair_price_cents)}
         </p>
       )}
 
@@ -346,9 +346,9 @@ function OwnerListingPanel({
         <div className="flex flex-col gap-1 border border-line px-2 py-1.5 font-mono text-[10px] tracking-tight text-muted">
           <span>Order {listing.order.id.slice(0, 8)}… · {listing.order.status}</span>
           <span>
-            Gross {formatUsd(listing.order.gross_cents)} · fee{" "}
-            {formatUsd(listing.order.fee_cents)} · net{" "}
-            {formatUsd(listing.order.net_cents)}
+            Gross {formatMyr(listing.order.gross_cents)} · fee{" "}
+            {formatMyr(listing.order.fee_cents)} · net{" "}
+            {formatMyr(listing.order.net_cents)}
           </span>
         </div>
       )}

@@ -25,7 +25,7 @@ import {
   rejectSubmissionAction,
 } from "@/app/admin/submissions/actions";
 import type { ActionResult } from "@/components/admin/action-result";
-import { formatUsd } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
@@ -67,15 +67,15 @@ function parseCents(raw: string): { ok: true; cents: number } | { ok: false; err
  */
 export function oracleHint(marketPriceCents: Cents | null): string {
   return marketPriceCents == null
-    ? "Integer USD cents. 18999 = $189.99."
-    : `Integer USD cents. SKU oracle price is ${formatUsd(marketPriceCents)}.`;
+    ? "Integer MYR sen. 18999 = RM 189.99."
+    : `Integer MYR sen. SKU oracle price is ${formatMyr(marketPriceCents)}.`;
 }
 
 /** Same reasoning as oracleHint above. */
 export function askingNote(askingPriceCents: Cents | null): string | null {
   return askingPriceCents == null
     ? null
-    : `Seller asked ${formatUsd(askingPriceCents)}. Prefilled, not binding.`;
+    : `Seller asked ${formatMyr(askingPriceCents)}. Prefilled, not binding.`;
 }
 
 export function DecisionControls({

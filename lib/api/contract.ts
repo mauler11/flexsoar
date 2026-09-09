@@ -1887,7 +1887,7 @@ export async function setCountry(countryCode: string): Promise<void> {
 }
 
 /**
- * The redeem handling fee, in USD cents, when no platform_config row exists.
+ * The redeem handling fee, in MYR sen, when no platform_config row exists.
  *
  * 011 gave it a permanent home: platform_config['redemption_handling_fee_cents']
  * (seeded at 1500). The authoritative value is now getRedemptionHandlingFeeCents();
@@ -1921,7 +1921,7 @@ export const CREDIT_HOLD_MINUTES_FALLBACK = 1440;
 
 /** The live platform_config rows that UI code can branch on. */
 export interface PlatformConfig {
-  /** redemption_handling_fee_cents, USD cents charged to ship a redeemed item. */
+  /** redemption_handling_fee_cents, MYR sen charged to ship a redeemed item. */
   redemption_handling_fee_cents: Cents;
   /** credit_payout_enabled — master switch for the seller-takes-credit leg. */
   credit_payout_enabled: boolean;
@@ -4493,7 +4493,7 @@ export async function executePayout(orderId: UUID): Promise<{ transferId: string
 
   const transfer = await stripe.transfers.create({
     amount: match.netCents,
-    currency: 'usd',
+    currency: 'myr',
     destination: match.connectAccountId,
     metadata: {
       order_id: orderId,

@@ -181,8 +181,9 @@ what earlier versions of this file said; where they conflict, this section wins.
 
 ## 6. Conventions
 
-- All `*_cents` columns are USD cents. 1 FSC = 1 USD. Prices display in USD
-  only; ringgit is never shown.
+- All `*_cents` columns are MYR sen. 1 FSC = RM1. Prices display in MYR
+  only (Stripe checkout, transfers, and the settlement webhook all enforce
+  MYR — a USD charge used to cost ~4% in conversion on an MY platform).
 - Money is always integer cents. Never floats for currency.
 - Condition floats are `numeric(4,3)` — three decimal places, always. Rubric
   components are `numeric(3,2)`.

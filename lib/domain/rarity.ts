@@ -24,14 +24,14 @@ export interface TierBandSpec {
   name: TierName;
   /** Hex border colour. Overridden by EXCEPTIONAL_COLOR when the flag is set. */
   borderColor: string;
-  /** Inclusive lower bound, USD cents. */
+  /** Inclusive lower bound, MYR sen. */
   minCents: Cents;
-  /** Exclusive upper bound, USD cents. null = open ended. */
+  /** Exclusive upper bound, MYR sen. null = open ended. */
   maxCents: Cents | null;
 }
 
 /**
- * Exactly the rows in `tier_bands`. Bounds are USD cents:
+ * Exactly the rows in `tier_bands`. Bounds are MYR sen:
  *   (1,'Common',    '#7A7A7A',     0,  6000)   -- under $60
  *   (2,'Uncommon',  '#35F07A',  6000, 12000)   -- $60 to $120
  *   (3,'Rare',      '#3B9EFF', 12000, 25000)   -- $120 to $250

@@ -26,8 +26,8 @@ export type UUID = string;
 export type Timestamptz = string;
 
 /**
- * Integer USD cents. Every `*_cents` column in the schema is USD.
- * 1 FSC = 1 USD = 100 cents. FSC is a display unit; ringgit is display only.
+ * Integer MYR sen. Every `*_cents` column in the schema is MYR sen.
+ * 1 FSC = RM1 = 100 sen. FSC is a display unit in the same unit of account.
  */
 export type Cents = number;
 

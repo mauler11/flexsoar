@@ -16,7 +16,7 @@ import {
 } from "@/app/(market)/queries";
 import { MarketTile } from "@/components/market/MarketTile";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { formatUsd } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 
 export async function generateMetadata({
   params,
@@ -75,7 +75,7 @@ export default async function ProfilePage({
           </div>
           <div>
             <dt className="text-muted">Portfolio</dt>
-            <dd className="text-foreground">{formatUsd(profile.portfolio_value_cents)}</dd>
+            <dd className="text-foreground">{formatMyr(profile.portfolio_value_cents)}</dd>
           </div>
         </dl>
       </section>
@@ -144,7 +144,7 @@ export default async function ProfilePage({
                       {trade.releasedAt ? trade.releasedAt.slice(0, 10) : "—"}
                     </td>
                     <td className="px-2 py-1.5 text-right">
-                      {trade.priceCents != null ? formatUsd(trade.priceCents) : "—"}
+                      {trade.priceCents != null ? formatMyr(trade.priceCents) : "—"}
                     </td>
                   </tr>
                 ))}

@@ -33,7 +33,7 @@ import {
 import { submitListingIntakeAction } from "@/app/(market)/list/actions";
 import type { GradeComponents } from "@/lib/db/grading";
 import { gradeFloatFromComponents } from "@/lib/db/grading";
-import { formatUsd } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 
 export interface IntakeWizardProps {
   skus: readonly Sku[];
@@ -337,7 +337,7 @@ function ReviewPane({
           value={`${photos.filter((p) => p.url.startsWith("https://")).length} uploaded (${REQUIRED_PHOTO_COUNT} required)`}
         />
         <Detail label="Self-declared float" value={declaredFloat.toFixed(3)} />
-        <Detail label="Reserve price" value={formatUsd(priceCents)} />
+        <Detail label="Reserve price" value={formatMyr(priceCents)} />
         <Detail label="Payout" value={payout === "cash" ? "cash" : "credit"} />
         <Detail label="Country" value={countryCode} />
       </div>

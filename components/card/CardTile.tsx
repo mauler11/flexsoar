@@ -2,9 +2,9 @@
  * components/card/CardTile.tsx
  *
  * Compact card for grids (~180px). Shows the sprite in its rarity frame,
- * condition, mint number, and price in USD — the marketplace's unit of
- * account (AGENT_RULES.md §6). No ringgit conversion; USD is the one
- * comparable number a buyer judges a trade against.
+ * condition, mint number, and price in MYR — the marketplace's unit of
+ * account (AGENT_RULES.md §6). MYR is the one comparable number a buyer
+ * judges a trade against.
  *
  * Pure props only. `priceCents` defaults to the card's oracle value
  * (fn_card_value_cents mirror); pass a listing's price to show the ask.
@@ -17,7 +17,7 @@ import { CardFrame } from "./CardFrame";
 import { ConditionBadge } from "./ConditionBadge";
 import { FloatBar } from "./FloatBar";
 import { TierBadge } from "./TierBadge";
-import { formatUsd } from "./format";
+import { formatMyr } from "./format";
 import { displayPriceCents } from "./value";
 import { conditionGradeBand, floatBand, publishedConditionLabel } from "@/lib/domain/rarity";
 
@@ -140,7 +140,7 @@ export function CardTile({
         <div className="mt-1 border-t border-line pt-2">
           {value != null ? (
             <div className="font-mono text-sm font-bold tracking-tight text-foreground">
-              {formatUsd(value)}
+              {formatMyr(value)}
             </div>
           ) : (
             <div className="font-mono text-sm font-bold tracking-tight text-muted">

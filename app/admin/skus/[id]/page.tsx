@@ -23,7 +23,7 @@ import { SkuModelForm } from "@/components/admin/skus/SkuModelForm";
 import { VariantsTable } from "@/components/admin/skus/VariantsTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { formatUsd } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 import { getSkuModel } from "@/lib/api/contract";
 import { borderColorFor, tierForPrice, tierName } from "@/lib/domain/rarity";
 

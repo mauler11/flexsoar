@@ -40,7 +40,7 @@ export interface CardSoldEmailInput {
 }
 
 function formatPrice(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`;
+  return `RM ${(cents / 100).toFixed(2)}`;
 }
 
 function formatDueBy(isoString: string): string {

@@ -37,7 +37,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/Button";
 import { PayoutSetup } from "@/components/market/PayoutSetup";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { formatUsd } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 
 /**
  * Stored Connect status for the dashboard. Reads the webhook-landed columns
@@ -204,7 +204,7 @@ export default async function DashboardPage() {
                   submitted {fmtDate(item.createdAt)}
                 </span>
                 <span className="shrink-0 text-muted">
-                  {item.askingPriceCents != null ? formatUsd(item.askingPriceCents) : "—"}
+                  {item.askingPriceCents != null ? formatMyr(item.askingPriceCents) : "—"}
                 </span>
               </div>
             ))}

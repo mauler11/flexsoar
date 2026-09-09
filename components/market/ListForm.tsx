@@ -24,7 +24,7 @@ import { listCardAction } from "@/app/(market)/actions";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Banner } from "@/components/market/Banner";
-import { formatUsd } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 import { COUNTRIES, isValidCountryCode } from "@/components/market/intake/intake-config";
 
 export interface ListFormProps {
@@ -137,7 +137,7 @@ export function ListForm({
         <div className="flex items-baseline justify-between font-mono text-[10px] uppercase tracking-tight text-muted">
           <span>Oracle fair value</span>
           <span className="text-foreground">
-            {formatUsd(oracleValueCents)}
+            {formatMyr(oracleValueCents)}
           </span>
         </div>
       )}

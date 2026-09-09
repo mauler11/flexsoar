@@ -16,7 +16,7 @@ import { useMemo, useState } from "react";
 import type { Sku } from "@/lib/db/types";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { formatUsd } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 
 export interface SkuPickerProps {
   skus: readonly Sku[];
@@ -106,7 +106,7 @@ export function SkuPicker({
               <span className="shrink-0 text-right">
                 <span className="block text-accent">
                   {sku.market_price_cents != null
-                    ? formatUsd(sku.market_price_cents)
+                    ? formatMyr(sku.market_price_cents)
                     : "unpriced"}
                 </span>
               </span>

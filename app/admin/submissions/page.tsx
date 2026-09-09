@@ -24,7 +24,7 @@ import {
   type Submission,
 } from "@/components/admin/db-reads";
 import { toPhotoList } from "@/components/admin/grading/photos";
-import { formatUsd } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Table, TBody, THead, Td, Th, Tr } from "@/components/ui/Table";
@@ -150,7 +150,7 @@ export default async function SubmissionsQueuePage() {
                   <Td className="text-right tabular-nums">
                     {submission.asking_price_cents == null
                       ? "—"
-                      : formatUsd(submission.asking_price_cents)}
+                      : formatMyr(submission.asking_price_cents)}
                   </Td>
                   <Td className="text-muted">{submission.submitted_payout}</Td>
                   <Td className="text-muted tabular-nums">

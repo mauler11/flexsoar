@@ -27,7 +27,7 @@ import { CardTile } from "@/components/card/CardTile";
 import { FloatBar } from "@/components/card/FloatBar";
 import { Sprite } from "@/components/card/Sprite";
 import { TierBadge } from "@/components/card/TierBadge";
-import { formatUsd } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 import { oracleValueCents } from "@/components/card/value";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -311,7 +311,7 @@ export default function StyleguidePage() {
         {/* ------------------------------------------------------------ */}
         <Section
           title="Card detail (hero)"
-          subtitle="Full-width frame, sprite at scale, condition badge, mint number, price in USD. Oracle fair value is always shown beside an ask. The second card demos showNumericFloat=true — the numeric gradient bar + percentile, gated behind platform_config.show_numeric_float (live-verified false today)."
+          subtitle="Full-width frame, sprite at scale, condition badge, mint number, price in MYR. Oracle fair value is always shown beside an ask. The second card demos showNumericFloat=true — the numeric gradient bar + percentile, gated behind platform_config.show_numeric_float (live-verified false today)."
         >
           <div className="flex flex-col gap-6">
             <CardDetail
@@ -428,7 +428,7 @@ export default function StyleguidePage() {
                     </Td>
                     <Td className="text-muted">{owner.handle}</Td>
                     <Td className="text-right">
-                      {value != null ? formatUsd(value) : "—"}
+                      {value != null ? formatMyr(value) : "—"}
                     </Td>
                   </Tr>
                 );
@@ -489,9 +489,9 @@ export default function StyleguidePage() {
             tier — the red 1 OF 1 ribbon sits on top of tier 5, never instead of it.
           </div>
           <div className="mt-1">
-            All prices are USD — the marketplace&apos;s unit of account. FSC is
-            earned-only store credit (1 FSC = 1 USD internally) and is never a
-            price; ringgit is never shown anywhere on the platform.
+            All prices are MYR — the marketplace&apos;s unit of account. FSC is
+            earned-only store credit (1 FSC = RM1 internally) and is never a
+            price.
           </div>
         </footer>
       </main>

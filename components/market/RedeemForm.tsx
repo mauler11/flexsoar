@@ -13,7 +13,7 @@ import { redeemCardAction } from "@/app/(market)/actions";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Banner } from "@/components/market/Banner";
-import { formatUsd } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 
 export interface RedeemFormProps {
   cardId: string;
@@ -66,7 +66,7 @@ export function RedeemForm({ cardId, feeCents }: RedeemFormProps) {
       <div className="flex items-baseline justify-between font-mono text-[10px] uppercase tracking-tight text-muted">
         <span>Ship to</span>
         <span className="text-foreground">
-          Handling fee {formatUsd(feeCents)}
+          Handling fee {formatMyr(feeCents)}
         </span>
       </div>
 
