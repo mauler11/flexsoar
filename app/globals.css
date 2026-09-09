@@ -24,8 +24,8 @@
   --color-foreground: var(--foreground);
   --color-raised: #0e1512;
   --color-overlay: #000000;
-  --color-line: #1c2622;
-  --color-line-strong: #2b3a33;
+  --color-line: #27352f;
+  --color-line-strong: #3d4f45;
   --color-muted: #8fa39a;
   --color-accent: #35f07a;
   --font-sans: var(--font-geist-sans);

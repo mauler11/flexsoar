@@ -31,16 +31,16 @@ export function FeaturedCard({ listing }: FeaturedCardProps) {
   return (
     <section
       aria-label="Featured listing"
-      className="grid overflow-hidden rounded-2xl border border-line bg-raised sm:grid-cols-2"
+      className="grid overflow-hidden rounded-2xl border border-line-strong bg-black sm:grid-cols-2"
     >
-      <div className="flex flex-col items-start justify-center gap-2 p-5 sm:p-8">
+      <div className="flex flex-col items-start justify-center gap-2 p-4 sm:p-6">
         <span className="rounded-md border border-accent/60 px-2 py-0.5 text-[11px] font-bold uppercase tracking-widest text-accent">
           Featured
         </span>
-        <h2 className="text-2xl font-extrabold uppercase leading-tight tracking-tight sm:text-4xl">
+        <h2 className="text-xl font-extrabold uppercase leading-tight tracking-tight sm:text-3xl">
           {listing.card.sku.brand} {listing.card.sku.model}
         </h2>
-        <p className="text-sm text-muted sm:text-base">
+        <p className="text-sm text-muted">
           {listing.card.sku.colorway} · US {listing.card.sku.size_us}
         </p>
         <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -63,14 +63,29 @@ export function FeaturedCard({ listing }: FeaturedCardProps) {
         <Button
           href={`/card/${listing.card_id}`}
           variant="secondary"
-          size="md"
-          className="mt-3"
+          size="lg"
+          className="mt-3 rounded-md bg-white px-6 font-bold text-black hover:bg-white/90"
         >
           View details →
         </Button>
+        <div
+          className="mt-2 flex items-center gap-2 text-xs text-muted"
+          aria-label="Featured carousel position (coming soon)"
+        >
+          <span className="font-semibold text-foreground">01</span>
+          <span>/ 04</span>
+          <span className="ml-2 inline-flex gap-1" aria-hidden="true">
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-line-strong text-muted">
+              ←
+            </span>
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-line-strong text-muted">
+              →
+            </span>
+          </span>
+        </div>
       </div>
       <div className="relative bg-[radial-gradient(ellipse_at_center,rgba(53,240,122,0.08),transparent_70%)]">
-        <CardArt sku={sku} aspect="aspect-[16/10] sm:aspect-auto sm:h-full sm:min-h-72" px={8} />
+        <CardArt sku={sku} aspect="aspect-[16/10] sm:aspect-auto sm:h-full sm:min-h-60" px={8} />
       </div>
     </section>
   );
