@@ -17,7 +17,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { processAllDuePayouts } from '@/lib/api/contract';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300;
+// Hobby ceiling is 60s — keep this well under it (early volume runs in secs).
+export const maxDuration = 60;
 
 function authorized(request: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
