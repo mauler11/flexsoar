@@ -10,6 +10,7 @@ import type { Metadata } from "next";
 import { BRAND_PILL_EXCLUSIONS, getListings, getPlatformConfig } from "@/lib/api/contract";
 import type { ListingSort, ListingsQuery } from "@/lib/api/contract";
 import type { Tier } from "@/lib/db/types";
+import { FeaturedCard } from "@/components/market/FeaturedCard";
 import { MarketFilters } from "@/components/market/MarketFilters";
 import { MarketTile } from "@/components/market/MarketTile";
 import { Banner } from "@/components/market/Banner";
@@ -79,21 +80,18 @@ export default async function BrowsePage({
     console.error('[market] load error:', loadError);
   }
 
+  const featured =
+    listings.length === 0
+      ? null
+      : [...listings].sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+  const gridListings =
+    featured != null && listings.length > 1
+      ? listings.filter((l) => l.id !== featured.id)
+      : listings;
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight">
-            Market
-          </h1>
-          <p className="text-sm text-muted">
-            Oracle-priced asks · instant listing
-          </p>
-        </div>
-        <p className="text-sm text-muted">
-          {listings.length} live
-        </p>
-      </div>
+      {featured != null && <FeaturedCard listing={featured} />}
 
       {params.error && (
         <Banner tone="error" title="Couldn't do that">
@@ -118,11 +116,11 @@ export default async function BrowsePage({
       {listings.length === 0 ? (
         <EmptyState
           title="Nothing listed yet"
-          description="No listings match these filters right now. Early-access windows and new mints fill this grid as they unlock."
+          description="No listings match these filters right now. New mints fill this grid as they unlock."
         />
       ) : (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {listings.map((listing) => (
+        <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+          {gridListings.map((listing) => (
             <MarketTile
               key={listing.id}
               listing={listing}

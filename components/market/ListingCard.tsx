@@ -36,6 +36,26 @@ export interface ListingCardProps {
   showNumericFloat?: boolean;
 }
 
+/**
+ * Below/above-fair indication. Anchors on fair_price_cents
+ * (condition-adjusted) with oracle_value_cents as fallback; null when
+ * neither exists or the price is exactly fair — never invented.
+ */
+export function fairIndicator(
+  priceCents: number,
+  fairPriceCents: number | null,
+  oracleValueCents: number | null,
+): { text: string; below: boolean } | null {
+  const anchor = fairPriceCents ?? oracleValueCents ?? null;
+  if (anchor == null || anchor <= 0) return null;
+  const pct = Math.round(((priceCents - anchor) / anchor) * 100);
+  if (pct === 0) return null;
+  return {
+    text: `${Math.abs(pct)}% ${pct < 0 ? "below" : "above"} fair`,
+    below: pct < 0,
+  };
+}
+
 export function ListingCard({
   listing,
   showNumericFloat = false,
@@ -53,14 +73,11 @@ export function ListingCard({
       ? null
       : listing.card.float_percentile.toFixed(2);
 
-  const fairAnchor =
-    listing.fair_price_cents ?? listing.oracle_value_cents ?? null;
-  const fairDeltaPct =
-    fairAnchor != null && fairAnchor > 0
-      ? Math.round(
-          ((listing.price_cents - fairAnchor) / fairAnchor) * 100,
-        )
-      : null;
+  const fair = fairIndicator(
+    listing.price_cents,
+    listing.fair_price_cents,
+    listing.oracle_value_cents,
+  );
 
   const detailHref = `/card/${listing.card_id}`;
 
@@ -80,11 +97,11 @@ export function ListingCard({
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-1 p-3">
-        <h3 className="truncate text-[15px] font-bold leading-snug">
+      <div className="flex flex-1 flex-col gap-0.5 p-2.5">
+        <h3 className="truncate text-sm font-bold leading-snug">
           {listing.card.sku.brand} {listing.card.sku.model}
         </h3>
-        <p className="truncate text-[13px] text-muted">
+        <p className="truncate text-xs text-muted">
           {listing.card.sku.colorway} · US {listing.card.sku.size_us}
         </p>
         {showNumericFloat ? (
@@ -102,21 +119,20 @@ export function ListingCard({
           />
         )}
 
-        <div className="mt-1 flex items-baseline gap-2">
-          <span className="text-lg font-extrabold tracking-tight">
+        <div className="mt-0.5 flex items-baseline gap-2">
+          <span className="text-base font-extrabold tracking-tight">
             {formatMyr(listing.price_cents)}
           </span>
         </div>
-        {fairDeltaPct != null && fairDeltaPct !== 0 && (
+        {fair != null && (
           <p
             className={
-              fairDeltaPct < 0
+              fair.below
                 ? "text-xs font-semibold text-accent"
                 : "text-xs font-semibold text-[#E8B33A]"
             }
           >
-            {Math.abs(fairDeltaPct)}% {fairDeltaPct < 0 ? "below" : "above"}{" "}
-            fair
+            {fair.text}
           </p>
         )}
 

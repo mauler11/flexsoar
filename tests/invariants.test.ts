@@ -3216,8 +3216,7 @@ describe('Market page (/market) — signed out render', () => {
   it('renders without crashing', async () => {
     const element = await MarketPage({ searchParams: Promise.resolve({}) });
     const html = renderToStaticMarkup(element);
-    expect(html).toContain('Market');
-    expect(html).toContain('Oracle-priced asks · instant listing');
+    expect(html).toContain('Nothing listed yet');
   });
 
   it('shows empty state when no listings', async () => {
