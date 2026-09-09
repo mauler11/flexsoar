@@ -746,8 +746,7 @@ export type ListingSort =
   | 'price_asc'
   | 'price_desc'
   | 'float_asc'
-  | 'float_desc'
-  | 'public_at_asc';
+  | 'float_desc';
 
 export interface ListingsQuery {
   status?: ListingStatus[];
@@ -3492,9 +3491,6 @@ export async function getListings(query: ListingsQuery = {}): Promise<ListingSum
         break;
       case 'price_desc':
         builder = builder.order('price_cents', { ascending: false });
-        break;
-      case 'public_at_asc':
-        builder = builder.order('public_at', { ascending: true });
         break;
       default:
         builder = builder.order('created_at', { ascending: false });

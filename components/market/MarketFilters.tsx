@@ -35,7 +35,6 @@ const SORT_OPTIONS = [
   { value: "recent", label: "Newest" },
   { value: "price_asc", label: "Price low → high" },
   { value: "price_desc", label: "Price high → low" },
-  { value: "public_at_asc", label: "Unlocks soon" },
   { value: "float_desc", label: "Float best" },
 ];
 

@@ -24,7 +24,6 @@ const SORTS: readonly ListingSort[] = [
   "price_asc",
   "price_desc",
   "float_desc",
-  "public_at_asc",
 ];
 
 interface BrowseSearchParams {
