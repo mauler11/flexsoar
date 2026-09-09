@@ -138,10 +138,10 @@ export default async function MarketLayout({
           <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-3">
             <Link href="/" aria-label="FlexSoar home">
               <Image
-                src="/logo-black.png"
+                src="/logo-black-big.png"
                 alt="FlexSoar"
-                width={84}
-                height={30}
+                width={126}
+                height={42}
                 priority
               />
             </Link>
