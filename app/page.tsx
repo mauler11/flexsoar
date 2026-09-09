@@ -16,7 +16,7 @@ export default function LandingPage() {
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-3">
           <Link href="/" aria-label="FlexSoar home">
             <Image
-              src="/logo-white.png"
+              src="/logo-black.png"
               alt="FlexSoar"
               width={84}
               height={30}
