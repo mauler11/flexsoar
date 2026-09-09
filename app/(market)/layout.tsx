@@ -6,6 +6,7 @@
  * shared by every market page.
  */
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { ToastProvider } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
@@ -22,6 +23,13 @@ interface NotificationPayload {
   card_id?: string;
   price_cents?: number;
   amount_cents?: number;
+  net_cents?: number;
+  first_sale?: boolean;
+  must_ship?: boolean;
+}
+
+function formatRm(cents: number): string {
+  return `RM ${(cents / 100).toFixed(2)}`;
 }
 
 function notificationTitle(type: ContractNotification["type"], payload: Json): string {
@@ -42,12 +50,18 @@ function notificationBody(type: ContractNotification["type"], payload: Json): st
   switch (type) {
     case "submission_approved":
       return `Your submission for ${p.sku?.brand ?? "a shoe"} ${p.sku?.model ?? ""} was approved and minted.`;
-    case "card_sold":
-      return `Your ${p.sku?.brand ?? "card"} ${p.sku?.model ?? ""} sold for ${p.price_cents ? `$${(p.price_cents / 100).toFixed(2)}` : "an undisclosed amount"}.`;
+    case "card_sold": {
+      const what = `${p.sku?.brand ?? "Your card"} ${p.sku?.model ?? ""}`.trim();
+      const price = p.price_cents ? formatRm(p.price_cents) : "an undisclosed amount";
+      if (p.must_ship) {
+        return `${what} sold for ${price}. Check your email for shipping instructions — the shoes must reach FlexSoar within 48 hours.`;
+      }
+      return `${what} sold for ${price}.`;
+    }
     case "card_redeemed":
       return `Your ${p.sku?.brand ?? "card"} ${p.sku?.model ?? ""} was redeemed and is being shipped.`;
     case "payout_sent":
-      return `A payout of ${p.amount_cents ? `$${(p.amount_cents / 100).toFixed(2)}` : "funds"} was sent to your account.`;
+      return `A payout of ${p.amount_cents ? formatRm(p.amount_cents) : "funds"} was sent to your account.`;
   }
 }
 
@@ -122,11 +136,14 @@ export default async function MarketLayout({
       <ToastProvider>
         <header className="border-b border-line bg-overlay">
           <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-3">
-            <Link
-              href="/"
-              className="font-mono text-sm font-black uppercase tracking-tight text-accent"
-            >
-              FlexSoar
+            <Link href="/" aria-label="FlexSoar home">
+              <Image
+                src="/logo-white.png"
+                alt="FlexSoar"
+                width={84}
+                height={30}
+                priority
+              />
             </Link>
             <MarketNav items={navItems} />
             <div className="flex items-center gap-2">

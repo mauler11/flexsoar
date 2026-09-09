@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 
@@ -13,11 +14,14 @@ export default function LandingPage() {
     <div className="flex min-h-screen flex-col">
       <header className="border-b border-line bg-overlay">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-3">
-          <Link
-            href="/"
-            className="font-mono text-sm font-black uppercase tracking-tight text-accent"
-          >
-            FlexSoar
+          <Link href="/" aria-label="FlexSoar home">
+            <Image
+              src="/logo-white.png"
+              alt="FlexSoar"
+              width={84}
+              height={30}
+              priority
+            />
           </Link>
           <nav className="flex items-center gap-2">
             <Button href="/market" size="sm" variant="secondary">

@@ -4612,17 +4612,17 @@ export async function listNotifications(
 /**
  * markNotificationRead(notificationId) -> void
  *
- * Marks a notification as read by setting read_at = now().
- * No-op if already read.
+ * Marks a notification as read via fn_mark_notification_read (028). A direct
+ * table UPDATE cannot work: 028 ships no UPDATE policy for authenticated, so
+ * the session write is denied and the bell never clears. The RPC checks
+ * ownership itself ('not your notification' otherwise). No-op if already read.
  */
 export async function markNotificationRead(notificationId: UUID): Promise<void> {
   const supabase = await createServerSupabase();
 
-  const { error } = await supabase
-    .from('notifications')
-    .update({ read_at: new Date().toISOString() })
-    .eq('id', notificationId)
-    .is('read_at', null);
+  const { error } = await supabase.rpc('fn_mark_notification_read', {
+    p_id: notificationId,
+  });
 
   if (error) fail(error, 'notifications');
 }
