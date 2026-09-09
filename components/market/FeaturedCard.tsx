@@ -74,13 +74,9 @@ export function FeaturedCard({ listing }: FeaturedCardProps) {
         >
           <span className="font-semibold text-foreground">01</span>
           <span>/ 04</span>
-          <span className="ml-2 inline-flex gap-1" aria-hidden="true">
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-line-strong text-muted">
-              ←
-            </span>
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-line-strong text-muted">
-              →
-            </span>
+          <span className="ml-2 inline-flex items-center gap-3 text-base" aria-hidden="true">
+            <span>←</span>
+            <span>→</span>
           </span>
         </div>
       </div>
