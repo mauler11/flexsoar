@@ -13,7 +13,6 @@ import type { ListingSummary } from "@/lib/api/contract";
 import { toSku } from "@/components/market/bridge";
 import { CardArt } from "@/components/card/CardArt";
 import { TierBadge } from "@/components/card/TierBadge";
-import { Button } from "@/components/ui/Button";
 import { fairIndicator } from "@/components/market/ListingCard";
 
 export interface FeaturedCardProps {
@@ -60,14 +59,12 @@ export function FeaturedCard({ listing }: FeaturedCardProps) {
             </span>
           )}
         </div>
-        <Button
+        <Link
           href={`/card/${listing.card_id}`}
-          variant="secondary"
-          size="lg"
-          className="mt-3 rounded-md bg-white px-6 font-bold text-black hover:bg-white/90"
+          className="mt-3 inline-flex items-center justify-center rounded-md bg-white px-6 py-3 text-sm font-bold text-black transition hover:bg-white/90"
         >
           View details →
-        </Button>
+        </Link>
         <div
           className="mt-2 flex items-center gap-2 text-xs text-muted"
           aria-label="Featured carousel position (coming soon)"
