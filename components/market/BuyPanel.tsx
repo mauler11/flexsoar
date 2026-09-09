@@ -100,7 +100,7 @@ export function BuyPanel({
   }
 
   return (
-    <div className="flex flex-col gap-3 border border-line bg-overlay p-3">
+    <div className="flex flex-col gap-3 rounded-2xl border border-line bg-raised p-4 shadow-soft">
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone="accent">Public</Badge>
       </div>
@@ -112,12 +112,12 @@ export function BuyPanel({
       </div>
 
       {listing.oracleValueCents != null && (
-        <p className="font-mono text-[10px] tracking-tight text-muted">
+        <p className="text-[10px] tracking-tight text-muted">
           Oracle fair value {formatMyr(listing.oracleValueCents)}
         </p>
       )}
       {listing.fairPriceCents != null && (
-        <p className="font-mono text-[10px] tracking-tight text-muted">
+        <p className="text-[10px] tracking-tight text-muted">
           Fair price (this condition) {formatMyr(listing.fairPriceCents)}
         </p>
       )}
@@ -139,15 +139,15 @@ export function BuyPanel({
       )}
 
       {buyable && (
-        <div className="flex flex-col gap-1.5 border border-line-strong bg-raised p-2">
+        <div className="flex flex-col gap-1.5 rounded-xl rounded-xl border border-line bg-overlay p-3">
           <div className="flex items-center justify-between gap-2">
             <label
               htmlFor="buy-credit-input"
-              className="font-mono text-[10px] uppercase tracking-tight text-muted"
+              className="text-[10px] uppercase tracking-tight text-muted"
             >
               Apply FSC
             </label>
-            <span className="font-mono text-[9px] uppercase tracking-tight text-muted">
+            <span className="text-[9px] uppercase tracking-tight text-muted">
               {formatFsc(maxCreditCents)} available
             </span>
           </div>
@@ -161,10 +161,10 @@ export function BuyPanel({
             value={creditInput}
             disabled={maxCreditCents <= 0}
             onChange={(e) => setCreditInput(e.target.value)}
-            className="border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[13px] tracking-tight text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-xl border border-line-strong bg-overlay px-2.5 py-2 text-[13px] text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="FSC to apply to this purchase"
           />
-          <div className="flex items-baseline justify-between font-mono text-[10px] tracking-tight text-muted">
+          <div className="flex items-baseline justify-between text-[10px] tracking-tight text-muted">
             <span>{fscOnly ? "Settles entirely in FSC" : "Due by card"}</span>
             <span className="text-foreground">
               {fscOnly ? formatFsc(creditCents) : formatMyr(cashCents)}
@@ -191,7 +191,7 @@ export function BuyPanel({
                 : "Buy with Stripe"
             : "Sign in"}
       </Button>
-      <p className="font-mono text-[9px] uppercase tracking-tight text-muted">
+      <p className="text-[9px] uppercase tracking-tight text-muted">
         {fscOnly
           ? "FSC settles immediately — no card charge, no Stripe redirect."
           : "Sale is recorded when payment settles — never by this page."}

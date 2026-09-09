@@ -24,7 +24,7 @@ export default async function ConnectReturnPage() {
   if (!me) {
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="font-mono text-xl font-black uppercase tracking-tight">
+        <h1 className="text-2xl font-extrabold tracking-tight">
           Payout setup
         </h1>
         <p className="font-mono text-[11px] tracking-tight text-muted">
@@ -50,7 +50,7 @@ export default async function ConnectReturnPage() {
   if (!accountId) {
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="font-mono text-xl font-black uppercase tracking-tight">
+        <h1 className="text-2xl font-extrabold tracking-tight">
           Payout setup
         </h1>
         <p className="font-mono text-[11px] tracking-tight text-muted">
@@ -82,7 +82,7 @@ export default async function ConnectReturnPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="font-mono text-xl font-black uppercase tracking-tight">
+      <h1 className="text-2xl font-extrabold tracking-tight">
         Payout setup
       </h1>
       {statusError ? (

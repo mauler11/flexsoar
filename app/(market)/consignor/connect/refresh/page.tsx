@@ -30,7 +30,7 @@ export default async function ConnectRefreshPage() {
           : String(err);
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="font-mono text-xl font-black uppercase tracking-tight">
+        <h1 className="text-2xl font-extrabold tracking-tight">
           Payout setup
         </h1>
         <p className="font-mono text-[11px] tracking-tight text-[#FF4444]">

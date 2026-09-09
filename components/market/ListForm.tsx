@@ -104,7 +104,7 @@ export function ListForm({
 
       {needsCountry && (
         <div className="flex flex-col gap-1">
-          <span className="font-mono text-[10px] uppercase tracking-tight text-muted">
+          <span className="text-[10px] uppercase tracking-tight text-muted">
             Your country
           </span>
           <select
@@ -115,7 +115,7 @@ export function ListForm({
               if (e.target.value) setError(null);
             }}
             disabled={pending}
-            className="border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[12px] tracking-tight text-foreground"
+            className="rounded-xl border border-line-strong bg-overlay px-2 py-1.5 text-[12px] tracking-tight text-foreground"
           >
             <option value="" disabled>
               Select your country…
@@ -126,7 +126,7 @@ export function ListForm({
               </option>
             ))}
           </select>
-          <span className="font-mono text-[10px] tracking-tight text-muted">
+          <span className="text-[10px] tracking-tight text-muted">
             No country on file yet — decides whether this sale pays you in
             cash or FSC. Required to list.
           </span>
@@ -134,7 +134,7 @@ export function ListForm({
       )}
 
       {oracleValueCents != null && (
-        <div className="flex items-baseline justify-between font-mono text-[10px] uppercase tracking-tight text-muted">
+        <div className="flex items-baseline justify-between text-[10px] uppercase tracking-tight text-muted">
           <span>Oracle fair value</span>
           <span className="text-foreground">
             {formatMyr(oracleValueCents)}
@@ -164,7 +164,7 @@ export function ListForm({
       {error && <Banner tone="error" title={error} />}
 
       <div className="mt-1 flex items-center justify-between gap-2">
-        <p className="font-mono text-[9px] uppercase tracking-tight text-muted">
+        <p className="text-[9px] uppercase tracking-tight text-muted">
           Listing opens a level-gated window, then becomes public
         </p>
         <Button

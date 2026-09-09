@@ -55,12 +55,12 @@ export default async function ProfilePage({
         <div className="flex items-center gap-3">
           <span
             aria-hidden
-            className="flex h-10 w-10 items-center justify-center border border-accent bg-accent font-mono text-sm font-black text-[#0B0B0B]"
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-accent bg-accent text-sm font-black text-[#0B0B0B]"
           >
             {profile.handle.slice(0, 1).toUpperCase()}
           </span>
           <div>
-            <h1 className="font-mono text-lg font-black tracking-tight">
+            <h1 className="text-xl font-extrabold tracking-tight">
               @{profile.handle}
             </h1>
             <p className="font-mono text-[10px] uppercase tracking-tight text-muted">

@@ -756,6 +756,11 @@ export interface ListingsQuery {
   tier?: Tier[];
   brand?: string;
   model?: string;
+  /**
+   * Free-text match against the embedded sku's brand OR model (ilike,
+   * case-insensitive). Combines with the exact brand/model filters above.
+   */
+  search?: string;
   sizeUs?: number;
   floatMin?: FloatValue;
   floatMax?: FloatValue;
@@ -3478,6 +3483,24 @@ export async function getListings(query: ListingsQuery = {}): Promise<ListingSum
   if (query.priceMaxCents !== undefined) builder = builder.lte('price_cents', query.priceMaxCents);
   if (query.brand !== undefined) builder = builder.eq('card.sku.brand', query.brand);
   if (query.model !== undefined) builder = builder.eq('card.sku.model', query.model);
+  if (query.search !== undefined && query.search.trim() !== '') {
+    // Two-step: PostgREST or() rejects two-level embed paths
+    // (card.sku.brand — the gateway kills the request), so resolve matching
+    // skus first (local columns, proven or()), then filter listings by
+    // card.sku_id (local-column in(), already used for skuId above).
+    // LIKE metacharacters (and the comma separating OR terms) are stripped
+    // so user input cannot break out of the pattern.
+    const term = `%${query.search.trim().replace(/[\\%,_]/g, '')}%`;
+    const skuHits = await supabase
+      .from('skus')
+      .select('id')
+      .or(`brand.ilike.${term},model.ilike.${term}`)
+      .limit(100);
+    if (skuHits.error) fail(skuHits.error, 'skus');
+    const skuIds = ((skuHits.data ?? []) as Array<{ id: UUID }>).map((r) => r.id);
+    if (skuIds.length === 0) return [];
+    builder = builder.in('card.sku_id', skuIds);
+  }
   if (query.sizeUs !== undefined) builder = builder.eq('card.sku.size_us', query.sizeUs);
 
   if (byFloat) {

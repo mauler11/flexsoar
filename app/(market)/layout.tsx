@@ -8,6 +8,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
+import { Suspense } from "react";
 import { ToastProvider } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import type { Notification as ContractNotification } from "@/lib/api/contract";
@@ -15,7 +16,8 @@ import type { Json } from "@/lib/db/types";
 import { getUser, listNotifications } from "@/lib/api/contract";
 import { signOut } from "@/app/(auth)/actions";
 import { currentUserId } from "@/app/(market)/queries";
-import { MarketNav, type MarketNavItem } from "@/components/market/MarketNav";
+import { SearchInput } from "@/components/market/SearchInput";
+import { Sidebar, type SidebarItem } from "@/components/market/Sidebar";
 import { NotificationBell } from "@/components/market/NotificationBell";
 
 interface NotificationPayload {
@@ -104,14 +106,15 @@ export default async function MarketLayout({
   const meId = await currentUserId();
   const me = meId ? await getUser({ id: meId }).catch(() => null) : null;
 
-  const navItems: MarketNavItem[] = [
-    { href: "/market", label: "Market" },
-    { href: "/list", label: "List" },
+  const sidebarItems: SidebarItem[] = [
+    { href: "/market", label: "Market", icon: "market" },
+    { href: "/list", label: "List", icon: "list" },
+    { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
     ...(me
-      ? [
-          { href: "/dashboard", label: "Dashboard" },
-          { href: `/u/${me.handle}`, label: "Profile" },
-        ]
+      ? [{ href: `/u/${me.handle}`, label: "Profile", icon: "profile" as const }]
+      : [{ href: "/sign-in", label: "Profile", icon: "profile" as const }]),
+    ...(me?.is_admin
+      ? [{ href: "/admin/submissions", label: "Admin", icon: "admin" as const }]
       : []),
   ];
 
@@ -134,57 +137,77 @@ export default async function MarketLayout({
   return (
     <div className="flex min-h-screen flex-col">
       <ToastProvider>
-        <header className="border-b border-line bg-overlay">
-          <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-3">
-            <Link href="/" aria-label="FlexSoar home">
-              <Image
-                src="/logo-white-big.png"
-                alt="FlexSoar"
-                width={168}
-                height={56}
-                priority
-              />
-            </Link>
-            <MarketNav items={navItems} />
-            <div className="flex items-center gap-2">
-              {me ? (
-                <>
-                  <NotificationBell
-                    notifications={notifications}
-                    unreadCount={unreadCount}
+        <div className="flex flex-1">
+          <Sidebar items={sidebarItems} />
+          <div className="flex min-w-0 flex-1 flex-col">
+            <header className="border-b border-line bg-background/80 backdrop-blur">
+              <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-3">
+                <Link
+                  href="/"
+                  aria-label="FlexSoar home"
+                  className="shrink-0"
+                >
+                  <Image
+                    src="/logo-white-big.png"
+                    alt="FlexSoar"
+                    width={120}
+                    height={40}
+                    priority
                   />
-                  <a
-                    href={`/u/${me.handle}`}
-                    className="font-mono text-[11px] tracking-tight text-muted hover:text-foreground"
-                  >
-                    @{me.handle} · LV {me.level}
-                  </a>
-                  <form action={signOut}>
-                    <Button type="submit" variant="ghost" size="sm">
-                      Sign out
+                </Link>
+                <div className="min-w-0 flex-1">
+                  <Suspense>
+                    <SearchInput />
+                  </Suspense>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {me ? (
+                    <>
+                      <NotificationBell
+                        notifications={notifications}
+                        unreadCount={unreadCount}
+                      />
+                      <Link
+                        href="/dashboard"
+                        title="Your XP"
+                        className="hidden rounded-full border border-accent/50 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/10 sm:inline-block"
+                      >
+                        {(me.xp_total ?? 0).toLocaleString()} XP
+                      </Link>
+                      <a
+                        href={`/u/${me.handle}`}
+                        className="hidden text-xs text-muted hover:text-foreground md:inline"
+                      >
+                        @{me.handle} · LV {me.level}
+                      </a>
+                      <form action={signOut}>
+                        <Button type="submit" variant="ghost" size="sm">
+                          Sign out
+                        </Button>
+                      </form>
+                    </>
+                  ) : (
+                    <Button href="/sign-in" size="sm" variant="secondary">
+                      Sign in
                     </Button>
-                  </form>
-                </>
-              ) : (
-                <Button href="/sign-in" size="sm" variant="secondary">
-                  Sign in
-                </Button>
-              )}
-            </div>
+                  )}
+                </div>
+              </div>
+            </header>
+
+            <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
+              {children}
+            </main>
+
+            <footer className="border-t border-line py-4 text-center text-[11px] text-muted">
+              <nav className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                <Link href="/terms" className="hover:text-foreground">Terms</Link>
+                <Link href="/privacy" className="hover:text-foreground">Privacy</Link>
+                <span>FlexSoar · Market — mint, list, settle</span>
+              </nav>
+            </footer>
           </div>
-        </header>
-
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
-          {children}
-        </main>
-
-        <footer className="border-t border-line py-4 text-center font-mono text-[9px] uppercase tracking-tight text-muted">
-          <nav className="flex flex-col sm:flex-row items-center justify-center gap-3">
-            <Link href="/terms" className="hover:text-foreground">Terms</Link>
-            <Link href="/privacy" className="hover:text-foreground">Privacy</Link>
-            <span>FlexSoar · Market — mint, list, settle</span>
-          </nav>
-        </footer>
+        </div>
       </ToastProvider>
     </div>
   );

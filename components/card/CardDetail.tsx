@@ -85,7 +85,7 @@ export function CardDetail({
     <CardFrame
       tier={card.tier}
       isExceptional={card.is_exceptional}
-      className={cn("w-full", className)}
+      className={cn("w-full overflow-hidden rounded-2xl bg-raised", className)}
     >
       <div className="grid gap-6 p-5 sm:grid-cols-2">
         <div className="flex items-center justify-center">
@@ -110,30 +110,30 @@ export function CardDetail({
           )}
         </div>
 
-        <div className="flex flex-col gap-4 font-mono">
+        <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <TierBadge tier={card.tier} isExceptional={card.is_exceptional} />
-            <span className="border border-line px-2 py-1 text-[10px] uppercase tracking-tight text-muted">
+            <span className="rounded-full border border-line px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
               {card.status}
             </span>
             {listing && (
-              <span className="border border-accent/60 px-2 py-1 text-[10px] uppercase tracking-tight text-accent">
+              <span className="rounded-full border border-accent/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
                 {listing.status}
               </span>
             )}
           </div>
 
           <div>
-            <h1 className="text-xl font-black leading-tight tracking-tight">
+            <h1 className="text-2xl font-extrabold leading-tight tracking-tight">
               {productName}
             </h1>
-            <p className="mt-1 text-sm tracking-tight text-muted/80">
+            <p className="mt-1 text-sm text-muted">
               {sku.colorway} · US {sku.size_us}
             </p>
           </div>
 
           {card.is_exceptional && card.exceptional_reason && (
-            <div className="border-l-2 border-[#FF4444] bg-[#FF4444]/10 px-3 py-2 text-[10px] leading-snug tracking-tight text-[#FF4444]">
+            <div className="rounded-xl border-l-2 border-[#FF4444] bg-[#FF4444]/10 px-3 py-2 text-xs leading-snug text-[#FF4444]">
               {card.exceptional_reason}
             </div>
           )}
@@ -144,7 +144,7 @@ export function CardDetail({
             <ConditionBadge band={band} label={conditionLabel} className="mt-2 w-fit" />
           )}
 
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm tracking-tight">
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
             <div className={cell}>
               <dt className={label}>Mint</dt>
               <dd className="text-foreground/90">
@@ -172,12 +172,12 @@ export function CardDetail({
 
           <div className="mt-auto border-t border-line pt-4">
             {value != null && (
-              <div className="text-2xl font-black tracking-tight text-foreground">
+              <div className="text-3xl font-extrabold tracking-tight text-foreground">
                 {formatMyr(value)}
               </div>
             )}
             {listing && listing.oracle_value_cents != null && (
-              <div className="mt-2 text-sm tracking-tight text-muted/70">
+              <div className="mt-1 text-sm text-muted">
                 Oracle fair value {formatMyr(listing.oracle_value_cents)}
               </div>
             )}

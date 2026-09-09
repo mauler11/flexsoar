@@ -121,7 +121,7 @@ export default async function DashboardPage() {
   if (!me) {
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="font-mono text-xl font-black uppercase tracking-tight">
+        <h1 className="text-2xl font-extrabold tracking-tight">
           Seller dashboard
         </h1>
         <EmptyState
@@ -154,7 +154,7 @@ export default async function DashboardPage() {
     <div className="flex flex-col gap-4">
       <div className="flex items-end justify-between gap-3">
         <div>
-          <h1 className="font-mono text-xl font-black uppercase tracking-tight">
+          <h1 className="text-2xl font-extrabold tracking-tight">
             Seller dashboard
           </h1>
           <p className="font-mono text-[10px] uppercase tracking-tight text-muted">
@@ -168,7 +168,7 @@ export default async function DashboardPage() {
 
       {/* Connect Payout Setup */}
       <section className="flex flex-col gap-2">
-        <h2 className="font-mono text-[11px] font-black uppercase tracking-tight text-foreground">
+        <h2 className="text-sm font-bold tracking-tight text-foreground">
           Payout setup
         </h2>
         <PayoutSetup
@@ -181,11 +181,11 @@ export default async function DashboardPage() {
 
       {/* Submissions */}
       <section className="flex flex-col gap-2">
-        <h2 className="font-mono text-[11px] font-black uppercase tracking-tight text-foreground">
+        <h2 className="text-sm font-bold tracking-tight text-foreground">
           Submissions ({submittedItems.length})
         </h2>
         {submittedItems.length === 0 ? (
-          <p className="border border-dashed border-line-strong px-3 py-4 font-mono text-[10px] tracking-tight text-muted">
+          <p className="rounded-xl border border-dashed border-line-strong px-3 py-4 text-[13px] text-muted">
             No submissions yet — list your first shoe from /list.
           </p>
         ) : (
@@ -193,7 +193,7 @@ export default async function DashboardPage() {
             {submittedItems.map((item) => (
               <div
                 key={item.id}
-                className="flex items-center justify-between gap-3 border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[11px] tracking-tight"
+                className="flex items-center justify-between gap-3 rounded-xl border border-line bg-raised px-3 py-2 text-[13px]"
               >
                 <span className="min-w-0 truncate font-bold text-foreground">
                   {item.sku.brand} {item.sku.model} · {item.sku.colorway} · US{" "}
@@ -214,11 +214,11 @@ export default async function DashboardPage() {
 
       {/* Held items */}
       <section className="flex flex-col gap-2">
-        <h2 className="font-mono text-[11px] font-black uppercase tracking-tight text-foreground">
+        <h2 className="text-sm font-bold tracking-tight text-foreground">
           Held items ({preMintHeldItems.length + heldCards.length})
         </h2>
         {(preMintHeldItems.length + heldCards.length) === 0 ? (
-          <p className="border border-dashed border-line-strong px-3 py-4 font-mono text-[10px] tracking-tight text-muted">
+          <p className="rounded-xl border border-dashed border-line-strong px-3 py-4 text-[13px] text-muted">
             Nothing in custody right now.
           </p>
         ) : (
@@ -226,7 +226,7 @@ export default async function DashboardPage() {
             {preMintHeldItems.map((item) => (
               <div
                 key={item.id}
-                className="flex items-center justify-between gap-3 border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[11px] tracking-tight"
+                className="flex items-center justify-between gap-3 rounded-xl border border-line bg-raised px-3 py-2 text-[13px]"
               >
                 <span className="min-w-0 truncate font-bold text-foreground">
                   {item.sku.brand} {item.sku.model} · {item.sku.colorway} · US{" "}
@@ -241,7 +241,7 @@ export default async function DashboardPage() {
             {heldCards.map((card) => (
               <div
                 key={card.id}
-                className="flex items-center justify-between gap-3 border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[11px] tracking-tight"
+                className="flex items-center justify-between gap-3 rounded-xl border border-line bg-raised px-3 py-2 text-[13px]"
               >
                 <span className="min-w-0 truncate font-bold text-foreground">
                   {card.sku.brand} {card.sku.model} · {card.sku.colorway} · US{" "}
@@ -259,7 +259,7 @@ export default async function DashboardPage() {
 
       {/* Owed redemptions */}
       <section className="flex flex-col gap-2">
-        <h2 className="font-mono text-[11px] font-black uppercase tracking-tight text-foreground">
+        <h2 className="text-sm font-bold tracking-tight text-foreground">
           Owed redemptions ({owed.length})
         </h2>
         <p className="font-mono text-[9px] tracking-tight text-muted">
@@ -267,7 +267,7 @@ export default async function DashboardPage() {
           the fulfilment SLA ships (handoff M5).
         </p>
         {owed.length === 0 ? (
-          <p className="border border-dashed border-line-strong px-3 py-4 font-mono text-[10px] tracking-tight text-muted">
+          <p className="rounded-xl border border-dashed border-line-strong px-3 py-4 text-[13px] text-muted">
             Nothing owed — every redemption you hold is shipped or still
             requested above.
           </p>
@@ -279,7 +279,7 @@ export default async function DashboardPage() {
               return (
                 <div
                   key={r.id}
-                  className="flex items-center justify-between gap-3 border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[11px] tracking-tight"
+                  className="flex items-center justify-between gap-3 rounded-xl border border-line bg-raised px-3 py-2 text-[13px]"
                 >
                   <span className="min-w-0 truncate font-bold text-foreground">
                     {r.card.sku.brand} {r.card.sku.model} · US{" "}

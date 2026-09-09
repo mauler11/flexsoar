@@ -144,10 +144,10 @@ export function PhotoUploader({ onChange }: PhotoUploaderProps) {
           return (
             <div
               key={angle.key}
-              className="flex flex-col gap-1 border border-line-strong bg-overlay p-2"
+              className="flex flex-col gap-1 rounded-xl border border-line-strong bg-overlay p-2"
             >
               <div className="flex items-center justify-between">
-                <span className="font-mono text-[10px] font-bold uppercase tracking-tight text-foreground">
+                <span className="text-[10px] font-bold uppercase tracking-tight text-foreground">
                   {angle.label}
                 </span>
                 {photo && (
@@ -160,7 +160,7 @@ export function PhotoUploader({ onChange }: PhotoUploaderProps) {
                   </Button>
                 )}
               </div>
-              <span className="font-mono text-[9px] tracking-tight text-muted">
+              <span className="text-[9px] tracking-tight text-muted">
                 {angle.hint}
               </span>
 
@@ -170,31 +170,31 @@ export function PhotoUploader({ onChange }: PhotoUploaderProps) {
                   <img
                     src={photo.url}
                     alt={`${angle.label} photo`}
-                    className="mt-1 aspect-square w-full border border-line-strong object-cover"
+                    className="mt-1 aspect-square w-full rounded-xl border border-line-strong object-cover"
                   />
                 ) : photo.status === "failed" ? (
-                  <div className="mt-1 flex aspect-square w-full flex-col items-center justify-center gap-1 border border-dashed border-[#FF4444] bg-[#FF4444]/10 px-2 py-4 text-center">
-                    <span className="font-mono text-[9px] font-bold uppercase tracking-tight text-[#FF4444]">
+                  <div className="mt-1 flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-[#FF4444] bg-[#FF4444]/10 px-2 py-4 text-center">
+                    <span className="text-[9px] font-bold uppercase tracking-tight text-[#FF4444]">
                       upload failed
                     </span>
-                    <span className="font-mono text-[9px] tracking-tight text-[#FF4444]">
+                    <span className="text-[9px] tracking-tight text-[#FF4444]">
                       {photo.error ?? "unknown error"}
                     </span>
-                    <span className="font-mono text-[9px] tracking-tight text-muted">
+                    <span className="text-[9px] tracking-tight text-muted">
                       remove above and choose the photo again
                     </span>
                   </div>
                 ) : photo.status === "uploading" ? (
-                  <div className="mt-1 flex aspect-square w-full items-center justify-center border border-dashed border-line-strong px-2 py-4 font-mono text-[10px] tracking-tight text-muted">
+                  <div className="mt-1 flex aspect-square w-full items-center justify-center rounded-xl border border-dashed border-line-strong px-2 py-4 text-[10px] tracking-tight text-muted">
                     uploading…
                   </div>
                 ) : (
-                  <div className="mt-1 flex aspect-square w-full items-center justify-center border border-dashed border-line-strong px-2 py-4 font-mono text-[10px] tracking-tight text-muted">
+                  <div className="mt-1 flex aspect-square w-full items-center justify-center rounded-xl border border-dashed border-line-strong px-2 py-4 text-[10px] tracking-tight text-muted">
                     photo selected locally
                   </div>
                 )
               ) : (
-                <label className="mt-1 flex aspect-square w-full cursor-pointer items-center justify-center border border-dashed border-line-strong px-2 py-4 text-center font-mono text-[10px] tracking-tight text-muted hover:border-muted">
+                <label className="mt-1 flex aspect-square w-full cursor-pointer items-center justify-center rounded-xl border border-dashed border-line-strong px-2 py-4 text-center text-[10px] tracking-tight text-muted hover:border-muted">
                   <input
                     ref={(el) => {
                       inputRefs.current[angle.key] = el;
@@ -216,7 +216,7 @@ export function PhotoUploader({ onChange }: PhotoUploaderProps) {
         })}
       </div>
 
-      <div className="border-t border-line-strong pt-2 font-mono text-[10px] tracking-tight text-muted">
+      <div className="border-t border-line-strong pt-2 text-[10px] tracking-tight text-muted">
         {countUploaded}/{REQUIRED_PHOTO_COUNT} photos uploaded — toe, both
         sides, and the outsole. All four are required.
       </div>

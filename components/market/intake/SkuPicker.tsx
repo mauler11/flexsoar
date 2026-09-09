@@ -55,7 +55,7 @@ export function SkuPicker({
       />
 
       {selected && (
-        <div className="flex items-center justify-between gap-2 border border-accent bg-accent/10 px-2 py-1.5 font-mono text-[11px] tracking-tight">
+        <div className="flex items-center justify-between gap-2 rounded-xl border border-accent bg-accent/10 px-2 py-1.5 text-[11px] tracking-tight">
           <span className="text-foreground">
             {selected.brand} {selected.model} · {selected.colorway} · US{" "}
             {selected.size_us}
@@ -75,7 +75,7 @@ export function SkuPicker({
 
       <div className="grid max-h-[300px] grid-cols-1 gap-1.5 overflow-y-auto pr-1">
         {matches.length === 0 && (
-          <div className="flex flex-col gap-2 border border-dashed border-line-strong px-3 py-4 font-mono text-[11px] tracking-tight text-muted">
+          <div className="flex flex-col gap-2 rounded-xl border border-dashed border-line-strong px-3 py-4 text-[11px] tracking-tight text-muted">
             <span>No match for “{query}”.</span>
             <span>If the shoe is real, we may not have it priced yet.</span>
           </div>
@@ -89,7 +89,7 @@ export function SkuPicker({
               onClick={() => onSelect(sku)}
               aria-pressed={isSelected}
               className={
-                "flex items-center justify-between gap-2 border px-2 py-1.5 text-left font-mono text-[11px] tracking-tight transition-colors " +
+                "flex items-center justify-between gap-2 rounded-xl border px-2 py-1.5 text-left text-[11px] tracking-tight transition-colors " +
                 (isSelected
                   ? "border-accent bg-accent/15 text-foreground"
                   : "border-line-strong bg-overlay text-foreground hover:border-muted")
@@ -115,7 +115,7 @@ export function SkuPicker({
         })}
       </div>
 
-      <div className="flex items-center justify-between border-t border-line-strong pt-3 font-mono text-[10px] tracking-tight text-muted">
+      <div className="flex items-center justify-between border-t border-line-strong pt-3 text-[10px] tracking-tight text-muted">
         <span>Only priced, live catalog SKUs appear here.</span>
         <Button variant="ghost" size="sm" onClick={onRequestMissing}>
           don&apos;t see your shoe? request it

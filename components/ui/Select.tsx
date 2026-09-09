@@ -1,7 +1,7 @@
 /**
  * components/ui/Select.tsx
  *
- * Chunky pixel native select with an optional label and inline error. Native
+ * Rounded dark native select with an optional label and inline error. Native
  * <select> keeps keyboard and screen-reader behaviour for free.
  */
 "use client";
@@ -31,7 +31,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
       {label && (
         <label
           htmlFor={selectId}
-          className="font-mono text-[10px] uppercase tracking-tight text-muted"
+          className="text-[11px] font-semibold uppercase tracking-wide text-muted"
         >
           {label}
         </label>
@@ -41,8 +41,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
         id={selectId}
         aria-invalid={error ? true : undefined}
         className={cn(
-          "border bg-overlay px-2 py-1.5 font-mono text-[13px] tracking-tight text-foreground",
-          "pixel-shadow-sm",
+          "rounded-xl border bg-raised px-2.5 py-2 text-[13px] text-foreground",
           "disabled:cursor-not-allowed disabled:opacity-40",
           error
             ? "border-[#FF4444] focus-visible:outline-[#FF4444]"
@@ -58,7 +57,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
         ))}
       </select>
       {error && (
-        <p className="font-mono text-[10px] tracking-tight text-[#FF4444]">
+        <p className="text-xs text-[#FF4444]">
           {error}
         </p>
       )}

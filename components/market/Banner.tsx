@@ -37,18 +37,18 @@ export function Banner({
     <div
       role="alert"
       className={cn(
-        "flex items-start gap-2 border bg-overlay px-3 py-2 font-mono text-[11px] leading-snug tracking-tight",
+        "flex items-start gap-2.5 rounded-2xl border bg-raised px-4 py-3 text-[13px] leading-snug",
         className,
       )}
       style={{ borderColor: t.border, color: t.text }}
     >
       <span
         aria-hidden
-        className="mt-1 h-2 w-2 shrink-0"
+        className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
         style={{ background: t.marker }}
       />
       <div>
-        <div className="font-bold uppercase">{title}</div>
+        <div className="font-bold">{title}</div>
         {children != null && (
           <div className="mt-0.5 text-muted">{children}</div>
         )}

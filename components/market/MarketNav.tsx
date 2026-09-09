@@ -39,7 +39,7 @@ export function MarketNav({ items }: MarketNavProps) {
   return (
     <nav
       aria-label="Market"
-      className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-tight"
+      className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide"
     >
       {items.map((item) => {
         const active = isActive(pathname, item.href);

@@ -112,7 +112,7 @@ export function NotificationBell({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
           </svg>
           {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[#0B0B0B] font-mono text-[9px] font-black">
+            <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[#0B0B0B] text-[9px] font-black">
               {unreadCount > 9 ? "9+" : unreadCount}
             </span>
           )}
@@ -123,10 +123,10 @@ export function NotificationBell({
             ref={dropdownRef}
             className="absolute right-0 mt-2 w-80 bg-raised border border-line rounded-lg pixel-shadow-lg animate-in fade-in-50 slide-in-from-top-2 duration-150 z-50"
           >
-            <div className="p-3 border-b border-line font-mono text-sm font-bold uppercase tracking-tight">
+            <div className="p-3 border-b border-line text-sm font-bold uppercase tracking-tight">
               Notifications
             </div>
-            <div className="p-3 text-center text-muted font-mono text-[11px]">
+            <div className="p-3 text-center text-muted text-[11px]">
               No notifications yet
             </div>
           </div>
@@ -149,7 +149,7 @@ export function NotificationBell({
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
         </svg>
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[#0B0B0B] font-mono text-[9px] font-black">
+          <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[#0B0B0B] text-[9px] font-black">
             {unreadCount > 9 ? "9+" : unreadCount}
           </span>
         )}
@@ -160,7 +160,7 @@ export function NotificationBell({
           ref={dropdownRef}
           className="absolute right-0 mt-2 w-80 bg-raised border border-line rounded-lg pixel-shadow-lg animate-in fade-in-50 slide-in-from-top-2 duration-150 z-50"
         >
-          <div className="p-3 border-b border-line flex items-center justify-between font-mono text-sm font-bold uppercase tracking-tight">
+          <div className="p-3 border-b border-line flex items-center justify-between text-sm font-bold uppercase tracking-tight">
             <span>Notifications</span>
             {unreadCount > 0 && (
               <Button
@@ -189,17 +189,17 @@ export function NotificationBell({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
                       <p className={cn(
-                        "font-mono text-sm tracking-tight truncate",
+                        "text-sm tracking-tight truncate",
                         !notification.read ? "font-bold text-foreground" : "text-muted/90"
                       )}>
                         {notification.title}
                       </p>
-                      <span className="shrink-0 font-mono text-[9px] uppercase tracking-tight text-muted">
+                      <span className="shrink-0 text-[9px] uppercase tracking-tight text-muted">
                         {mounted ? formatTime(notification.createdAt) : ""}
                       </span>
                     </div>
                     <p className={cn(
-                        "mt-1 font-mono text-[11px] tracking-tight truncate",
+                        "mt-1 text-[11px] tracking-tight truncate",
                         !notification.read ? "text-muted/90" : "text-muted/70"
                       )}>
                       {notification.body}
@@ -207,7 +207,7 @@ export function NotificationBell({
                     {notification.link && notification.linkLabel && (
                       <a
                         href={notification.link}
-                        className="mt-2 inline-block font-mono text-[10px] uppercase tracking-tight text-accent hover:underline"
+                        className="mt-2 inline-block text-[10px] uppercase tracking-tight text-accent hover:underline"
                       >
                         {notification.linkLabel}
                       </a>

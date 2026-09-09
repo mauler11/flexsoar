@@ -1,9 +1,9 @@
 /**
  * components/ui/Badge.tsx
  *
- * Small fixed-status chip. Tones map to the palette: accent (green), info
- * (blue), warn (amber), danger (red), neutral (grey). A leading pixel square
- * keeps the tone readable in greyscale.
+ * Small fixed-status pill. Tones map to the palette: accent (green), info
+ * (blue), warn (amber), danger (red), neutral (grey). A leading dot keeps
+ * the tone readable in greyscale.
  */
 import type { ReactNode } from "react";
 import { cn } from "./cn";
@@ -30,12 +30,12 @@ export function Badge({ tone = "neutral", children, className }: BadgeProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 border bg-overlay px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-tight",
+        "inline-flex items-center gap-1.5 rounded-full border bg-overlay px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
         className,
       )}
       style={{ borderColor: t.border, color: t.text }}
     >
-      <span aria-hidden className="h-1.5 w-1.5 shrink-0" style={{ background: t.square }} />
+      <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: t.square }} />
       {children}
     </span>
   );

@@ -63,7 +63,7 @@ export function RedeemForm({ cardId, feeCents }: RedeemFormProps) {
 
   return (
     <div className="flex flex-col gap-2 border border-line bg-overlay p-3">
-      <div className="flex items-baseline justify-between font-mono text-[10px] uppercase tracking-tight text-muted">
+      <div className="flex items-baseline justify-between text-[10px] uppercase tracking-tight text-muted">
         <span>Ship to</span>
         <span className="text-foreground">
           Handling fee {formatMyr(feeCents)}
@@ -112,12 +112,12 @@ export function RedeemForm({ cardId, feeCents }: RedeemFormProps) {
       <div className="grid gap-2 sm:grid-cols-2">
         <label
           htmlFor="redeem-country"
-          className="flex flex-col gap-1 font-mono text-[10px] uppercase tracking-tight text-muted"
+          className="flex flex-col gap-1 text-[10px] uppercase tracking-tight text-muted"
         >
           Country
           <select
             id="redeem-country"
-            className="border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[13px] tracking-tight text-foreground pixel-shadow-sm"
+            className="rounded-xl border border-line-strong bg-overlay px-2 py-1.5 text-[13px] tracking-tight text-foreground pixel-shadow-sm"
             value={country}
             onChange={(e) => setCountry(e.target.value)}
             disabled={pending}
@@ -140,7 +140,7 @@ export function RedeemForm({ cardId, feeCents }: RedeemFormProps) {
       {error && <Banner tone="error" title={error} />}
 
       <div className="mt-1 flex items-center justify-between gap-2">
-        <p className="font-mono text-[9px] uppercase tracking-tight text-muted">
+        <p className="text-[9px] uppercase tracking-tight text-muted">
           Burns the card claim; the physical item ships after authentication
         </p>
         <Button

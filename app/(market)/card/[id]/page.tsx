@@ -169,7 +169,7 @@ export default async function CardPage({
       <div className="grid gap-8 lg:grid-cols-2">
         <section className="flex flex-col gap-6">
           <div>
-            <h2 className="mb-3 font-mono text-[10px] font-bold uppercase tracking-tight text-muted">
+            <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
               Provenance
             </h2>
             <ProvenanceChain provenance={detail.provenance} />
@@ -178,13 +178,13 @@ export default async function CardPage({
           <ExpandableSection title="Oracle & grading details">
             <div className="flex flex-col gap-3 text-sm">
               {oracleCents != null && (
-                <div className="flex items-baseline justify-between font-mono tracking-tight text-muted">
+                <div className="flex items-baseline justify-between text-sm text-muted">
                   <span>Oracle fair value</span>
                   <span className="text-foreground font-medium">{formatMyr(oracleCents)}</span>
                 </div>
               )}
               {listing?.fair_price_cents != null && (
-                <div className="flex items-baseline justify-between font-mono tracking-tight text-muted">
+                <div className="flex items-baseline justify-between text-sm text-muted">
                   <span>Fair price (this condition)</span>
                   <span className="text-foreground font-medium">{formatMyr(listing.fair_price_cents)}</span>
                 </div>
@@ -215,7 +215,7 @@ export default async function CardPage({
                   countryCode={ownerCountryCode}
                 />
                 <div>
-                  <h2 className="mb-2 font-mono text-[10px] font-bold uppercase tracking-tight text-muted">
+                  <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
                     Redeem the physical card
                   </h2>
                   <RedeemForm
@@ -317,7 +317,7 @@ function OwnerListingPanel({
 }) {
   const sold = listing.order != null;
   return (
-    <div className="flex flex-col gap-3 border border-line bg-overlay p-3">
+    <div className="flex flex-col gap-3 rounded-2xl border border-line bg-raised p-4">
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={listing.status === "public" ? "accent" : "info"}>
           {listing.status}

@@ -37,7 +37,7 @@ export function ProvenanceChain({ provenance }: ProvenanceChainProps) {
 
   if (provenance.length === 0) {
     return (
-      <div className="font-mono text-sm tracking-tight text-muted py-4">
+      <div className="text-sm tracking-tight text-muted py-4">
         No provenance recorded.
       </div>
     );
@@ -47,7 +47,7 @@ export function ProvenanceChain({ provenance }: ProvenanceChainProps) {
     <div>
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-2 font-mono text-sm uppercase tracking-tight text-muted hover:text-foreground/80 transition-colors mb-4 lg:hidden"
+        className="flex items-center gap-2 text-sm uppercase tracking-tight text-muted hover:text-foreground/80 transition-colors mb-4 lg:hidden"
         aria-expanded={isExpanded}
       >
         <span>Provenance ({provenance.length})</span>
@@ -77,12 +77,12 @@ export function ProvenanceChain({ provenance }: ProvenanceChainProps) {
                 aria-hidden
                 className="absolute -left-2 top-2 h-3 w-3 border border-line bg-raised rounded-full"
               />
-              <div className="font-mono text-xs uppercase tracking-tight text-muted mb-2">
+              <div className="text-xs uppercase tracking-tight text-muted mb-2">
                 {isMint ? "Minted" : "Acquired"}
                 <span className="mx-1 text-foreground/40">·</span>
                 {entry.acquired_at.slice(0, 10)}
               </div>
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 font-mono text-sm tracking-tight">
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm tracking-tight">
                 <div className="flex items-center gap-2">
                   <ActionIcon action={action} />
                   <a
@@ -106,7 +106,7 @@ export function ProvenanceChain({ provenance }: ProvenanceChainProps) {
           );
         })}
         {provenance.length === 0 && (
-          <li className="font-mono text-sm tracking-tight text-muted py-4">
+          <li className="text-sm tracking-tight text-muted py-4">
             No provenance recorded.
           </li>
         )}

@@ -60,13 +60,13 @@ function QuestionRow({
   onPick: (score: number) => void;
 }) {
   return (
-    <li className="flex flex-col gap-1.5 border border-line-strong bg-overlay p-3">
+    <li className="flex flex-col gap-1.5 rounded-xl border border-line-strong bg-overlay p-3">
       <div className="flex items-baseline justify-between gap-2">
-        <h4 className="font-mono text-[11px] font-bold uppercase tracking-tight text-foreground">
+        <h4 className="text-[11px] font-bold uppercase tracking-tight text-foreground">
           {index + 1}. {question.question}
         </h4>
       </div>
-      <p className="font-mono text-[10px] tracking-tight text-muted">
+      <p className="text-[10px] tracking-tight text-muted">
         {question.hint}
       </p>
       <div className="mt-1 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
@@ -79,7 +79,7 @@ function QuestionRow({
               aria-pressed={active}
               onClick={() => onPick(option.score)}
               className={
-                "border px-2 py-1.5 font-mono text-[10px] font-bold uppercase tracking-tight transition-colors " +
+                "rounded-xl border px-2 py-1.5 text-[10px] font-bold uppercase tracking-tight transition-colors " +
                 (active
                   ? "border-accent bg-accent/15 text-accent"
                   : "border-line-strong bg-raised text-muted hover:border-muted hover:text-foreground")

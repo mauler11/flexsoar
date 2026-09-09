@@ -165,7 +165,7 @@ export function IntakeWizard({
   return (
     <div className="flex flex-col gap-4">
       {/* Stepper */}
-      <ol className="flex flex-wrap items-center gap-1.5 border border-line-strong bg-overlay p-2">
+      <ol className="flex flex-wrap items-center gap-1.5 rounded-xl border border-line-strong bg-overlay p-2">
         {STEPS.map((label, i) => {
           const active = i === step;
           const reached = i <= step || (i < step && canStepReached(i));
@@ -179,7 +179,7 @@ export function IntakeWizard({
                 {i + 1}. {label}
               </Button>
               {i < STEPS.length - 1 && (
-                <span className="font-mono text-[9px] text-muted">/</span>
+                <span className="text-[9px] text-muted">/</span>
               )}
             </li>
           );
@@ -189,7 +189,7 @@ export function IntakeWizard({
       {/* Steps */}
       {step === 0 && (
         submittingModel ? (
-          <div className="flex items-center justify-center py-8 font-mono text-[11px] text-muted">
+          <div className="flex items-center justify-center py-8 text-[11px] text-muted">
             Finding or creating your shoe…
           </div>
         ) : showModelFinder ? (
@@ -218,7 +218,7 @@ export function IntakeWizard({
       {step === 1 && (
         <>
           <PhotoUploader onChange={setPhotos} />
-          <div className="border-t border-line-strong pt-2 font-mono text-[10px] tracking-tight text-muted">
+          <div className="border-t border-line-strong pt-2 text-[10px] tracking-tight text-muted">
             Live at intake review — a grader verifies against your uploads.
           </div>
         </>
@@ -256,7 +256,7 @@ export function IntakeWizard({
       )}
 
       {!signedIn && step > 0 && (
-        <div className="border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 font-mono text-[10px] tracking-tight text-muted">
+        <div className="rounded-xl border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 text-[10px] tracking-tight text-muted">
           You&apos;re not signed in — submit will require an account.
         </div>
       )}
@@ -343,7 +343,7 @@ function ReviewPane({
       </div>
 
       {(isNewModel || isUnpricedModel) && (
-        <div className="border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 font-mono text-[10px] tracking-tight text-[#E8B33A]">
+        <div className="rounded-xl border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 text-[10px] tracking-tight text-[#E8B33A]">
           {isNewModel
             ? `This is a NEW model — it has no oracle price yet. Your submission will be recorded, but the card CANNOT MINT until an admin sets the base price. You&apos;ll see "pending review AND pricing" in your dashboard.`
             : `This model exists but has NO oracle price. Your submission will be recorded, but the card CANNOT MINT until an admin sets the base price. You&apos;ll see "pending review AND pricing" in your dashboard.`}
@@ -353,7 +353,7 @@ function ReviewPane({
       <div className="flex flex-col gap-1">
         <label
           htmlFor="notes-input"
-          className="font-mono text-[10px] uppercase tracking-tight text-muted"
+          className="text-[10px] uppercase tracking-tight text-muted"
         >
           Notes for the grader (optional)
         </label>
@@ -363,17 +363,17 @@ function ReviewPane({
           onChange={(e) => onNotesChange(e.target.value)}
           rows={2}
           placeholder="Worn once, box included, bought new this season…"
-          className="border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[12px] tracking-tight text-foreground placeholder:text-muted/50"
+          className="rounded-xl border border-line-strong bg-overlay px-2 py-1.5 text-[12px] tracking-tight text-foreground placeholder:text-muted/50"
         />
       </div>
 
       {error && (
-        <div className="border border-[#FF4444]/60 bg-[#FF4444]/10 px-3 py-2 font-mono text-[10px] tracking-tight text-[#FF4444]">
+        <div className="rounded-xl border border-[#FF4444]/60 bg-[#FF4444]/10 px-3 py-2 text-[10px] tracking-tight text-[#FF4444]">
           {error}
         </div>
       )}
 
-      <div className="border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 font-mono text-[10px] leading-relaxed tracking-tight text-muted">
+      <div className="rounded-xl border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 text-[10px] leading-relaxed tracking-tight text-muted">
         Submit takes the listing to review. A grader re-checks the shoe against
         your photos and answers; the human grade is what becomes the card. You
         can track this submission from your dashboard.
@@ -384,11 +384,11 @@ function ReviewPane({
 
 function Detail({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex flex-col gap-0.5 border border-line-strong bg-overlay px-2 py-1.5">
-      <span className="font-mono text-[9px] uppercase tracking-tight text-muted">
+    <div className="flex flex-col gap-0.5 rounded-xl border border-line-strong bg-overlay px-2 py-1.5">
+      <span className="text-[9px] uppercase tracking-tight text-muted">
         {label}
       </span>
-      <span className="font-mono text-[11px] font-bold tracking-tight text-foreground">
+      <span className="text-[11px] font-bold tracking-tight text-foreground">
         {value}
       </span>
     </div>
@@ -407,18 +407,18 @@ function DoneState({
   isUnpricedModel: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-3 border border-accent bg-accent/10 p-4">
-      <h3 className="font-mono text-sm font-black uppercase tracking-tight text-foreground">
+    <div className="flex flex-col gap-3 rounded-2xl border border-accent bg-accent/10 p-4">
+      <h3 className="text-sm font-black uppercase tracking-tight text-foreground">
         In review — live within the hour
       </h3>
-      <p className="font-mono text-[11px] tracking-tight text-muted">
+      <p className="text-[11px] tracking-tight text-muted">
         Your {sku ? `${sku.brand} ${sku.model}` : "listing"} is queued
         for intake grading{itemId ? ` (ref ${itemId})` : ""}. A
         grader verifies condition against your photos, then the card goes live
         in your dashboard. You&apos;ll be notified either way.
       </p>
 {(isNewModel || isUnpricedModel) && (
-        <div className="border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 font-mono text-[10px] tracking-tight text-[#E8B33A]">
+        <div className="rounded-xl border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 text-[10px] tracking-tight text-[#E8B33A]">
           {isNewModel
             ? `This is a NEW model — it has no oracle price yet. The card CANNOT MINT until an admin sets the base price. Your dashboard will show "pending review AND pricing".`
             : `This model has NO oracle price. The card CANNOT MINT until an admin sets the base price. Your dashboard will show "pending review AND pricing".`}

@@ -1,13 +1,11 @@
 /**
  * components/market/MarketTile.tsx
  *
- * One live listing in the market grid. The listing is a ListingSummary from
- * the contract; the presentational CardTile is shaped by full row types, so
- * the bridge adapts first.
+ * One live listing in the market grid. Thin wrapper over ListingCard that
+ * keeps the established (listing, showNumericFloat) prop contract.
  */
 import type { ListingSummary } from "@/lib/api/contract";
-import { toCard, toSku, toSummaryListing } from "@/components/market/bridge";
-import { CardTile } from "@/components/card/CardTile";
+import { ListingCard } from "@/components/market/ListingCard";
 
 export interface MarketTileProps {
   listing: ListingSummary;
@@ -21,20 +19,5 @@ export interface MarketTileProps {
 }
 
 export function MarketTile({ listing, showNumericFloat }: MarketTileProps) {
-  const card = toCard(listing.card);
-  const sku = toSku(listing.card.sku);
-  const listingForCard = toSummaryListing(listing.card, listing.seller_id);
-
-  return (
-    <div className="flex w-[188px] flex-col gap-1.5">
-      <CardTile
-        card={card}
-        sku={sku}
-        priceCents={listing.price_cents}
-        listing={listingForCard}
-        href={`/card/${listing.card_id}`}
-        showNumericFloat={showNumericFloat}
-      />
-    </div>
-  );
+  return <ListingCard listing={listing} showNumericFloat={showNumericFloat} />;
 }

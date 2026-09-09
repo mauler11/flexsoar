@@ -1,7 +1,7 @@
 /**
  * components/ui/Input.tsx
  *
- * Chunky pixel text field with an optional label, hint, and inline error.
+ * Rounded dark text field with an optional label, hint, and inline error.
  * "use client" so it can be controlled from interactive forms.
  */
 "use client";
@@ -26,7 +26,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       {label && (
         <label
           htmlFor={inputId}
-          className="font-mono text-[10px] uppercase tracking-tight text-muted"
+          className="text-[11px] font-semibold uppercase tracking-wide text-muted"
         >
           {label}
         </label>
@@ -39,8 +39,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           error ? `${inputId}-error` : hint ? `${inputId}-hint` : undefined
         }
         className={cn(
-          "border bg-overlay px-2 py-1.5 font-mono text-[13px] tracking-tight text-foreground placeholder:text-muted/50",
-          "pixel-shadow-sm",
+          "rounded-xl border bg-raised px-3 py-2 text-[13px] text-foreground placeholder:text-muted/50",
           "disabled:cursor-not-allowed disabled:opacity-40",
           error
             ? "border-[#FF4444] focus-visible:outline-[#FF4444]"
@@ -52,7 +51,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       {error && (
         <p
           id={`${inputId}-error`}
-          className="font-mono text-[10px] tracking-tight text-[#FF4444]"
+          className="text-xs text-[#FF4444]"
         >
           {error}
         </p>
@@ -60,7 +59,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       {!error && hint && (
         <p
           id={`${inputId}-hint`}
-          className="font-mono text-[10px] tracking-tight text-muted"
+          className="text-xs text-muted"
         >
           {hint}
         </p>

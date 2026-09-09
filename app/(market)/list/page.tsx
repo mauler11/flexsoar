@@ -31,7 +31,7 @@ export default async function ListPage() {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h1 className="font-mono text-xl font-black uppercase tracking-tight">
+        <h1 className="text-2xl font-extrabold tracking-tight">
           List a shoe
         </h1>
         <p className="font-mono text-[10px] uppercase tracking-tight text-muted">

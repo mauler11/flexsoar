@@ -75,7 +75,7 @@ export function OrderPoll({ listingId, cardId, priceCents }: OrderPollProps) {
           <Banner tone="success" title="Purchase settled">
             Your payment was recorded. {orderId ? `Order ${orderId.slice(0, 8)}…` : ""}
           </Banner>
-          <div className="font-mono text-[10px] uppercase tracking-tight text-muted">
+          <div className="text-[10px] uppercase tracking-tight text-muted">
             Paid {formatMyr(priceCents)} · the card is now yours
           </div>
           <Button href={`/card/${cardId}`} size="sm">
@@ -92,14 +92,14 @@ export function OrderPoll({ listingId, cardId, priceCents }: OrderPollProps) {
         </Banner>
       ) : (
         <>
-          <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-tight text-muted">
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-tight text-muted">
             <span
               aria-hidden
               className="inline-block h-2 w-2 animate-pulse bg-[#E8B33A]"
             />
             Waiting for payment to settle…
           </div>
-          <p className="font-mono text-[9px] uppercase tracking-tight text-muted">
+          <p className="text-[9px] uppercase tracking-tight text-muted">
             Polling the ledger — the sale is recorded server-side by the
             webhook, not by this page.
           </p>

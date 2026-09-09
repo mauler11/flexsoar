@@ -28,6 +28,7 @@ export interface MarketFiltersProps {
     sizeUs?: number;
     tier: number[];
     sort: string;
+    q?: string;
   };
 }
 
@@ -87,8 +88,48 @@ export function MarketFilters({
     push({ brand: nextBrand });
   }
 
+  const pillActive =
+    "border-transparent bg-accent font-semibold text-[#0B0B0B]";
+  const pillIdle =
+    "border-line-strong bg-raised text-muted hover:border-muted hover:text-foreground";
+
   return (
-    <div className="flex flex-wrap items-end gap-3 border border-line bg-overlay px-3 py-2">
+    <div className="flex flex-col gap-3 rounded-2xl border border-line bg-raised/40 p-3">
+      <div
+        role="group"
+        aria-label="Filter by brand"
+        className="flex gap-2 overflow-x-auto pb-1"
+      >
+        {["", ...brands].map((b) => {
+          const active = (initial.brand ?? "") === b;
+          return (
+            <button
+              key={b || "all"}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onBrandChange(b)}
+              className={`shrink-0 rounded-full border px-3.5 py-1.5 text-[13px] transition-colors ${
+                active ? pillActive : pillIdle
+              }`}
+            >
+              {b || "All"}
+            </button>
+          );
+        })}
+      </div>
+      {initial.q && (
+        <p className="text-[13px] text-muted">
+          Results for <span className="font-semibold text-foreground">“{initial.q}”</span>{" "}
+          <button
+            type="button"
+            onClick={() => push({ q: null })}
+            className="text-accent hover:underline"
+          >
+            clear
+          </button>
+        </p>
+      )}
+      <div className="flex flex-wrap items-end gap-3">
       <Select
         label="Brand"
         options={[{ value: "", label: "All" }, ...brands.map((b) => ({ value: b, label: b }))]}
@@ -131,11 +172,13 @@ export function MarketFilters({
             size: null,
             tier: null,
             sort: "recent",
+            q: null,
           })
         }
       >
         Clear
       </Button>
+      </div>
     </div>
   );
 }

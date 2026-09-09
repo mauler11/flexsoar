@@ -58,7 +58,7 @@ export function PayoutSetup({
 
   if (connected) {
     return (
-      <div className="border border-line bg-overlay/50 px-3 py-3 font-mono text-[11px] tracking-tight">
+      <div className="rounded-2xl border border-line bg-raised px-4 py-3 text-[13px]">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-green-500" aria-hidden="true" />
@@ -83,7 +83,7 @@ export function PayoutSetup({
     countryCode != null && countryCode.toUpperCase() !== "MY";
 
   return (
-    <div className="border border-dashed border-line-strong px-3 py-3 font-mono text-[11px] tracking-tight">
+    <div className="rounded-2xl border border-dashed border-line-strong bg-raised/40 px-4 py-3 text-[13px]">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-[#FF4444]" aria-hidden="true" />

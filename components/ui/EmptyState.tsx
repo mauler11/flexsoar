@@ -25,7 +25,7 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center gap-2 border border-dashed border-line-strong bg-raised px-4 py-10 text-center",
+        "flex flex-col items-center gap-2 rounded-2xl border border-dashed border-line-strong bg-raised px-4 py-10 text-center",
         className,
       )}
     >
@@ -34,11 +34,11 @@ export function EmptyState({
           {icon}
         </div>
       )}
-      <h3 className="font-mono text-[12px] font-bold uppercase tracking-tight">
+      <h3 className="text-base font-bold tracking-tight">
         {title}
       </h3>
       {description != null && (
-        <p className="max-w-sm font-mono text-[11px] leading-snug tracking-tight text-muted">
+        <p className="max-w-sm text-[13px] leading-snug text-muted">
           {description}
         </p>
       )}

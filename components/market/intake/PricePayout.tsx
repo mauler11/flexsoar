@@ -97,14 +97,14 @@ export function PricePayout({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <span className="font-mono text-[10px] uppercase tracking-tight text-muted">
+        <span className="text-[10px] uppercase tracking-tight text-muted">
           Your country
         </span>
         <select
           aria-label="Your country"
           value={countryCode ?? ""}
           onChange={(e) => onCountryChange(e.target.value)}
-          className="border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[12px] tracking-tight text-foreground"
+          className="rounded-xl border border-line-strong bg-overlay px-2 py-1.5 text-[12px] tracking-tight text-foreground"
         >
           <option value="" disabled>
             Select your country…
@@ -115,7 +115,7 @@ export function PricePayout({
             </option>
           ))}
         </select>
-        <span className="font-mono text-[10px] tracking-tight text-muted">
+        <span className="text-[10px] tracking-tight text-muted">
           Decides whether this sale pays you in cash or FSC. Required to
           submit.
         </span>
@@ -136,24 +136,24 @@ export function PricePayout({
         </Banner>
       )}
 
-      <div className="flex flex-col gap-1 border border-line-strong bg-overlay p-3">
-        <span className="font-mono text-[10px] font-bold uppercase tracking-tight text-muted">
+      <div className="flex flex-col gap-1 rounded-xl border border-line-strong bg-overlay p-3">
+        <span className="text-[10px] font-bold uppercase tracking-tight text-muted">
           {sku.brand} {sku.model} · {sku.colorway} · US {sku.size_us}
         </span>
         <div className="flex items-baseline justify-between gap-2">
-          <span className="font-mono text-[11px] tracking-tight text-muted">
+          <span className="text-[11px] tracking-tight text-muted">
             Oracle reference value (deadstock)
           </span>
-          <span className="font-mono text-[13px] font-bold tracking-tight text-accent">
+          <span className="text-[13px] font-bold tracking-tight text-accent">
             {oracle != null ? formatMyr(oracle) : "unpriced"}
           </span>
         </div>
         {estimate != null && (
           <div className="flex items-baseline justify-between gap-2">
-            <span className="font-mono text-[10px] tracking-tight text-muted">
+            <span className="text-[10px] tracking-tight text-muted">
               At your self-declared condition
             </span>
-            <span className="font-mono text-[11px] font-bold tracking-tight text-foreground">
+            <span className="text-[11px] font-bold tracking-tight text-foreground">
               ≈ {formatMyr(estimate)}
             </span>
           </div>
@@ -179,7 +179,7 @@ export function PricePayout({
           hint="Reserve price — what you must clear to sell."
         />
         <div className="flex flex-col gap-1">
-          <span className="font-mono text-[10px] uppercase tracking-tight text-muted">
+          <span className="text-[10px] uppercase tracking-tight text-muted">
             Payout method
           </span>
           {/* Read-only — not a choice. fn_submit_listing (019c) derives this
@@ -187,14 +187,14 @@ export function PricePayout({
               sends; see the file doc comment. */}
           <div
             aria-label="Payout method (determined by your country, not a choice)"
-            className="border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[12px] font-bold uppercase tracking-tight text-foreground"
+            className="rounded-xl border border-line-strong bg-overlay px-2 py-1.5 text-[12px] font-bold uppercase tracking-tight text-foreground"
           >
             {previewedPayoutMethod ?? "select your country above"}
           </div>
         </div>
       </div>
 
-      <div className="border border-dashed border-line-strong bg-raised px-3 py-2 font-mono text-[10px] leading-relaxed tracking-tight text-muted">
+      <div className="rounded-xl border border-dashed border-line-strong bg-raised px-3 py-2 text-[10px] leading-relaxed tracking-tight text-muted">
         {previewedPayoutMethod === "credit"
           ? "Credit lands on your FlexSoar balance the moment the sale settles — usable in checkout immediately."
           : previewedPayoutMethod === "cash"

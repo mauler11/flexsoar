@@ -32,6 +32,7 @@ interface BrowseSearchParams {
   size?: string;
   tier?: string;
   sort?: string;
+  q?: string;
   error?: string;
 }
 
@@ -58,6 +59,8 @@ export default async function BrowsePage({
   const query: ListingsQuery = { sort };
   if (brand) query.brand = brand;
   if (model) query.model = model;
+  const search = params.q?.trim() || undefined;
+  if (search) query.search = search;
   if (sizeUs != null && Number.isFinite(sizeUs)) query.sizeUs = sizeUs;
   if (tier.length) query.tier = tier as Tier[];
 
@@ -92,14 +95,14 @@ export default async function BrowsePage({
     <div className="flex flex-col gap-4">
       <div className="flex items-end justify-between gap-3">
         <div>
-          <h1 className="font-mono text-xl font-black uppercase tracking-tight">
+          <h1 className="text-2xl font-extrabold tracking-tight">
             Market
           </h1>
-          <p className="font-mono text-[10px] uppercase tracking-tight text-muted">
+          <p className="text-sm text-muted">
             Oracle-priced asks · instant listing
           </p>
         </div>
-        <p className="font-mono text-[10px] uppercase tracking-tight text-muted">
+        <p className="text-sm text-muted">
           {listings.length} live
         </p>
       </div>
@@ -127,6 +130,7 @@ export default async function BrowsePage({
           sizeUs: sizeUs != null && Number.isFinite(sizeUs) ? sizeUs : undefined,
           tier,
           sort,
+          q: search,
         }}
       />
 

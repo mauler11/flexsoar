@@ -152,7 +152,7 @@ export function SkuModelFinder({
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
-      <div className="border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 font-mono text-[10px] tracking-tight text-muted">
+      <div className="rounded-xl border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 text-[10px] tracking-tight text-muted">
         We&apos;ll match your shoe against existing models. If it&apos;s new, we&apos;ll create
         the model (no price — pricing is an admin decision) and your size variant
         instantly. You can list immediately; an unpriced model just means the
@@ -195,7 +195,7 @@ export function SkuModelFinder({
       </div>
 
       {matches.length > 0 && (
-        <div className="border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[11px] tracking-tight">
+        <div className="rounded-xl border border-line-strong bg-overlay px-2 py-1.5 text-[11px] tracking-tight">
           <div className="font-bold text-foreground mb-1">Close matches (click to select):</div>
           <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
             {matches.map((m) => (
@@ -204,7 +204,7 @@ export function SkuModelFinder({
                 type="button"
                 onClick={() => handleSelectMatch(m)}
                 className={
-                  "flex items-center justify-between gap-2 border px-2 py-1 text-left transition-colors " +
+                  "flex items-center justify-between gap-2 rounded-xl border px-2 py-1 text-left transition-colors " +
                   (selectedMatch?.id === m.id
                     ? "border-accent bg-accent/15 text-foreground"
                     : "border-line-strong bg-overlay text-foreground hover:border-muted")
@@ -229,13 +229,13 @@ export function SkuModelFinder({
       )}
 
       {searching && matches.length === 0 && (
-        <p className="font-mono text-[10px] tracking-tight text-muted">
+        <p className="text-[10px] tracking-tight text-muted">
           Searching models…
         </p>
       )}
 
       {error && (
-        <p className="font-mono text-[10px] tracking-tight text-[#FF4444]">
+        <p className="text-[10px] tracking-tight text-[#FF4444]">
           {error}
         </p>
       )}
