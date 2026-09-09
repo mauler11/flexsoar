@@ -4388,14 +4388,19 @@ export async function checkPayoutEligibility(): Promise<PayoutEligibility[]> {
   const payoutHoldDays = 7; // fallback; could read from platform_config
   const holdCutoff = new Date(Date.now() - payoutHoldDays * 24 * 60 * 60 * 1000).toISOString();
 
-  // Find settled orders not yet paid out where hold has elapsed
+  // Find settled orders not yet paid out where hold has elapsed.
+  // Cash-method only: credit (FSC) sellers are paid instantly in-ledger via
+  // credit_sale_net at purchase time — a Stripe transfer on top would pay
+  // them twice. Their payout_release_at is null, which the lte() below also
+  // excludes, but the explicit gate makes the invariant loud, not accidental.
   const { data: orders, error } = await supabase
     .from('orders')
     .select(
-      'id, seller_id, net_cents, payout_release_at, paid_out, credit_cents, cash_cents',
+      'id, seller_id, net_cents, payout_release_at, paid_out, credit_cents, cash_cents, seller_payout',
     )
     .eq('status', 'settled')
     .eq('paid_out', false)
+    .eq('seller_payout', 'cash')
     .lte('payout_release_at', holdCutoff);
 
   if (error) fail(error, 'orders');
