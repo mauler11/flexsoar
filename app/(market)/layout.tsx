@@ -144,20 +144,20 @@ export default async function MarketLayout({
               aria-label="FlexSoar home"
               className="shrink-0"
             >
-              <Image
-                src="/logo-white-big.png"
-                alt="FlexSoar"
-                width={120}
-                height={40}
-                priority
-              />
-            </Link>
-            <div className="min-w-0 flex-1">
-              <Suspense>
-                <SearchInput />
-              </Suspense>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
+                  <Image
+                    src="/logo-white-big.png"
+                    alt="FlexSoar"
+                    width={150}
+                    height={50}
+                    priority
+                  />
+                </Link>
+                <div className="mx-auto min-w-0 w-full max-w-xl flex-1">
+                  <Suspense>
+                    <SearchInput />
+                  </Suspense>
+                </div>
+                <div className="flex shrink-0 items-center gap-4">
               {me ? (
                 <>
                   <NotificationBell
@@ -177,11 +177,11 @@ export default async function MarketLayout({
                   >
                     @{me.handle} · LV {me.level}
                   </a>
-                  <form action={signOut}>
-                    <Button type="submit" variant="ghost" size="sm">
-                      Sign out
-                    </Button>
-                  </form>
+                      <form action={signOut}>
+                        <Button type="submit" variant="secondary" size="sm">
+                          Sign out
+                        </Button>
+                      </form>
                 </>
               ) : (
                 <Button href="/sign-in" size="sm" variant="secondary">

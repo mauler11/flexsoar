@@ -7,7 +7,7 @@
  * feeds the card links.
  */
 import type { Metadata } from "next";
-import { BRAND_PILL_EXCLUSIONS, getListings, getPlatformConfig, getSkus } from "@/lib/api/contract";
+import { BRAND_PILL_EXCLUSIONS, getListings, getPlatformConfig } from "@/lib/api/contract";
 import type { ListingSort, ListingsQuery } from "@/lib/api/contract";
 import type { Tier } from "@/lib/db/types";
 import { MarketFilters } from "@/components/market/MarketFilters";
@@ -66,31 +66,18 @@ export default async function BrowsePage({
   if (tier.length) query.tier = tier as Tier[];
 
   let listings = [] as Awaited<ReturnType<typeof getListings>>;
-  let skus = [] as Awaited<ReturnType<typeof getSkus>>;
   let platformConfig = { show_numeric_float: false };
   let loadError: string | null = null;
 
   try {
-    [listings, skus, platformConfig] = await Promise.all([
+    [listings, platformConfig] = await Promise.all([
       getListings(query),
-      getSkus({ limit: 400 }),
       getPlatformConfig(),
     ]);
   } catch (err) {
     loadError = err instanceof Error ? err.message : String(err);
     console.error('[market] load error:', loadError);
   }
-
-  const brands = [...new Set(skus.map((s) => s.brand))].sort();
-  const modelsByBrand: Record<string, string[]> = {};
-  for (const s of skus) {
-    if (!s.brand) continue;
-    (modelsByBrand[s.brand] ??= []).push(s.model);
-  }
-  for (const key of Object.keys(modelsByBrand)) {
-    modelsByBrand[key] = [...new Set(modelsByBrand[key])].sort();
-  }
-  const sizes = [...new Set(skus.map((s) => s.size_us))].sort((a, b) => a - b);
 
   return (
     <div className="flex flex-col gap-4">
@@ -121,15 +108,8 @@ export default async function BrowsePage({
       )}
 
       <MarketFilters
-        brands={brands}
-        modelsByBrand={modelsByBrand}
-        sizes={sizes}
-        maxTier={5}
         initial={{
           brand,
-          model,
-          sizeUs: sizeUs != null && Number.isFinite(sizeUs) ? sizeUs : undefined,
-          tier,
           sort,
           q: search,
         }}

@@ -40,7 +40,7 @@ export function SearchInput({ initial = "" }: SearchInputProps) {
   }, [value, pathname, router, searchParams]);
 
   return (
-    <div className="relative w-full max-w-md">
+    <div className="relative w-full">
       <svg
         className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
         fill="none"
@@ -60,7 +60,7 @@ export function SearchInput({ initial = "" }: SearchInputProps) {
         placeholder="Search for sneakers, brands, or collections…"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        className="w-full rounded-xl border border-line bg-raised py-2 pl-9 pr-8 text-sm text-foreground placeholder:text-muted/60 hover:border-line-strong focus:border-accent focus:outline-none"
+        className="w-full rounded-xl border border-line-strong bg-raised py-2 pl-9 pr-8 text-sm text-foreground placeholder:text-muted/60 hover:border-muted focus:border-accent focus:outline-none"
       />
       {value && (
         <button

@@ -12,6 +12,7 @@
  * the current page's own nav entry.
  */
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -111,6 +112,29 @@ export function Sidebar({ items }: SidebarProps) {
           </Link>
         );
       })}
+
+      <div className="mt-auto hidden flex-col gap-2 rounded-2xl border border-line bg-overlay p-3 lg:flex">
+        <Image
+          src="/club-logo.png"
+          alt="FlexSoar club"
+          width={64}
+          height={64}
+          className="rounded-xl"
+        />
+        <p className="text-sm font-extrabold leading-tight tracking-tight">
+          Join the FlexSoar club
+        </p>
+        <p className="text-xs leading-snug text-muted">
+          Don&apos;t miss hot drops. Early access, member-only heat, and
+          collection updates — straight to you.
+        </p>
+        <Link
+          href="/socials"
+          className="inline-flex items-center justify-center rounded-lg border border-accent/60 px-2 py-1.5 text-xs font-bold text-accent transition hover:bg-accent/10"
+        >
+          Learn more →
+        </Link>
+      </div>
     </nav>
   );
 }
