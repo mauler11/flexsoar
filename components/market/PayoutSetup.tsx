@@ -96,8 +96,9 @@ export function PayoutSetup({
           size="sm"
           onClick={handleSetup}
           disabled={isLoading}
+          className="rounded-lg"
         >
-          {isLoading ? "Opening Stripe…" : "Set up payouts"}
+          {isLoading ? "Opening Stripe…" : "Set Up Payouts"}
         </Button>
       </div>
       {!isConsignor && (

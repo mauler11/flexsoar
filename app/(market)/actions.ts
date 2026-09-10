@@ -474,11 +474,36 @@ export async function markNotificationReadAction(notificationId: string): Promis
 // ------------------------------------------------------------
 
 /**
- * Flips the caller's show_collection flag (045). Session UPDATE — the row
- * is scoped by users_self_update and the column by its grant, so this can
- * only ever touch the caller's own visibility, never anyone else's.
+ * Flips one card's show_in_profile flag (046) via fn_set_card_visibility,
+ * which enforces owner-or-admin itself. Redirects back to the dashboard —
+ * the toggle lives on each held shoe there.
  */
-export async function toggleShowCollectionAction(show: boolean): Promise<void> {
+export async function toggleCardVisibilityAction(cardId: string, show: boolean): Promise<void> {
+  const me = await currentUserId();
+  if (!me) {
+    redirect('/sign-in');
+  }
+  if (!/^[0-9a-f-]{36}$/i.test(cardId)) {
+    redirectWithError('/dashboard', 'Bad card id.');
+  }
+
+  const supabase = await createServerSupabase();
+  const { error } = await supabase.rpc('fn_set_card_visibility', {
+    p_card_id: cardId,
+    p_show: show,
+  });
+
+  if (error) {
+    redirectWithError('/dashboard', error.message);
+  }
+  redirect('/dashboard');
+}
+
+/**
+ * Flips the caller's show_trade_history flag (046). Session UPDATE — the
+ * row is scoped by users_self_update and the column by its grant.
+ */
+export async function toggleTradeHistoryAction(show: boolean, next: string): Promise<void> {
   const me = await currentUserId();
   if (!me) {
     redirect('/sign-in');
@@ -487,11 +512,11 @@ export async function toggleShowCollectionAction(show: boolean): Promise<void> {
   const supabase = await createServerSupabase();
   const { error } = await supabase
     .from('users')
-    .update({ show_collection: show })
+    .update({ show_trade_history: show })
     .eq('id', me);
 
   if (error) {
-    redirectWithError('/dashboard', error.message);
+    redirectWithError(safeNextPath(next) || '/dashboard', error.message);
   }
-  redirect('/dashboard');
+  redirect(safeNextPath(next) || '/dashboard');
 }

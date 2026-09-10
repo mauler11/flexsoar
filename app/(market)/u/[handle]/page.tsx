@@ -11,9 +11,11 @@ import { notFound } from "next/navigation";
 import { getListings, getPlatformConfig } from "@/lib/api/contract";
 import {
   currentUserId,
+  getHiddenCardIds,
   getPublicProfileByHandle,
   getTradeHistory,
 } from "@/app/(market)/queries";
+import { toggleTradeHistoryAction } from "@/app/(market)/actions";
 import { MarketTile } from "@/components/market/MarketTile";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatMyr } from "@/components/card/format";
@@ -45,11 +47,17 @@ export default async function ProfilePage({
   const isOwner = viewerId != null && viewerId === profile.id;
   const holdingsVisible = profile.show_collection || isOwner;
 
-  const [live, trades, platformConfig] = await Promise.all([
+  const [live, trades, hiddenIds, platformConfig] = await Promise.all([
     holdingsVisible ? getListings({ sellerId: profile.id }) : Promise.resolve([]),
     holdingsVisible ? getTradeHistory(profile.id) : Promise.resolve([]),
+    getHiddenCardIds(profile.id),
     getPlatformConfig(),
   ]);
+
+  // 046: per-shoe hiding applies on top of the master switch.
+  const visibleLive = live.filter((l) => !hiddenIds.has(l.card_id));
+  const visibleTrades = trades.filter((t) => !hiddenIds.has(t.cardId));
+  const tradesVisible = profile.show_trade_history || isOwner;
 
   const joined = profile.created_at.slice(0, 10);
 
@@ -94,16 +102,16 @@ export default async function ProfilePage({
       {holdingsVisible && (
       <section>
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-          Live listings ({live.length})
+          Live listings ({visibleLive.length})
         </h2>
-        {live.length === 0 ? (
+        {visibleLive.length === 0 ? (
           <EmptyState
             title="Nothing listed"
             description="This account has no live listings right now."
           />
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {live.map((listing) => (
+            {visibleLive.map((listing) => (
               <MarketTile
                 key={listing.id}
                 listing={listing}
@@ -115,21 +123,54 @@ export default async function ProfilePage({
       </section>
       )}
 
-      {holdingsVisible && (
+      {holdingsVisible && tradesVisible && (
       <section>
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-          Trade history ({trades.length})
-        </h2>
-        {trades.length === 0 ? (
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
+            Trade history ({visibleTrades.length})
+          </h2>
+          {isOwner && (
+            <div className="flex items-center gap-1 text-xs text-muted">
+              <span>Show trade history:</span>
+              <form action={toggleTradeHistoryAction.bind(null, true, `/u/${handle}`)}>
+                <button
+                  type="submit"
+                  aria-pressed={profile.show_trade_history}
+                  className={
+                    profile.show_trade_history
+                      ? "rounded-md bg-accent px-2 py-0.5 font-bold text-[#0B0B0B]"
+                      : "rounded-md px-2 py-0.5 hover:text-foreground"
+                  }
+                >
+                  Yes
+                </button>
+              </form>
+              <form action={toggleTradeHistoryAction.bind(null, false, `/u/${handle}`)}>
+                <button
+                  type="submit"
+                  aria-pressed={!profile.show_trade_history}
+                  className={
+                    !profile.show_trade_history
+                      ? "rounded-md bg-accent px-2 py-0.5 font-bold text-[#0B0B0B]"
+                      : "rounded-md px-2 py-0.5 hover:text-foreground"
+                  }
+                >
+                  No
+                </button>
+              </form>
+            </div>
+          )}
+        </div>
+        {visibleTrades.length === 0 ? (
           <EmptyState
             title="No trades yet"
             description="This account hasn't acquired or released any cards."
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full border border-line bg-overlay font-mono text-[11px] tracking-tight">
+            <table className="w-full border border-line bg-overlay text-[11px]">
               <thead>
-                <tr className="border-b border-line text-[9px] uppercase tracking-tight text-muted">
+                <tr className="border-b border-line text-[9px] uppercase tracking-wide text-muted">
                   <th className="px-2 py-1.5 text-left">Card</th>
                   <th className="px-2 py-1.5 text-left">Mint</th>
                   <th className="px-2 py-1.5 text-left">Acquired</th>
@@ -138,7 +179,7 @@ export default async function ProfilePage({
                 </tr>
               </thead>
               <tbody>
-                {trades.map((trade) => (
+                {visibleTrades.map((trade) => (
                   <tr key={`${trade.cardId}-${trade.acquiredAt}`} className="border-b border-line last:border-b-0">
                     <td className="px-2 py-1.5">
                       <a

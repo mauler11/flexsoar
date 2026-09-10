@@ -28,10 +28,10 @@
  */
 
 import type { Metadata } from "next";
-import { getCards, getConsignment, getConsignments, getRedemptions, getPlatformConfig } from "@/lib/api/contract";
+import { getCards, getConsignment, getConsignments, getRedemptions } from "@/lib/api/contract";
 import type { CardSummary } from "@/lib/api/contract";
 import type { ItemSummary } from "@/lib/api/contract";
-import { currentUserId, getMySubmittedItems } from "@/app/(market)/queries";
+import { currentUserId, getHiddenCardIds, getMySubmittedItems } from "@/app/(market)/queries";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/Button";
 import { PayoutSetup } from "@/components/market/PayoutSetup";
@@ -50,13 +50,12 @@ async function getConnectStatus(userId: string): Promise<{
   payoutsEnabled: boolean;
   isConsignor: boolean;
   countryCode: string | null;
-  showCollection: boolean;
 }> {
   const supabase = await createServerSupabase();
   const { data } = await supabase
     .from("users")
     .select(
-      "stripe_connect_account_id, stripe_connect_payouts_enabled, is_consignor, country_code, show_collection",
+      "stripe_connect_account_id, stripe_connect_payouts_enabled, is_consignor, country_code",
     )
     .eq("id", userId)
     .maybeSingle();
@@ -65,14 +64,12 @@ async function getConnectStatus(userId: string): Promise<{
     stripe_connect_payouts_enabled?: boolean | null;
     is_consignor?: boolean | null;
     country_code?: string | null;
-    show_collection?: boolean | null;
   };
   return {
     accountId: row.stripe_connect_account_id ?? null,
     payoutsEnabled: row.stripe_connect_payouts_enabled ?? false,
     isConsignor: row.is_consignor ?? false,
     countryCode: row.country_code ?? null,
-    showCollection: row.show_collection ?? true,
   };
 }
 
@@ -93,7 +90,7 @@ export default async function DashboardPage() {
 
   const connectStatus = me
     ? await getConnectStatus(me)
-    : { accountId: null, payoutsEnabled: false, isConsignor: false, countryCode: null, showCollection: true };
+    : { accountId: null, payoutsEnabled: false, isConsignor: false, countryCode: null };
 
   if (!me) {
     return (
@@ -125,9 +122,11 @@ export default async function DashboardPage() {
   const heldCards = await getCards({ ownerId: me, status: HELD_CARD_STATUSES, limit: 200 });
 
   const redemptions = await getRedemptions({ userId: me });
-  const platformConfig = await getPlatformConfig().catch(() => ({
-    show_numeric_float: false,
-  }));
+  const hiddenIds = await getHiddenCardIds(me);
+  const visibility: Record<string, boolean> = {};
+  for (const card of heldCards) {
+    visibility[card.id] = !hiddenIds.has(card.id);
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -163,8 +162,7 @@ export default async function DashboardPage() {
         heldItems={preMintHeldItems}
         heldCards={heldCards}
         redemptions={redemptions}
-        showCollection={connectStatus.showCollection}
-        showNumericFloat={platformConfig.show_numeric_float}
+        visibility={visibility}
       />
 
       <p className="border-t border-line-strong pt-2 text-xs text-muted">

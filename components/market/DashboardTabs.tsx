@@ -13,12 +13,10 @@
 import { useState } from "react";
 import type { CardSummary, ItemSummary, RedemptionSummary } from "@/lib/api/contract";
 import type { SubmittedItem } from "@/app/(market)/queries";
-import { toCard, toSku } from "@/components/market/bridge";
-import { CardTile } from "@/components/card/CardTile";
+import { HeldCard } from "@/components/market/HeldCard";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatMyr } from "@/components/card/format";
-import { toggleShowCollectionAction } from "@/app/(market)/actions";
 import { cn } from "@/components/ui/cn";
 
 export interface DashboardTabsProps {
@@ -26,8 +24,8 @@ export interface DashboardTabsProps {
   heldItems: ItemSummary[];
   heldCards: CardSummary[];
   redemptions: RedemptionSummary[];
-  showCollection: boolean;
-  showNumericFloat?: boolean;
+  /** cardId -> show_in_profile. Absent means visible (pre-046 rows). */
+  visibility: Record<string, boolean>;
 }
 
 type Tab = "held" | "submissions" | "redemptions";
@@ -59,8 +57,7 @@ export function DashboardTabs({
   heldItems,
   heldCards,
   redemptions,
-  showCollection,
-  showNumericFloat = false,
+  visibility,
 }: DashboardTabsProps) {
   const [tab, setTab] = useState<Tab>("held");
 
@@ -94,17 +91,6 @@ export function DashboardTabs({
 
       {tab === "held" && (
         <div role="tabpanel" className="flex flex-col gap-3">
-          <label className="flex cursor-pointer items-center gap-2 text-[13px] text-muted">
-            <input
-              type="checkbox"
-              defaultChecked={showCollection}
-              onChange={(e) => {
-                void toggleShowCollectionAction(e.target.checked);
-              }}
-              className="h-4 w-4 accent-[#35F07A]"
-            />
-            Show my collection on my public profile
-          </label>
           {heldItems.length + heldCards.length === 0 ? (
             <EmptyState
               title="Nothing in custody"
@@ -113,11 +99,15 @@ export function DashboardTabs({
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {heldCards.map((card) => (
-                <CardTile
+                <HeldCard
                   key={card.id}
-                  card={toCard(card)}
-                  sku={toSku(card.sku)}
-                  showNumericFloat={showNumericFloat}
+                  card={card}
+                  statusLabel={
+                    card.status === "active"
+                      ? "Held — not listed"
+                      : card.status.replace(/_/g, " ")
+                  }
+                  shownInProfile={visibility[card.id] ?? true}
                 />
               ))}
               {heldItems.map((item) => (

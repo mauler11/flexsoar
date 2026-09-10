@@ -175,6 +175,8 @@ export interface PublicProfile {
   portfolio_value_cents: number;
   /** 045: false hides holdings from everyone but the owner. */
   show_collection: boolean;
+  /** 046: false hides trade history from everyone but the owner. */
+  show_trade_history: boolean;
   created_at: Timestamptz;
 }
 
@@ -191,18 +193,39 @@ export async function getPublicProfileByHandle(
 ): Promise<PublicProfile | null> {
   const supabase = await createServerSupabase();
 
-  const profile = await supabase
+  // Resilient to a not-yet-run 045/046: if the view lacks the visibility
+  // flags, fall back to visible defaults rather than 500ing the profile.
+  let row: Omit<PublicProfile, "rankName"> | null = null;
+  const full = await supabase
     .from("public_profiles")
-    .select("id, handle, level, xp_total, portfolio_value_cents, show_collection, created_at")
+    .select("id, handle, level, xp_total, portfolio_value_cents, show_collection, show_trade_history, created_at")
     .eq("handle", handle)
     .maybeSingle();
 
-  if (profile.error && profile.error.code !== "PGRST116") {
-    throw new Error(profile.error.message.trim() || "public_profiles read failed");
+  if (full.error && full.error.code !== 'PGRST116') {
+    const legacy = await supabase
+      .from("public_profiles")
+      .select("id, handle, level, xp_total, portfolio_value_cents, created_at")
+      .eq("handle", handle)
+      .maybeSingle();
+    if (legacy.error && legacy.error.code !== 'PGRST116') {
+      throw new Error(legacy.error.message.trim() || "public_profiles read failed");
+    }
+    if (!legacy.data) return null;
+    row = {
+      ...(legacy.data as Omit<PublicProfile, "rankName" | "show_collection" | "show_trade_history">),
+      show_collection: true,
+      show_trade_history: true,
+    };
+  } else {
+    if (!full.data) return null;
+    const fullRow = full.data as Omit<PublicProfile, "rankName">;
+    row = {
+      ...fullRow,
+      show_collection: fullRow.show_collection ?? true,
+      show_trade_history: fullRow.show_trade_history ?? true,
+    };
   }
-  if (!profile.data) return null;
-
-  const row = profile.data as Omit<PublicProfile, "rankName">;
 
   const rank = await supabase
     .from("levels")
@@ -217,6 +240,27 @@ export async function getPublicProfileByHandle(
     ...row,
     rankName: (rank.data as { name: string } | null)?.name ?? `Level ${row.level}`,
   };
+}
+
+/**
+ * Card ids the user hides from their public profile (046). cards has a
+ * public read policy, so this is safe for anonymous visitors too — it only
+ * ever reveals ids, and the profile page uses it purely to filter.
+ */
+export async function getHiddenCardIds(userId: UUID): Promise<Set<UUID>> {
+  const supabase = await createServerSupabase();
+  try {
+    const result = await supabase
+      .from("cards")
+      .select("id")
+      .eq("owner_id", userId)
+      .eq("show_in_profile", false);
+    if (result.error) return new Set();
+    return new Set(((result.data ?? []) as Array<{ id: UUID }>).map((r) => r.id));
+  } catch {
+    // Pre-046 databases lack the column — treat everything as visible.
+    return new Set();
+  }
 }
 
 export interface TradeEvent {
