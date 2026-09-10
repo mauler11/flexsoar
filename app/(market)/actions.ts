@@ -37,6 +37,7 @@ import {
 } from '@/lib/api/contract';
 import type { ShippingAddress } from '@/lib/api/contract';
 import type { UUID } from '@/lib/db/types';
+import { createServerSupabase } from '@/lib/supabase/server';
 import { safeNextPath } from '@/app/(auth)/paths';
 import { currentUserId, currentUserLevel, REDEMPTION_HANDLING_FEE_CENTS } from '@/app/(market)/queries';
 import { isValidCountryCode } from '@/components/market/intake/intake-config';
@@ -466,4 +467,31 @@ export async function markNotificationReadAction(notificationId: string): Promis
   } catch (thrown) {
     redirectWithError('/market', errorText(thrown));
   }
+}
+
+// ------------------------------------------------------------
+// PROFILE VISIBILITY
+// ------------------------------------------------------------
+
+/**
+ * Flips the caller's show_collection flag (045). Session UPDATE — the row
+ * is scoped by users_self_update and the column by its grant, so this can
+ * only ever touch the caller's own visibility, never anyone else's.
+ */
+export async function toggleShowCollectionAction(show: boolean): Promise<void> {
+  const me = await currentUserId();
+  if (!me) {
+    redirect('/sign-in');
+  }
+
+  const supabase = await createServerSupabase();
+  const { error } = await supabase
+    .from('users')
+    .update({ show_collection: show })
+    .eq('id', me);
+
+  if (error) {
+    redirectWithError('/dashboard', error.message);
+  }
+  redirect('/dashboard');
 }

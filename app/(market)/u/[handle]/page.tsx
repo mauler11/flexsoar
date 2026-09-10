@@ -41,9 +41,13 @@ export default async function ProfilePage({
   const profile = await getPublicProfileByHandle(handle);
   if (!profile) notFound();
 
+  // 045: hidden collections show holdings to nobody but the owner.
+  const isOwner = viewerId != null && viewerId === profile.id;
+  const holdingsVisible = profile.show_collection || isOwner;
+
   const [live, trades, platformConfig] = await Promise.all([
-    getListings({ sellerId: profile.id }),
-    getTradeHistory(profile.id),
+    holdingsVisible ? getListings({ sellerId: profile.id }) : Promise.resolve([]),
+    holdingsVisible ? getTradeHistory(profile.id) : Promise.resolve([]),
     getPlatformConfig(),
   ]);
 
@@ -80,8 +84,16 @@ export default async function ProfilePage({
         </dl>
       </section>
 
+      {!holdingsVisible && (
+        <EmptyState
+          title="Private collection"
+          description="This seller keeps their holdings hidden."
+        />
+      )}
+
+      {holdingsVisible && (
       <section>
-        <h2 className="mb-2 font-mono text-[10px] font-bold uppercase tracking-tight text-muted">
+        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
           Live listings ({live.length})
         </h2>
         {live.length === 0 ? (
@@ -101,9 +113,11 @@ export default async function ProfilePage({
           </div>
         )}
       </section>
+      )}
 
+      {holdingsVisible && (
       <section>
-        <h2 className="mb-2 font-mono text-[10px] font-bold uppercase tracking-tight text-muted">
+        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
           Trade history ({trades.length})
         </h2>
         {trades.length === 0 ? (
@@ -153,6 +167,7 @@ export default async function ProfilePage({
           </div>
         )}
       </section>
+      )}
     </div>
   );
 }

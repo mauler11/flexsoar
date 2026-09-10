@@ -173,6 +173,8 @@ export interface PublicProfile {
   rankName: string;
   xp_total: number;
   portfolio_value_cents: number;
+  /** 045: false hides holdings from everyone but the owner. */
+  show_collection: boolean;
   created_at: Timestamptz;
 }
 
@@ -191,7 +193,7 @@ export async function getPublicProfileByHandle(
 
   const profile = await supabase
     .from("public_profiles")
-    .select("id, handle, level, xp_total, portfolio_value_cents, created_at")
+    .select("id, handle, level, xp_total, portfolio_value_cents, show_collection, created_at")
     .eq("handle", handle)
     .maybeSingle();
 

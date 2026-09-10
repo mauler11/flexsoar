@@ -28,16 +28,15 @@
  */
 
 import type { Metadata } from "next";
-import { getCards, getConsignment, getConsignments, getRedemptions } from "@/lib/api/contract";
+import { getCards, getConsignment, getConsignments, getRedemptions, getPlatformConfig } from "@/lib/api/contract";
 import type { CardSummary } from "@/lib/api/contract";
-import type { RedemptionSummary } from "@/lib/api/contract";
 import type { ItemSummary } from "@/lib/api/contract";
 import { currentUserId, getMySubmittedItems } from "@/app/(market)/queries";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/Button";
 import { PayoutSetup } from "@/components/market/PayoutSetup";
+import { DashboardTabs } from "@/components/market/DashboardTabs";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { formatMyr } from "@/components/card/format";
 
 /**
  * Stored Connect status for the dashboard. Reads the webhook-landed columns
@@ -51,12 +50,13 @@ async function getConnectStatus(userId: string): Promise<{
   payoutsEnabled: boolean;
   isConsignor: boolean;
   countryCode: string | null;
+  showCollection: boolean;
 }> {
   const supabase = await createServerSupabase();
   const { data } = await supabase
     .from("users")
     .select(
-      "stripe_connect_account_id, stripe_connect_payouts_enabled, is_consignor, country_code",
+      "stripe_connect_account_id, stripe_connect_payouts_enabled, is_consignor, country_code, show_collection",
     )
     .eq("id", userId)
     .maybeSingle();
@@ -65,12 +65,14 @@ async function getConnectStatus(userId: string): Promise<{
     stripe_connect_payouts_enabled?: boolean | null;
     is_consignor?: boolean | null;
     country_code?: string | null;
+    show_collection?: boolean | null;
   };
   return {
     accountId: row.stripe_connect_account_id ?? null,
     payoutsEnabled: row.stripe_connect_payouts_enabled ?? false,
     isConsignor: row.is_consignor ?? false,
     countryCode: row.country_code ?? null,
+    showCollection: row.show_collection ?? true,
   };
 }
 
@@ -78,45 +80,20 @@ export const metadata: Metadata = {
   title: "Dashboard — FlexSoar Market",
 };
 
-/** Display-only ship SLA, pending handoff M5. Hours from requested_at. */
-const REDEMPTION_SHIP_DEADLINE_HOURS = 72;
-
 const HELD_STATUSES: readonly ItemSummary["status"][] = [
   "pending_intake",
   "in_custody",
   "redemption_hold",
 ];
 
-const OWED_STATUSES: readonly RedemptionSummary["status"][] = ["requested", "picking"];
-
 const HELD_CARD_STATUSES: CardSummary["status"][] = ["active", "locked"];
-
-function fmtDate(iso: string | null): string {
-  if (!iso) return "—";
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(iso));
-}
-
-function deadlineOf(requestedAt: string): Date {
-  return new Date(
-    new Date(requestedAt).getTime() + REDEMPTION_SHIP_DEADLINE_HOURS * 3600 * 1000,
-  );
-}
-
-function isOverdue(deadline: Date): boolean {
-  return deadline.getTime() < Date.now();
-}
 
 export default async function DashboardPage() {
   const me = await currentUserId();
 
   const connectStatus = me
     ? await getConnectStatus(me)
-    : { accountId: null, payoutsEnabled: false, isConsignor: false, countryCode: null };
+    : { accountId: null, payoutsEnabled: false, isConsignor: false, countryCode: null, showCollection: true };
 
   if (!me) {
     return (
@@ -148,7 +125,9 @@ export default async function DashboardPage() {
   const heldCards = await getCards({ ownerId: me, status: HELD_CARD_STATUSES, limit: 200 });
 
   const redemptions = await getRedemptions({ userId: me });
-  const owed = redemptions.filter((r) => OWED_STATUSES.includes(r.status as RedemptionSummary["status"]));
+  const platformConfig = await getPlatformConfig().catch(() => ({
+    show_numeric_float: false,
+  }));
 
   return (
     <div className="flex flex-col gap-4">
@@ -157,12 +136,12 @@ export default async function DashboardPage() {
           <h1 className="text-2xl font-extrabold tracking-tight">
             Seller dashboard
           </h1>
-          <p className="font-mono text-[10px] uppercase tracking-tight text-muted">
+          <p className="text-sm text-muted">
             Submissions · held stock · redemptions
           </p>
         </div>
-        <Button variant="primary" size="md" href="/list">
-          list a shoe
+        <Button variant="primary" size="md" href="/list" className="rounded-md">
+          List a Shoe
         </Button>
       </div>
 
@@ -179,131 +158,16 @@ export default async function DashboardPage() {
         />
       </section>
 
-      {/* Submissions */}
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-bold tracking-tight text-foreground">
-          Submissions ({submittedItems.length})
-        </h2>
-        {submittedItems.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-line-strong px-3 py-4 text-[13px] text-muted">
-            No submissions yet — list your first shoe from /list.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            {submittedItems.map((item) => (
-              <div
-                key={item.id}
-                className="flex items-center justify-between gap-3 rounded-xl border border-line bg-raised px-3 py-2 text-[13px]"
-              >
-                <span className="min-w-0 truncate font-bold text-foreground">
-                  {item.sku.brand} {item.sku.model} · {item.sku.colorway} · US{" "}
-                  {item.sku.size_us}
-                </span>
-                <span className="shrink-0 text-muted">{item.status}</span>
-                <span className="shrink-0 text-muted">
-                  submitted {fmtDate(item.createdAt)}
-                </span>
-                <span className="shrink-0 text-muted">
-                  {item.askingPriceCents != null ? formatMyr(item.askingPriceCents) : "—"}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+      <DashboardTabs
+        submittedItems={submittedItems}
+        heldItems={preMintHeldItems}
+        heldCards={heldCards}
+        redemptions={redemptions}
+        showCollection={connectStatus.showCollection}
+        showNumericFloat={platformConfig.show_numeric_float}
+      />
 
-      {/* Held items */}
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-bold tracking-tight text-foreground">
-          Held items ({preMintHeldItems.length + heldCards.length})
-        </h2>
-        {(preMintHeldItems.length + heldCards.length) === 0 ? (
-          <p className="rounded-xl border border-dashed border-line-strong px-3 py-4 text-[13px] text-muted">
-            Nothing in custody right now.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            {preMintHeldItems.map((item) => (
-              <div
-                key={item.id}
-                className="flex items-center justify-between gap-3 rounded-xl border border-line bg-raised px-3 py-2 text-[13px]"
-              >
-                <span className="min-w-0 truncate font-bold text-foreground">
-                  {item.sku.brand} {item.sku.model} · {item.sku.colorway} · US{" "}
-                  {item.sku.size_us}
-                </span>
-                <span className="shrink-0 text-muted">{item.status}</span>
-                <span className="shrink-0 text-muted">
-                  {item.float_value != null ? item.float_value.toFixed(3) : "not graded"}
-                </span>
-              </div>
-            ))}
-            {heldCards.map((card) => (
-              <div
-                key={card.id}
-                className="flex items-center justify-between gap-3 rounded-xl border border-line bg-raised px-3 py-2 text-[13px]"
-              >
-                <span className="min-w-0 truncate font-bold text-foreground">
-                  {card.sku.brand} {card.sku.model} · {card.sku.colorway} · US{" "}
-                  {card.sku.size_us}
-                </span>
-                <span className="shrink-0 text-muted">{card.status}</span>
-                <span className="shrink-0 text-muted">
-                  {card.float_value != null ? card.float_value.toFixed(3) : "not graded"}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* Owed redemptions */}
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-bold tracking-tight text-foreground">
-          Owed redemptions ({owed.length})
-        </h2>
-        <p className="font-mono text-[9px] tracking-tight text-muted">
-          Shipment window: {REDEMPTION_SHIP_DEADLINE_HOURS}h from request, until
-          the fulfilment SLA ships (handoff M5).
-        </p>
-        {owed.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-line-strong px-3 py-4 text-[13px] text-muted">
-            Nothing owed — every redemption you hold is shipped or still
-            requested above.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            {owed.map((r) => {
-              const deadline = deadlineOf(r.requested_at);
-              const overdue = isOverdue(deadline);
-              return (
-                <div
-                  key={r.id}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-line bg-raised px-3 py-2 text-[13px]"
-                >
-                  <span className="min-w-0 truncate font-bold text-foreground">
-                    {r.card.sku.brand} {r.card.sku.model} · US{" "}
-                    {r.card.sku.size_us}
-                  </span>
-                  <span className="shrink-0 text-muted">{r.status}</span>
-                  <span
-                    className={
-                      "shrink-0 " +
-                      (overdue ? "text-[#FF4444]" : "text-muted")
-                    }
-                  >
-                    {overdue
-                      ? `overdue ${fmtDate(deadline.toISOString())}`
-                      : `ship by ${fmtDate(deadline.toISOString())}`}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      <p className="border-t border-line-strong pt-2 font-mono text-[9px] tracking-tight text-muted">
+      <p className="border-t border-line-strong pt-2 text-xs text-muted">
         Anything stale? The fulfilment SLA (M5) is flagged in
         docs/handoff/market.md — the dashboard renders the reads the contract
         has today.
