@@ -13,11 +13,11 @@ export const metadata: Metadata = {
 };
 
 const LINKS = [
-  { label: "Join our Discord", href: "#" },
-  { label: "Join our Telegram", href: "#" },
-  { label: "Follow on X", href: "#" },
-  { label: "Follow on Instagram", href: "#" },
-  { label: "Follow on TikTok", href: "#" },
+  { label: "Join our Discord", href: "https://discord.gg/EQaHFzaRX" },
+  { label: "Join our Telegram", href: "https://t.me/flexsoar" },
+  { label: "Follow on X", href: "https://x.com/flexsoarnet" },
+  { label: "Follow on Instagram", href: "https://www.instagram.com/flexsoarnet/" },
+  { label: "Follow on TikTok", href: "https://www.tiktok.com/@flexsoar.net" },
 ];
 
 export default function SocialsPage() {
@@ -43,18 +43,20 @@ export default function SocialsPage() {
 
       <div className="flex flex-col gap-2">
         {LINKS.map((link) => (
-          <Link
+          <a
             key={link.label}
             href={link.href}
+            target="_blank"
+            rel="noopener noreferrer"
             className="inline-flex items-center justify-center rounded-xl border border-line-strong bg-raised px-4 py-3 text-sm font-bold transition hover:border-accent hover:text-accent"
           >
             {link.label}
-          </Link>
+          </a>
         ))}
       </div>
 
       <p className="text-center text-xs text-muted">
-        Links go live soon — the club opens its doors at launch.
+        Five doors, one club. Pick yours.
       </p>
     </div>
   );
