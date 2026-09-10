@@ -23,12 +23,10 @@
 
 import { useState, useTransition } from "react";
 import {
-  ensureSkuVariantAction,
   getSkuFloatCurveAction,
   updateSkuVariantAction,
 } from "@/app/admin/skus/actions";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Table, TBody, THead, Td, Th, Tr } from "@/components/ui/Table";
 import { formatMyr } from "@/components/card/format";
@@ -101,10 +99,6 @@ export function VariantsTable({
   const [confirmingRow, setConfirmingRow] = useState<Sku | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const [newSize, setNewSize] = useState("");
-  const [addError, setAddError] = useState<string | null>(null);
-  const [addPending, startAddTransition] = useTransition();
-
   const [curveFor, setCurveFor] = useState<Sku | null>(null);
   const [curveBands, setCurveBands] = useState<FloatCurveBand[] | null>(null);
   const [curveError, setCurveError] = useState<string | null>(null);
@@ -146,32 +140,6 @@ export function VariantsTable({
         [v.id]: outcome.ok ? null : `${outcome.message}${outcome.code ? ` (${outcome.code})` : ""}`,
       }));
       setConfirmingRow(null);
-    });
-  }
-
-  function addSize() {
-    setAddError(null);
-    const text = newSize.trim();
-    if (!/^\d{1,2}(\.\d)?$/.test(text)) {
-      setAddError("US size, whole or half — e.g. 9 or 9.5");
-      return;
-    }
-    const size = Number(text);
-    if (size < 3 || size > 20) {
-      setAddError("size must be between 3 and 20");
-      return;
-    }
-    if (size * 2 !== Math.floor(size * 2)) {
-      setAddError("size must be a whole or half size");
-      return;
-    }
-    startAddTransition(async () => {
-      const outcome = await ensureSkuVariantAction(modelId, size);
-      if (!outcome.ok) {
-        setAddError(`${outcome.message}${outcome.code ? ` (${outcome.code})` : ""}`);
-        return;
-      }
-      setNewSize("");
     });
   }
 
@@ -292,26 +260,6 @@ export function VariantsTable({
           </TBody>
         </Table>
       )}
-
-      <div className="flex flex-wrap items-end gap-2 border border-line bg-raised p-2">
-        <Input
-          label="Add size (US)"
-          value={newSize}
-          onChange={(e) => {
-            setNewSize(e.target.value);
-            setAddError(null);
-          }}
-          inputMode="decimal"
-          placeholder="9.5"
-          disabled={addPending}
-        />
-        <Button size="sm" onClick={addSize} disabled={addPending || newSize.trim() === ""}>
-          {addPending ? "Adding…" : "Add size"}
-        </Button>
-        {addError && (
-          <span className="font-mono text-[10px] tracking-tight text-[#FF4444]">{addError}</span>
-        )}
-      </div>
 
       <Modal
         open={confirmingRow !== null}

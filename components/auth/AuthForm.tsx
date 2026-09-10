@@ -294,7 +294,7 @@ export function AuthForm({ mode, next = "/" }: AuthFormProps) {
               onClick={handleForgotPassword}
               className="font-mono text-[10px] uppercase tracking-tight text-muted hover:text-foreground transition-colors underline-offset-2 hover:underline"
             >
-              Forgot password?
+              Forgot Password?
             </button>
           </div>
         )}

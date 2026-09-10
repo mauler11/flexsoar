@@ -35,7 +35,7 @@ export function CardFrame({
   const color = borderColorFor(tier, isExceptional);
   return (
     <div
-      className={cn("relative", className)}
+      className={cn("relative rounded-2xl", className)}
       style={{
         borderColor: color,
         borderWidth: isExceptional ? 2 : 1,

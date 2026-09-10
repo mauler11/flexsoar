@@ -116,10 +116,10 @@ export const users: User[] = [
     kyc_status: 'verified',
     is_consignor: false,
     is_admin: true,
-    // 4,454 + 240 * 50 = 16,454 -> level 2 (needs 10,000)
+    // 4,500 + 240 * 50 = 16,500 -> level 2 (needs 10,000)
     level: 2,
     xp_total: 240,
-    portfolio_value_cents: 4454,
+    portfolio_value_cents: 4500,
     created_at: '2026-03-04T02:15:00.000Z',
   },
   {
@@ -146,10 +146,10 @@ export const users: User[] = [
     kyc_status: 'verified',
     is_consignor: true,
     is_admin: false,
-    // 942,365 + 140,000 * 50 = 7,942,365 -> level 7 (needs 7,500,000)
+    // 949,177 + 140,000 * 50 = 7,949,177 -> level 7 (needs 7,500,000)
     level: 7,
     xp_total: 140000,
-    portfolio_value_cents: 942365,
+    portfolio_value_cents: 949177,
     created_at: '2025-11-02T13:05:00.000Z',
   },
 ];
@@ -563,7 +563,7 @@ export const listings: Listing[] = [
     status: 'early_access',
     early_access_level: EARLY_ACCESS_LEVEL,
     public_at: EARLY_ACCESS_PUBLIC_AT,
-    oracle_value_cents: 124805,
+    oracle_value_cents: 128000, // FN pin since 048: full market price
     created_at: '2026-08-09T15:30:00.000Z',
     sold_at: null,
   },
@@ -577,7 +577,7 @@ export const listings: Listing[] = [
     status: 'sold',
     early_access_level: EARLY_ACCESS_LEVEL,
     public_at: '2026-06-18T08:15:00.000Z',
-    oracle_value_cents: 4454,
+    oracle_value_cents: 4500, // FN pin since 048
     created_at: '2026-06-18T08:00:00.000Z',
     sold_at: CARD_1_SALE_1_AT,
   },
@@ -591,8 +591,8 @@ export const listings: Listing[] = [
     price_cents: 4900,
     status: 'sold',
     early_access_level: EARLY_ACCESS_LEVEL,
-    public_at: '2026-07-03T02:25:00.000Z',
-    oracle_value_cents: 4454,
+    public_at: '2026-07-03T02:00:00.000Z',
+    oracle_value_cents: 4500, // FN pin since 048
     created_at: '2026-07-03T02:00:00.000Z',
     sold_at: CARD_1_SALE_2_AT,
   },
@@ -613,7 +613,8 @@ export const listings: Listing[] = [
 
 // ------------------------------------------------------------
 // ORDERS — one per sold listing
-// fee_bps is the SELLER's level fee: Capo 500, Underboss 350.
+// fee_bps is flat 800 for every seller: levels are display-only since 048,
+// so the old level ladder (Capo 500, Underboss 350) no longer prices fees.
 // ------------------------------------------------------------
 
 export const orders: Order[] = [
@@ -624,10 +625,10 @@ export const orders: Order[] = [
     buyer_id: USER_IDS.ravi,
     seller_id: USER_IDS.wenxin,
     gross_cents: 4300,
-    // wenxin is level 5 Capo.
-    fee_bps: 500,
-    fee_cents: 215, // floor(4300 * 500 / 10000)
-    net_cents: 4085,
+    // Flat 800bps since 048 (levels display-only).
+    fee_bps: 800,
+    fee_cents: 344, // floor(4300 * 800 / 10000)
+    net_cents: 3956,
     settlement_ref: 'pi_3PfLq2AaBbCcDdEe0001',
     status: 'settled',
     txn_id: txnId(1),
@@ -640,10 +641,10 @@ export const orders: Order[] = [
     buyer_id: USER_IDS.aiman,
     seller_id: USER_IDS.ravi,
     gross_cents: 4900,
-    // ravi is level 7 Underboss.
-    fee_bps: 350,
-    fee_cents: 171, // floor(4900 * 350 / 10000)
-    net_cents: 4729,
+    // Flat 800bps since 048 (levels display-only).
+    fee_bps: 800,
+    fee_cents: 392, // floor(4900 * 800 / 10000)
+    net_cents: 4508,
     settlement_ref: 'pi_3PfLq2AaBbCcDdEe0002',
     status: 'settled',
     txn_id: txnId(2),

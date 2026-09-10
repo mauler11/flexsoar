@@ -68,7 +68,7 @@ export function SkuPicker({
               onSelect(null as unknown as Sku);
             }}
           >
-            change
+            Change
           </Button>
         </div>
       )}
@@ -118,7 +118,7 @@ export function SkuPicker({
       <div className="flex items-center justify-between border-t border-line-strong pt-3 text-[10px] tracking-tight text-muted">
         <span>Only priced, live catalog SKUs appear here.</span>
         <Button variant="ghost" size="sm" onClick={onRequestMissing}>
-          don&apos;t see your shoe? request it
+          Don&apos;t see your shoe? Request it
         </Button>
       </div>
     </div>

@@ -242,10 +242,10 @@ export function SkuModelFinder({
 
       <div className="flex items-center justify-between">
         <Button variant="ghost" size="sm" onClick={onBack} disabled={isPending}>
-          back
+          Back
         </Button>
         <Button type="submit" size="md" disabled={isPending || searching}>
-          {isPending || searching ? "finding…" : "confirm & continue"}
+          {isPending || searching ? "Finding…" : "Confirm & Continue"}
         </Button>
       </div>
     </form>

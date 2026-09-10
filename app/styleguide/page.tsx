@@ -167,7 +167,7 @@ export default function StyleguidePage() {
         {/* ------------------------------------------------------------ */}
         <Section
           title="Tokens"
-          subtitle="The palette. Cards add tier colours (#7A7A7A / #35F07A / #3B9EFF / #A855F7 / #E8B33A) and the exceptional red (#FF4444), always paired with an ornament."
+          subtitle="The palette. Cards add tier colours (#7A7A7A / #35F07A / #3B9EFF / #A855F7 / #FFD60A) and the exceptional red (#FF4444), always paired with an ornament."
         >
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
             {SWATCHES.map((swatch) => (

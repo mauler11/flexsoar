@@ -34,6 +34,9 @@ export function NotificationBell({
 }: NotificationBellProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  // Expanded by default so the full message reads; the triangle collapses
+  // long bodies back to one line. Absent id = expanded.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const dropdownRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -185,12 +188,14 @@ export function NotificationBell({
                 onClick={() => notifications.filter(n => !n.read).forEach(n => handleMarkRead(n.id))}
                 className="text-[10px] text-accent hover:text-accent/80"
               >
-                Mark all read
+                Mark All Read
               </Button>
             )}
           </div>
           <div className="max-h-96 overflow-y-auto">
-            {notifications.map((notification) => (
+            {notifications.map((notification) => {
+              const isCollapsed = collapsed[notification.id] ?? false;
+              return (
               <div
                 key={notification.id}
                 className={cn(
@@ -205,18 +210,31 @@ export function NotificationBell({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
                       <p className={cn(
-                        "text-sm tracking-tight truncate",
-                        !notification.read ? "font-bold text-foreground" : "text-muted/90"
+                        "text-sm tracking-tight",
+                        !notification.read ? "font-bold text-foreground" : "text-muted/90",
+                        !isCollapsed && "break-words"
                       )}>
                         {notification.title}
                       </p>
-                      <span className="shrink-0 text-[9px] uppercase tracking-tight text-muted">
+                      <span className="flex shrink-0 items-center gap-1 text-[9px] uppercase tracking-wide text-muted">
                         {mounted ? formatTime(notification.createdAt) : ""}
+                        <button
+                          type="button"
+                          aria-label={isCollapsed ? "Expand notification" : "Collapse notification"}
+                          aria-expanded={!isCollapsed}
+                          onClick={() =>
+                            setCollapsed((c) => ({ ...c, [notification.id]: !isCollapsed }))
+                          }
+                          className="rounded px-0.5 text-[11px] hover:text-foreground"
+                        >
+                          {isCollapsed ? "▼" : "▲"}
+                        </button>
                       </span>
                     </div>
                     <p className={cn(
-                        "mt-1 text-[11px] tracking-tight truncate",
-                        !notification.read ? "text-muted/90" : "text-muted/70"
+                        "mt-1 text-[11px] tracking-tight",
+                        !notification.read ? "text-muted/90" : "text-muted/70",
+                        isCollapsed ? "truncate" : "whitespace-normal break-words"
                       )}>
                       {notification.body}
                     </p>
@@ -235,13 +253,14 @@ export function NotificationBell({
                         onClick={() => handleMarkRead(notification.id)}
                         className="mt-2 text-[10px] text-muted hover:text-accent"
                       >
-                        Mark as read
+                        Mark As Read
                       </Button>
                     )}
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

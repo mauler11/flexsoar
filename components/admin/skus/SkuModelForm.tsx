@@ -179,11 +179,14 @@ export function SkuModelForm({ model }: { model: SkuModel | null }) {
     if (!parsed.ok) return;
     startTransition(async () => {
       if (model) {
+        // Sprite art moved to the uploader (pixel art replaced the sprite
+        // maps); palette/sprite fields below are not rendered any more, so
+        // the model's existing values pass straight through untouched.
         const outcome = await updateSkuModelAction(model.id, {
           base_price_cents: parsed.common.basePriceCents,
           price_confidence: parsed.common.priceConfidence,
-          sprite_key: parsed.common.spriteKey,
-          palette: parsed.common.palette,
+          sprite_key: model.sprite_key,
+          palette: (model.palette ?? null) as Record<string, string> | null,
         });
         setResult(outcome);
         setConfirming(false);
@@ -238,51 +241,14 @@ export function SkuModelForm({ model }: { model: SkuModel | null }) {
           {...field("base_price_cents")}
         />
         {model !== null && (
-          <>
-            <Input
-              label="Price confidence"
-              inputMode="decimal"
-              hint="0.00–1.00, optional."
-              {...field("price_confidence")}
-            />
-            <Input
-              label="Sprite key"
-              hint="'low-top' or 'high-top' — the shipped base maps. Shared by every size."
-              {...field("sprite_key")}
-            />
-          </>
+          <Input
+            label="Price confidence"
+            inputMode="decimal"
+            hint="0.00–1.00, optional. The oracle's own certainty score — informational, used in no calculation."
+            {...field("price_confidence")}
+          />
         )}
       </div>
-
-      {model !== null && (
-        <div className="flex flex-col gap-1">
-          <label
-            htmlFor="model-palette"
-            className="font-mono text-[10px] uppercase tracking-tight text-muted"
-          >
-            Palette JSON
-          </label>
-          <textarea
-            id="model-palette"
-            value={draft.palette}
-            onChange={(event) => set("palette", event.target.value)}
-            rows={6}
-            disabled={pending}
-            placeholder={`{ "D": "#1A1A1A", "C": "#9A9A9A", … } — the 9 glyphs are D C c B b W I i G`}
-            className="border border-line-strong bg-overlay px-2 py-1.5 font-mono text-[12px] tracking-tight text-foreground placeholder:text-muted/50 pixel-shadow-sm hover:border-muted disabled:cursor-not-allowed disabled:opacity-40"
-          />
-          {"palette" in errors && (
-            <p className="font-mono text-[10px] tracking-tight text-[#FF4444]">
-              {(errors as Partial<Record<keyof Draft, string>>).palette}
-            </p>
-          )}
-          {parsed.ok && parsed.common.paletteWarning && (
-            <p className="font-mono text-[10px] leading-snug tracking-tight text-[#E8B33A]">
-              Palette warning — saving anyway is allowed: {parsed.common.paletteWarning}
-            </p>
-          )}
-        </div>
-      )}
 
       <div className="flex items-center gap-2">
         <Button size="sm" onClick={() => setConfirming(true)} disabled={pending || !parsed.ok}>

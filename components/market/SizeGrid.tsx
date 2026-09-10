@@ -43,7 +43,7 @@ export function SizeGrid({ modelId, existingSizes }: SizeGridProps) {
             >
               <span className="text-sm font-extrabold">US M {size}</span>
               <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-                {active ? "Selected" : "Make list"}
+                {active ? "Selected" : "Make List"}
               </span>
             </button>
           );

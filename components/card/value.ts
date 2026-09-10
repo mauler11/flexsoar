@@ -5,17 +5,20 @@
  *
  * oracleValueCents mirrors fn_card_value_cents() in 002_operations.sql exactly:
  *   floor(skus.market_price_cents * fn_float_multiplier(sku, float))
- * with fn_float_multiplier falling through to the linear fallback
- * `1.0 - float * 0.48` while no sku_float_curve rows exist.
+ * with fn_float_multiplier falling through to the linear fallback while no
+ * sku_float_curve rows exist — including 048's deadstock pin (FN band holds
+ * full oracle).
  *
  * The styleguide and card components use this so a card's "value" reads the
  * same as the ledger would once track/data lands. It is pure props -> cents,
  * never a fetch.
  */
 import type { Card, Sku } from "@/lib/db/types";
+import { FN_MAX_FLOAT } from "@/lib/domain/rarity";
 
-/** Mirrors fn_float_multiplier's linear fallback. */
+/** Mirrors fn_float_multiplier's linear fallback, deadstock pin included. */
 export function floatMultiplier(float: number): number {
+  if (float < FN_MAX_FLOAT) return 1.0;
   return 1.0 - float * 0.48;
 }
 

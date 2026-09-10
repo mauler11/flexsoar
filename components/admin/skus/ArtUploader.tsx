@@ -10,14 +10,13 @@
  * `skuId` here is a VARIANT id, not a model id — `fn_replace_sku_art`
  * (027_sku_models.sql) takes a variant id even though it writes the whole
  * model's art_url and propagates to every sibling size. This component
- * always addresses it through one variant, whatever variant the caller has
- * on hand (the model page's first size; a submission review bench's own
- * item.sku). It never writes art_url through upsertSku any more — that path
- * would only set ONE variant's own art_url column, which 027 leaves
- * unsynced with the model on UPDATE, silently forking one size's art from
- * every other size's. replaceSkuArtAction (fn_replace_sku_art) is the only
- * write in this file for exactly that reason, for BOTH a first upload and a
- * replacement.
+ * addresses it through one variant when the caller has one on hand (the
+ * model page's first size; a submission review bench's own item.sku), and
+ * falls back to a direct sku_models.art_url write (setModelArtAction) when
+ * the model has no sizes yet — later variants inherit it on create. It never
+ * writes art_url through upsertSku any more — that path would only set ONE
+ * variant's own art_url column, which 027 leaves unsynced with the model on
+ * UPDATE, silently forking one size's art from every other size's.
  *
  * Art is stored PER MODEL, not per size and not per card: every size of the
  * same model, and every card minted from any of them, shares this one
@@ -29,7 +28,12 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { getSkuArtUploadUrlAction, replaceSkuArtAction } from "@/app/admin/skus/actions";
+import {
+  getModelArtUploadUrlAction,
+  getSkuArtUploadUrlAction,
+  replaceSkuArtAction,
+  setModelArtAction,
+} from "@/app/admin/skus/actions";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import type { UUID } from "@/lib/db/types";
@@ -37,8 +41,13 @@ import type { UUID } from "@/lib/db/types";
 const MAX_ART_BYTES = 5 * 1024 * 1024;
 
 export interface ArtUploaderProps {
-  /** Any one variant of the model this art belongs to. */
-  skuId: UUID;
+  /**
+   * Any one variant of the model this art belongs to — or null when the
+   * model has no sizes yet, in which case modelId carries the write
+   * directly (setModelArtAction needs no variant to address through).
+   */
+  skuId: UUID | null;
+  modelId?: UUID;
   /** The MODEL's current art_url, shown as a preview until a replacement lands. */
   currentArtUrl: string | null;
   /**
@@ -54,6 +63,7 @@ export interface ArtUploaderProps {
 
 export function ArtUploader({
   skuId,
+  modelId,
   currentArtUrl,
   mode = "edit",
   onUploaded,
@@ -74,11 +84,22 @@ export function ArtUploader({
       setUploading(true);
       setError(null);
       try {
-        const outcome = await getSkuArtUploadUrlAction({
-          skuId,
-          filename: file.name,
-          contentType: file.type || "image/png",
-        });
+        const scopeId = skuId ?? modelId ?? null;
+        if (!scopeId) {
+          setError("no variant or model to address this art through");
+          return;
+        }
+        const outcome = skuId
+          ? await getSkuArtUploadUrlAction({
+              skuId,
+              filename: file.name,
+              contentType: file.type || "image/png",
+            })
+          : await getModelArtUploadUrlAction({
+              modelId: scopeId,
+              filename: file.name,
+              contentType: file.type || "image/png",
+            });
         if (!outcome.ok) {
           setError(outcome.message);
           return;
@@ -96,10 +117,14 @@ export function ArtUploader({
           return;
         }
 
-        // First art or a replacement — both go through fn_replace_sku_art.
-        // There is no other sanctioned write path for a model's art (see the
-        // file header).
-        const saved = await replaceSkuArtAction(skuId, outcome.publicUrl);
+        // Variant-addressed models go through fn_replace_sku_art; a sizeless
+        // model writes sku_models.art_url directly (nothing to propagate to
+        // yet — later variants inherit on create). See the file header.
+        const saved = skuId
+          ? await replaceSkuArtAction(skuId, outcome.publicUrl)
+          : modelId
+            ? await setModelArtAction(modelId, outcome.publicUrl)
+            : { ok: false as const, message: "no variant or model to address" };
         if (!saved.ok) {
           setError(saved.message);
           return;

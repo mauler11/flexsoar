@@ -294,9 +294,11 @@ vi.mock('@/lib/api/contract', async (importOriginal) => {
 
 /**
  * fn_float_multiplier: no sku_float_curve rows exist yet, so every SKU falls
- * through to the linear fallback.
+ * through to the linear fallback — including 048's deadstock pin (FN band
+ * holds full oracle).
  */
-const floatMultiplier = (float: number): number => 1.0 - float * 0.48;
+const floatMultiplier = (float: number): number =>
+  float < 0.07 ? 1.0 : 1.0 - float * 0.48;
 
 /** fn_card_value_cents(card). */
 const cardValueCents = (card: Card, sku: Sku): number =>
@@ -312,16 +314,19 @@ const percentRank = (population: number[], value: number): number => {
   return Math.round((below / (population.length - 1)) * 100 * 100) / 100;
 };
 
-/** The `levels` rows inserted by 001_schema.sql. */
+/**
+ * The `levels` rows as 048 leaves them: flat 800bps on every level while
+ * levels stay display-only. rankScoreRequired still gates the cosmetic rank.
+ */
 const LEVELS: { level: number; rankScoreRequired: number; sellerFeeBps: number }[] = [
   { level: 1, rankScoreRequired: 0, sellerFeeBps: 800 },
-  { level: 2, rankScoreRequired: 10000, sellerFeeBps: 750 },
-  { level: 3, rankScoreRequired: 50000, sellerFeeBps: 700 },
-  { level: 4, rankScoreRequired: 200000, sellerFeeBps: 600 },
-  { level: 5, rankScoreRequired: 750000, sellerFeeBps: 500 },
-  { level: 6, rankScoreRequired: 2500000, sellerFeeBps: 425 },
-  { level: 7, rankScoreRequired: 7500000, sellerFeeBps: 350 },
-  { level: 8, rankScoreRequired: 20000000, sellerFeeBps: 300 },
+  { level: 2, rankScoreRequired: 10000, sellerFeeBps: 800 },
+  { level: 3, rankScoreRequired: 50000, sellerFeeBps: 800 },
+  { level: 4, rankScoreRequired: 200000, sellerFeeBps: 800 },
+  { level: 5, rankScoreRequired: 750000, sellerFeeBps: 800 },
+  { level: 6, rankScoreRequired: 2500000, sellerFeeBps: 800 },
+  { level: 7, rankScoreRequired: 7500000, sellerFeeBps: 800 },
+  { level: 8, rankScoreRequired: 20000000, sellerFeeBps: 800 },
 ];
 
 const sellerFeeBps = (level: number): number =>

@@ -35,6 +35,7 @@
  * "setCountry() wiring: CLOSED").
  */
 
+import { useEffect, useRef, useState } from "react";
 import type { Sku } from "@/lib/db/types";
 import { floatMultiplier } from "@/components/card/value";
 import { formatMyr } from "@/components/card/format";
@@ -44,6 +45,64 @@ import {
   COUNTRIES,
   derivePayoutPreview,
 } from "@/components/market/intake/intake-config";
+
+/**
+ * Ringgit input that types like a textbox, not a number spinner. The old
+ * controlled `type="number"` re-derived its display from integer cents on
+ * every keystroke, so typing "1" snapped to "1.00" and fight the caret —
+ * digit-by-digit entry was impossible. This keeps raw text while typing,
+ * commits valid amounts live, and re-syncs to canonical form on blur (or
+ * when the parent value changes from elsewhere).
+ */
+function PriceRinggitInput({
+  priceCents,
+  onPriceChange,
+}: {
+  priceCents: number | null;
+  onPriceChange: (cents: number) => void;
+}) {
+  const [text, setText] = useState(
+    priceCents != null ? String(priceCents / 100) : "",
+  );
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // External changes (e.g. clearing the form) re-sync, but never while the
+  // user is mid-keystroke in this field.
+  useEffect(() => {
+    if (document.activeElement !== inputRef.current) {
+      setText(priceCents != null ? String(priceCents / 100) : "");
+    }
+  }, [priceCents]);
+
+  function commit(raw: string) {
+    // Up to 2 decimals, non-negative. Empty clears back to null via 0 —
+    // the wizard treats 0 as "no price yet" (canNext requires > 0).
+    if (raw.trim() === "") {
+      onPriceChange(0);
+      return;
+    }
+    if (!/^\d+(\.\d{0,2})?$/.test(raw.trim())) return;
+    const cents = Math.round(Number(raw) * 100);
+    if (Number.isFinite(cents) && cents >= 0) onPriceChange(cents);
+  }
+
+  return (
+    <Input
+      label="Your price (MYR)"
+      inputMode="decimal"
+      placeholder="e.g. 215.00"
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value);
+        commit(e.target.value);
+      }}
+      onBlur={() => {
+        setText(priceCents != null ? String(priceCents / 100) : "");
+      }}
+      hint="Reserve price — what you must clear to sell."
+    />
+  );
+}
 
 export interface PricePayoutProps {
   sku: Sku;
@@ -80,9 +139,6 @@ export function PricePayout({
     oracle != null && declaredFloat != null
       ? Math.floor(oracle * floatMultiplier(declaredFloat))
       : null;
-
-  const priceDollars =
-    priceCents != null ? String((priceCents / 100).toFixed(2)) : "";
 
   // The selection in this step always wins over the account's saved payout
   // method once one is made — that saved value is stale the moment the
@@ -161,23 +217,7 @@ export function PricePayout({
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Input
-          label="Your price (MYR)"
-          type="number"
-          min="0"
-          step="0.01"
-          placeholder="e.g. 215.00"
-          value={priceDollars}
-          onChange={(e) => {
-            const dollars = Number(e.target.value);
-            if (Number.isFinite(dollars) && dollars >= 0) {
-              onPriceChange(Math.round(dollars * 100));
-            } else {
-              onPriceChange(0);
-            }
-          }}
-          hint="Reserve price — what you must clear to sell."
-        />
+        <PriceRinggitInput priceCents={priceCents} onPriceChange={onPriceChange} />
         <div className="flex flex-col gap-1">
           <span className="text-[10px] uppercase tracking-tight text-muted">
             Payout method

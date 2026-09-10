@@ -56,7 +56,7 @@ export function ReviewButtons({ requestId }: { requestId: string }) {
           disabled={isPending}
           onClick={() => decide("approve")}
         >
-          {isPending ? "Working…" : "Approve + create model"}
+          {isPending ? "Working…" : "Approve + Create Model"}
         </Button>
         <Button
           variant="danger"

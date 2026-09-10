@@ -47,18 +47,19 @@ export interface TierBandSpec {
 
 /**
  * Exactly the rows in `tier_bands`. Bounds are MYR sen:
- *   (1,'Common',    '#7A7A7A',     0,  6000)   -- under $60
- *   (2,'Uncommon',  '#35F07A',  6000, 12000)   -- $60 to $120
- *   (3,'Rare',      '#3B9EFF', 12000, 25000)   -- $120 to $250
- *   (4,'Epic',      '#A855F7', 25000, 50000)   -- $250 to $500
- *   (5,'Legendary', '#E8B33A', 50000,  null)   -- $500 and up
+ *   (1,'Common',    '#7A7A7A',     0,  6000)   -- under RM60
+ *   (2,'Uncommon',  '#35F07A',  6000, 12000)   -- RM60 to RM120
+ *   (3,'Rare',      '#3B9EFF', 12000, 25000)   -- RM120 to RM250
+ *   (4,'Epic',      '#A855F7', 25000, 50000)   -- RM250 to RM500
+ *   (5,'Legendary', '#FFD60A', 50000,  null)   -- RM500 and up, vivid since
+ *     048 (old amber #E8B33A collided with warn banners and above-fair text)
  */
 export const TIER_BANDS: readonly TierBandSpec[] = [
   { tier: 1, name: 'Common', borderColor: '#7A7A7A', minCents: 0, maxCents: 6000 },
   { tier: 2, name: 'Uncommon', borderColor: '#35F07A', minCents: 6000, maxCents: 12000 },
   { tier: 3, name: 'Rare', borderColor: '#3B9EFF', minCents: 12000, maxCents: 25000 },
   { tier: 4, name: 'Epic', borderColor: '#A855F7', minCents: 25000, maxCents: 50000 },
-  { tier: 5, name: 'Legendary', borderColor: '#E8B33A', minCents: 50000, maxCents: null },
+  { tier: 5, name: 'Legendary', borderColor: '#FFD60A', minCents: 50000, maxCents: null },
 ] as const;
 
 /** Red border for `cards.is_exceptional`. A flag, not a sixth tier. */
@@ -133,6 +134,12 @@ export const FLOAT_BANDS: readonly FloatBandSpec[] = [
   { band: 'WW', label: 'Well Worn', min: 0.38, max: 0.45 },
   { band: 'BS', label: 'Battle-Scarred', min: 0.45, max: 1.0 },
 ] as const;
+
+/**
+ * Exclusive top of the FN band. Doubles as the deadstock pin boundary:
+ * fn_float_multiplier (048) and its TS mirror hold full oracle below this.
+ */
+export const FN_MAX_FLOAT = 0.07;
 
 /**
  * Condition band for a human-graded float. Clamps out-of-range input to the

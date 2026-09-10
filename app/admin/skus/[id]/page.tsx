@@ -3,13 +3,9 @@
  *
  * Edit one MODEL (027): `id` is a sku_models id, not a skus (variant) id.
  * Base price and metadata write through updateSkuModel(); art writes through
- * replaceSkuArt() addressed via the model's first size (fn_replace_sku_art
- * takes a variant id even though it writes the model's art — see
- * ArtUploader.tsx); the size variants beneath it live in VariantsTable.
- *
- * Art is blocked until at least one size exists — fn_replace_sku_art has no
- * variant to address on a model with zero sizes, so there is no id to hand
- * it. Said in the UI, not just enforced by absence.
+ * replaceSkuArt() addressed via the model's first size, or straight onto
+ * the model (setModelArtAction) when it has no sizes yet — see
+ * ArtUploader.tsx. The size variants beneath it live in VariantsTable.
  */
 
 import type { Metadata } from "next";
@@ -82,18 +78,11 @@ export default async function EditSkuModelPage({
 
       <SkuModelForm model={model} />
 
-      {firstVariantId ? (
-        <ArtUploader skuId={firstVariantId} currentArtUrl={model.art_url} />
-      ) : (
-        <div className="flex flex-col gap-2 border border-dashed border-line-strong bg-raised p-3">
-          <h2 className="font-mono text-[13px] uppercase tracking-tight">Pixel art</h2>
-          <p className="font-mono text-[10px] leading-snug tracking-tight text-muted">
-            No size exists yet. fn_replace_sku_art writes this model&apos;s
-            art through one of its size variants — with none, there is
-            nothing to address it through. Add a size below first.
-          </p>
-        </div>
-      )}
+      <ArtUploader
+        skuId={firstVariantId}
+        modelId={model.id}
+        currentArtUrl={model.art_url}
+      />
 
       <VariantsTable
         modelId={model.id}

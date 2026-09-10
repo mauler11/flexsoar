@@ -249,7 +249,7 @@ export default async function MarketLayout({
               <nav className="flex flex-col sm:flex-row items-center justify-center gap-3">
                 <Link href="/terms" className="hover:text-foreground">Terms</Link>
                 <Link href="/privacy" className="hover:text-foreground">Privacy</Link>
-                <span>FlexSoar · Market — mint, list, settle</span>
+                <span>FlexSoar · Market — Buy. Sell. Redeem.</span>
               </nav>
             </footer>
           </div>

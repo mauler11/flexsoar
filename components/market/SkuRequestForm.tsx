@@ -98,7 +98,7 @@ export function SkuRequestForm() {
       )}
 
       <Button type="submit" size="lg" disabled={isPending}>
-        {isPending ? "Sending…" : "Send product request"}
+        {isPending ? "Sending…" : "Send Product Request"}
       </Button>
     </form>
   );

@@ -275,15 +275,15 @@ export function IntakeWizard({
       {/* Footer nav */}
       <div className="flex items-center justify-between border-t border-line-strong pt-3">
         <Button variant="ghost" size="md" onClick={back} disabled={step === 0}>
-          back
+          Back
         </Button>
         {step < STEPS.length - 1 ? (
           <Button variant="primary" size="md" onClick={next} disabled={!canNext}>
             {step === 1
-              ? `next · ${photos.filter((p) => p.url.startsWith("https://")).length}/${REQUIRED_PHOTO_COUNT} photos`
+              ? `Next · ${photos.filter((p) => p.url.startsWith("https://")).length}/${REQUIRED_PHOTO_COUNT} photos`
               : step === 2 && !canNext
-                ? "next · answer all six"
-                : "next"}
+                ? "Next · answer all six"
+                : "Next"}
           </Button>
         ) : (
           <Button
@@ -292,7 +292,7 @@ export function IntakeWizard({
             onClick={doSubmit}
             disabled={submit.state === "running" || isPending}
           >
-            {submit.state === "running" || isPending ? "submitting…" : "submit in review"}
+            {submit.state === "running" || isPending ? "Submitting…" : "Submit in Review"}
           </Button>
         )}
       </div>
@@ -418,15 +418,14 @@ function DoneState({
   isUnpricedModel: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-accent bg-accent/10 p-4">
+      <div className="flex flex-col gap-3 rounded-2xl border border-accent bg-accent/10 p-4">
       <h3 className="text-sm font-black uppercase tracking-tight text-foreground">
-        In review — live within the hour
+        In review
       </h3>
       <p className="text-[11px] tracking-tight text-muted">
-        Your {sku ? `${sku.brand} ${sku.model}` : "listing"} is queued
-        for intake grading{itemId ? ` (ref ${itemId})` : ""}. A
-        grader verifies condition against your photos, then the card goes live
-        in your dashboard. You&apos;ll be notified either way.
+        Your {sku ? `${sku.brand} ${sku.model}` : "shoe"} is queued for a
+        review{itemId ? ` (ref ${itemId})` : ""}. The condition is verified
+        against your photos.
       </p>
 {(isNewModel || isUnpricedModel) && (
         <div className="rounded-xl border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 text-[10px] tracking-tight text-[#E8B33A]">
@@ -437,10 +436,10 @@ function DoneState({
       )}
       <div className="flex gap-2">
         <Button variant="primary" size="md" href="/">
-          back to market
+          Back to Market
         </Button>
         <Button variant="secondary" size="md" href="/dashboard">
-          your dashboard
+          Your Dashboard
         </Button>
       </div>
     </div>

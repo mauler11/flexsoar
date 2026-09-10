@@ -19,6 +19,7 @@
 import { revalidatePath } from "next/cache";
 import { failure, type ActionResult } from "@/components/admin/action-result";
 import { requireAdminAction } from "@/components/admin/auth";
+import { createServerSupabase } from "@/lib/supabase/server";
 import { getAdminSku, getSkuFloatCurve } from "@/components/admin/db-reads";
 import { getSkuArtUploadUrl } from "@/components/admin/r2";
 import {
@@ -255,6 +256,39 @@ function revalidateArtPaths(modelId: UUID) {
   revalidatePath("/");
 }
 
+export type ModelArtUploadResult =
+  | { ok: true; uploadUrl: string; publicUrl: string; key: string }
+  | { ok: false; message: string };
+
+/**
+ * Sign a presigned PUT for model-direct art (no size variant exists yet).
+ * Keys under `sku-art/<modelId>/` — same layout, no variant lookup involved.
+ */
+export async function getModelArtUploadUrlAction(input: {
+  modelId: UUID;
+  filename: string;
+  contentType: string;
+}): Promise<ModelArtUploadResult> {
+  try {
+    await requireAdminAction();
+
+    const filename = input.filename.trim();
+    const contentType = input.contentType.trim();
+    if (!filename || !contentType) {
+      return { ok: false, message: "a file name and type are required" };
+    }
+    if (!contentType.startsWith("image/")) {
+      return { ok: false, message: `${contentType} is not an image` };
+    }
+
+    const { getSkuArtUploadUrl } = await import("@/components/admin/r2");
+    const upload = await getSkuArtUploadUrl(input.modelId, filename, contentType);
+    return { ok: true, ...upload };
+  } catch (thrown) {
+    return { ok: false, message: thrown instanceof Error ? thrown.message : "upload failed" };
+  }
+}
+
 export type ReplaceSkuArtResult =
   | { ok: true; artUrl: string | null }
   | { ok: false; message: string; code?: ContractErrorCode };
@@ -268,6 +302,36 @@ export type ReplaceSkuArtResult =
  * requireAdminAction() before writing, since this changes art already
  * rendered on every card of every size of the model.
  */
+/**
+ * Model-direct art write for models with zero size variants. fn_replace_sku_art
+ * needs a variant to address through, so it cannot serve a sizeless model;
+ * this direct update under sku_models_admin_write can. Variant propagation
+ * is a non-issue with no variants, and later variants inherit on create.
+ */
+export async function setModelArtAction(
+  modelId: UUID,
+  artUrl: string | null,
+): Promise<ReplaceSkuArtResult> {
+  try {
+    await requireAdminAction();
+
+    const supabase = await createServerSupabase();
+    const { error } = await supabase
+      .from("sku_models")
+      .update({ art_url: artUrl })
+      .eq("id", modelId);
+    if (error) {
+      return { ok: false, message: error.message };
+    }
+
+    revalidateArtPaths(modelId);
+    return { ok: true, artUrl };
+  } catch (thrown) {
+    const f = failure(thrown);
+    return f.ok ? { ok: false, message: "unknown failure" } : { ok: false, message: f.message, code: f.code };
+  }
+}
+
 export async function replaceSkuArtAction(
   skuId: UUID,
   artUrl: string | null,
