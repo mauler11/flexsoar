@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/Button";
 import type { Notification as ContractNotification } from "@/lib/api/contract";
 import type { Json } from "@/lib/db/types";
 import { getUser, listNotifications } from "@/lib/api/contract";
+import { createServerSupabase } from "@/lib/supabase/server";
 import { signOut } from "@/app/(auth)/actions";
 import { currentUserId } from "@/app/(market)/queries";
 import { SearchInput } from "@/components/market/SearchInput";
@@ -128,6 +129,22 @@ export default async function MarketLayout({
   const meId = await currentUserId();
   const me = meId ? await getUser({ id: meId }).catch(() => null) : null;
 
+  // Per-account Terms state (047): null when signed out (device flag rules),
+  // true/false when signed in (account rules, across devices).
+  let accountAgreed: boolean | null = null;
+  if (meId) {
+    const supabase = await createServerSupabase();
+    const { data } = await supabase
+      .from("users")
+      .select("tos_accepted_at")
+      .eq("id", meId)
+      .maybeSingle();
+    if (data) {
+      accountAgreed =
+        (data as { tos_accepted_at: string | null }).tos_accepted_at != null;
+    }
+  }
+
   const sidebarItems: SidebarItem[] = [
     { href: "/market", label: "Market", icon: "market" },
     { href: "/list", label: "List", icon: "list" },
@@ -159,7 +176,7 @@ export default async function MarketLayout({
   return (
     <div className="flex min-h-screen flex-col">
       <ToastProvider>
-        <OnboardingTour />
+        <OnboardingTour accountAgreed={accountAgreed} />
         <header className="sticky top-0 z-40 border-b border-line bg-background/80 backdrop-blur">
           <div className="flex w-full items-center gap-3 px-4 py-3">
             <Link

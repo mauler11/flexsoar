@@ -471,6 +471,33 @@ export async function markNotificationReadAction(notificationId: string): Promis
 }
 
 // ------------------------------------------------------------
+// TERMS ACCEPTANCE
+// ------------------------------------------------------------
+
+/**
+ * Records the caller's Terms acceptance (047, tour checkbox). Session
+ * UPDATE of a self-attestation timestamp — row scoped by users_self_update,
+ * column by its grant. Returns a result so the tour can close optimistically.
+ */
+export async function recordTosAcceptanceAction(): Promise<{ ok: boolean; message?: string }> {
+  const me = await currentUserId();
+  if (!me) {
+    return { ok: false, message: 'Sign in to record acceptance.' };
+  }
+
+  const supabase = await createServerSupabase();
+  const { error } = await supabase
+    .from('users')
+    .update({ tos_accepted_at: new Date().toISOString() })
+    .eq('id', me);
+
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  return { ok: true };
+}
+
+// ------------------------------------------------------------
 // PROFILE VISIBILITY
 // ------------------------------------------------------------
 

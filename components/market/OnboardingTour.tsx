@@ -13,6 +13,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { recordTosAcceptanceAction } from "@/app/(market)/actions";
 import { Badge } from "@/components/ui/Badge";
 import { TierBadge } from "@/components/card/TierBadge";
 import { ConditionBadge } from "@/components/card/ConditionBadge";
@@ -135,16 +136,41 @@ function SlideVisual({ index }: { index: number }) {
   }
 }
 
-export function OnboardingTour() {
+export function OnboardingTour({
+  accountAgreed,
+}: {
+  /**
+   * Whether the signed-in account accepted the Terms (users.tos_accepted_at).
+   * Null when signed out — then the device flag alone decides. Account state
+   * wins over device state so agreeing on a phone carries to desktop.
+   */
+  accountAgreed: boolean | null;
+}) {
   const [visible, setVisible] = useState(false);
   const [step, setStep] = useState(0);
   const [agreed, setAgreed] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   // Client-side first-visit check after mount: prerendered HTML never
   // flashes the overlay at returning visitors.
   useEffect(() => {
+    if (accountAgreed === true) return;
+    if (accountAgreed === false) {
+      setVisible(true);
+      return;
+    }
     if (!hasSeenTour()) setVisible(true);
-  }, []);
+  }, [accountAgreed]);
+
+  async function welcome() {
+    if (accountAgreed === false) {
+      setSaving(true);
+      await recordTosAcceptanceAction().catch(() => null);
+      setSaving(false);
+    }
+    markTourSeen();
+    setVisible(false);
+  }
 
   const last = step === TOUR_SLIDES.length - 1;
   const slide = TOUR_SLIDES[step];
@@ -193,14 +219,13 @@ export function OnboardingTour() {
                 </label>
                 <button
                   type="button"
-                  disabled={!agreed}
+                  disabled={!agreed || saving}
                   onClick={() => {
-                    markTourSeen();
-                    setVisible(false);
+                    void welcome();
                   }}
                   className="inline-flex items-center justify-center rounded-lg bg-accent px-4 py-3 text-sm font-bold text-[#0B0B0B] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  Welcome
+                  {saving ? "Saving…" : "Welcome"}
                 </button>
               </div>
             ) : (
