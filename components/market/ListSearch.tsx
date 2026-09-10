@@ -78,7 +78,7 @@ export function ListSearch() {
           <path d="M20 20l-3.5-3.5" />
         </svg>
         <input
-          type="search"
+          type="text"
           role="searchbox"
           aria-label="Search products to sell"
           placeholder="Search for products, brands…"

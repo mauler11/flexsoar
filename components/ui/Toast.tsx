@@ -34,7 +34,7 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 const TONE: Record<ToastTone, { border: string; text: string; square: string }> =
   {
     info: { border: "#3B9EFF", text: "#3B9EFF", square: "#3B9EFF" },
-    success: { border: "#00FF66", text: "#00FF66", square: "#00FF66" },
+    success: { border: "#4DFF88", text: "#4DFF88", square: "#4DFF88" },
     warn: { border: "#E8B33A", text: "#E8B33A", square: "#E8B33A" },
     danger: { border: "#FF4444", text: "#FF4444", square: "#FF4444" },
   };

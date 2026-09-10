@@ -206,17 +206,9 @@ export default async function MarketLayout({
                       />
                       <a
                         href={`/u/${me.handle}`}
-                        className="hidden items-center gap-1.5 md:inline-flex"
+                        className="hidden text-[13px] text-muted hover:text-foreground md:inline"
                       >
-                        <span
-                          aria-hidden="true"
-                          className="flex h-6 w-6 items-center justify-center rounded-full bg-raised text-[11px] font-extrabold text-foreground"
-                        >
-                          {me.handle.slice(0, 1).toUpperCase()}
-                        </span>
-                        <span className="text-[13px] text-muted hover:text-foreground">
-                          @{me.handle}
-                        </span>
+                        @{me.handle}
                       </a>
                       <span className="hidden text-xs font-semibold text-muted sm:inline">
                         LV {me.level}

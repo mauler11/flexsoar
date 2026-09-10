@@ -10,7 +10,7 @@
  */
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface SearchInputProps {
   initial?: string;
@@ -21,6 +21,28 @@ export function SearchInput({ initial = "" }: SearchInputProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [value, setValue] = useState(initial);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // "/" focuses search from anywhere (unless already typing somewhere).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      inputRef.current?.focus();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   // Another control (e.g. Clear) can reset q — follow it.
   useEffect(() => {
@@ -54,9 +76,10 @@ export function SearchInput({ initial = "" }: SearchInputProps) {
         <path d="M20 20l-3.5-3.5" />
       </svg>
       <input
-        type="search"
+        ref={inputRef}
+        type="text"
         role="searchbox"
-        aria-label="Search sneakers"
+        aria-label="Search sneakers (press / to focus)"
         placeholder="Search for sneakers, brands, or collections…"
         value={value}
         onChange={(e) => setValue(e.target.value)}

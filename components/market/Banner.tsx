@@ -21,7 +21,7 @@ export interface BannerProps {
 const TONE: Record<BannerTone, { border: string; text: string; marker: string }> =
   {
     error: { border: "#FF4444", text: "#FF4444", marker: "#FF4444" },
-    success: { border: "#00FF66", text: "#00FF66", marker: "#00FF66" },
+    success: { border: "#4DFF88", text: "#4DFF88", marker: "#4DFF88" },
     warn: { border: "#E8B33A", text: "#E8B33A", marker: "#E8B33A" },
     info: { border: "#3B9EFF", text: "#3B9EFF", marker: "#3B9EFF" },
   };
