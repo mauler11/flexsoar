@@ -8,15 +8,16 @@
  */
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getListings, getPlatformConfig } from "@/lib/api/contract";
+import { getCards, getListings, getPlatformConfig } from "@/lib/api/contract";
 import {
   currentUserId,
   getHiddenCardIds,
   getPublicProfileByHandle,
   getTradeHistory,
 } from "@/app/(market)/queries";
-import { toggleTradeHistoryAction } from "@/app/(market)/actions";
 import { MarketTile } from "@/components/market/MarketTile";
+import { HeldCard } from "@/components/market/HeldCard";
+import { TradeToggle } from "@/components/market/TradeToggle";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatMyr } from "@/components/card/format";
 
@@ -47,17 +48,36 @@ export default async function ProfilePage({
   const isOwner = viewerId != null && viewerId === profile.id;
   const holdingsVisible = profile.show_collection || isOwner;
 
-  const [live, trades, hiddenIds, platformConfig] = await Promise.all([
+  const [live, trades, ownedCards, hiddenIds, platformConfig] = await Promise.all([
     holdingsVisible ? getListings({ sellerId: profile.id }) : Promise.resolve([]),
     holdingsVisible ? getTradeHistory(profile.id) : Promise.resolve([]),
+    holdingsVisible
+      ? getCards({ ownerId: profile.id, status: ["active", "locked"], limit: 200 }).catch(() => [])
+      : Promise.resolve([]),
     getHiddenCardIds(profile.id),
     getPlatformConfig(),
   ]);
 
-  // 046: per-shoe hiding applies on top of the master switch.
+  // 046: per-shoe hiding applies on top of the master switch. Owners see
+  // their own hidden shoes ghosted (so the toggle visibly does something);
+  // everyone else never sees them at all.
   const visibleLive = live.filter((l) => !hiddenIds.has(l.card_id));
+  const listedCardIds = new Set(visibleLive.map((l) => l.card_id));
+  const collection = ownedCards.filter((c) => !listedCardIds.has(c.id));
+  const visibleCollection = collection.filter((c) => !hiddenIds.has(c.id));
+  const shownCollection = isOwner
+    ? collection.map((c) => ({ card: c, hidden: hiddenIds.has(c.id) }))
+    : visibleCollection.map((c) => ({ card: c, hidden: false }));
   const visibleTrades = trades.filter((t) => !hiddenIds.has(t.cardId));
   const tradesVisible = profile.show_trade_history || isOwner;
+
+  // Portfolio matches exactly what the profile shows: live ask prices plus
+  // the oracle market price of unlisted collection shoes on display.
+  const visiblePortfolioCents =
+    visibleLive.reduce((sum, l) => sum + l.price_cents, 0) +
+    shownCollection
+      .filter((s) => !s.hidden)
+      .reduce((sum, s) => sum + (s.card.sku.market_price_cents ?? 0), 0);
 
   const joined = profile.created_at.slice(0, 10);
 
@@ -80,14 +100,16 @@ export default async function ProfilePage({
             </p>
           </div>
         </div>
-        <dl className="flex gap-6 font-mono text-[10px] uppercase tracking-tight">
+        <dl className="flex gap-6 text-[10px] uppercase tracking-wide">
           <div>
             <dt className="text-muted">Xp</dt>
             <dd className="text-foreground">{profile.xp_total.toLocaleString()}</dd>
           </div>
           <div>
             <dt className="text-muted">Portfolio</dt>
-            <dd className="text-foreground">{formatMyr(profile.portfolio_value_cents)}</dd>
+            <dd className="text-foreground" title="Live asks plus shown collection value">
+              {formatMyr(visiblePortfolioCents)}
+            </dd>
           </div>
         </dl>
       </section>
@@ -123,6 +145,42 @@ export default async function ProfilePage({
       </section>
       )}
 
+      {holdingsVisible && (
+      <section>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
+            Collection ({shownCollection.length})
+          </h2>
+        </div>
+        {shownCollection.length === 0 ? (
+          <EmptyState
+            title="No shoes on display"
+            description="Nothing in the collection right now."
+          />
+        ) : (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {shownCollection.map(({ card, hidden }) => (
+              <div key={card.id} className="relative">
+                {hidden && (
+                  <span className="absolute left-2 top-2 z-10 rounded-md bg-overlay/80 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-muted">
+                    Hidden
+                  </span>
+                )}
+                <div className={hidden ? "opacity-60" : undefined}>
+                  <HeldCard
+                    card={card}
+                    statusLabel="In collection"
+                    shownInProfile={!hidden}
+                    showToggle={false}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+      )}
+
       {holdingsVisible && tradesVisible && (
       <section>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -130,35 +188,7 @@ export default async function ProfilePage({
             Trade history ({visibleTrades.length})
           </h2>
           {isOwner && (
-            <div className="flex items-center gap-1 text-xs text-muted">
-              <span>Show trade history:</span>
-              <form action={toggleTradeHistoryAction.bind(null, true, `/u/${handle}`)}>
-                <button
-                  type="submit"
-                  aria-pressed={profile.show_trade_history}
-                  className={
-                    profile.show_trade_history
-                      ? "rounded-md bg-accent px-2 py-0.5 font-bold text-[#0B0B0B]"
-                      : "rounded-md px-2 py-0.5 hover:text-foreground"
-                  }
-                >
-                  Yes
-                </button>
-              </form>
-              <form action={toggleTradeHistoryAction.bind(null, false, `/u/${handle}`)}>
-                <button
-                  type="submit"
-                  aria-pressed={!profile.show_trade_history}
-                  className={
-                    !profile.show_trade_history
-                      ? "rounded-md bg-accent px-2 py-0.5 font-bold text-[#0B0B0B]"
-                      : "rounded-md px-2 py-0.5 hover:text-foreground"
-                  }
-                >
-                  No
-                </button>
-              </form>
-            </div>
+            <TradeToggle handle={handle} initial={profile.show_trade_history} />
           )}
         </div>
         {visibleTrades.length === 0 ? (

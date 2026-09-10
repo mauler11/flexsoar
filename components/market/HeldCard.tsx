@@ -6,10 +6,13 @@
  * A held shoe in the dashboard, dressed exactly like the market grid:
  * art, tier pill, name, variant · size, colour-coded condition, and a
  * status footer. The whole card links to its detail page. Below it sits
- * the per-shoe profile toggle — green Shown In Profile, grey when hidden.
+ * the per-shoe profile toggle — green Shown In Profile, grey when hidden —
+ * sized like the grid's Buy now button. The toggle flips optimistically and
+ * revalidates in place (no full navigation per click).
  */
 
 import Link from "next/link";
+import { useState, useTransition } from "react";
 import type { CardSummary } from "@/lib/api/contract";
 import { toSku } from "@/components/market/bridge";
 import { CardArt } from "@/components/card/CardArt";
@@ -27,13 +30,36 @@ export interface HeldCardProps {
   card: CardSummary;
   statusLabel: string;
   shownInProfile: boolean;
+  /** Dashboard shows the toggle; the public profile never does. */
+  showToggle?: boolean;
 }
 
-export function HeldCard({ card, statusLabel, shownInProfile }: HeldCardProps) {
+export function HeldCard({
+  card,
+  statusLabel,
+  shownInProfile,
+  showToggle = true,
+}: HeldCardProps) {
   const sku = toSku(card.sku);
   const band = card.condition_grade
     ? conditionGradeBand(card.condition_grade)
     : floatBand(card.float_value);
+  const [shown, setShown] = useState(shownInProfile);
+  const [failed, setFailed] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  function flip() {
+    const next = !shown;
+    setShown(next);
+    setFailed(false);
+    startTransition(async () => {
+      const result = await toggleCardVisibilityAction(card.id, next);
+      if (!result.ok) {
+        setShown(!next);
+        setFailed(true);
+      }
+    });
+  }
 
   return (
     <div className="flex flex-col">
@@ -63,21 +89,29 @@ export function HeldCard({ card, statusLabel, shownInProfile }: HeldCardProps) {
           <p className="mt-0.5 text-xs text-muted">{statusLabel}</p>
         </div>
       </Link>
-      <button
-        type="button"
-        onClick={() => {
-          void toggleCardVisibilityAction(card.id, !shownInProfile);
-        }}
-        aria-pressed={shownInProfile}
-        className={cn(
-          "mt-1.5 rounded-lg border px-2 py-1 text-[11px] font-bold uppercase tracking-wide transition",
-          shownInProfile
-            ? "border-accent/60 text-accent hover:bg-accent/10"
-            : "border-line-strong text-muted hover:border-muted hover:text-foreground",
-        )}
-      >
-        {shownInProfile ? "Shown in Profile" : "Not Shown In Profile"}
-      </button>
+      {showToggle && (
+        <>
+          <button
+            type="button"
+            onClick={flip}
+            disabled={isPending}
+            aria-pressed={shown}
+            className={cn(
+              "mt-2 inline-flex items-center justify-center px-3 py-2 text-sm font-bold transition disabled:opacity-60",
+              shown
+                ? "rounded-lg bg-accent text-[#0B0B0B] hover:brightness-110"
+                : "rounded-lg border border-line-strong text-muted hover:border-muted hover:text-foreground",
+            )}
+          >
+            {shown ? "Shown In Profile" : "Not Shown In Profile"}
+          </button>
+          {failed && (
+            <p role="alert" className="mt-1 text-xs text-[#FF4444]">
+              Couldn&apos;t save — try again.
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }

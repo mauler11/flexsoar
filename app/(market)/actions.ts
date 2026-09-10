@@ -19,6 +19,7 @@
 
 import { headers } from 'next/headers';
 import { redirect, unstable_rethrow } from 'next/navigation';
+import { revalidatePath } from 'next/cache';
 import Stripe from 'stripe';
 
 import {
@@ -475,16 +476,20 @@ export async function markNotificationReadAction(notificationId: string): Promis
 
 /**
  * Flips one card's show_in_profile flag (046) via fn_set_card_visibility,
- * which enforces owner-or-admin itself. Redirects back to the dashboard —
- * the toggle lives on each held shoe there.
+ * which enforces owner-or-admin itself. Returns a result instead of
+ * redirecting so callers can flip optimistically and revalidate in place —
+ * a full navigation per toggle feels broken.
  */
-export async function toggleCardVisibilityAction(cardId: string, show: boolean): Promise<void> {
+export async function toggleCardVisibilityAction(
+  cardId: string,
+  show: boolean,
+): Promise<{ ok: boolean; message?: string }> {
   const me = await currentUserId();
   if (!me) {
-    redirect('/sign-in');
+    return { ok: false, message: 'Sign in to change visibility.' };
   }
   if (!/^[0-9a-f-]{36}$/i.test(cardId)) {
-    redirectWithError('/dashboard', 'Bad card id.');
+    return { ok: false, message: 'Bad card id.' };
   }
 
   const supabase = await createServerSupabase();
@@ -494,19 +499,24 @@ export async function toggleCardVisibilityAction(cardId: string, show: boolean):
   });
 
   if (error) {
-    redirectWithError('/dashboard', error.message);
+    return { ok: false, message: error.message };
   }
-  redirect('/dashboard');
+  revalidatePath('/dashboard');
+  return { ok: true };
 }
 
 /**
  * Flips the caller's show_trade_history flag (046). Session UPDATE — the
- * row is scoped by users_self_update and the column by its grant.
+ * row is scoped by users_self_update and the column by its grant. Returns
+ * a result for the same optimistic-toggle reason as above.
  */
-export async function toggleTradeHistoryAction(show: boolean, next: string): Promise<void> {
+export async function toggleTradeHistoryAction(
+  show: boolean,
+  next: string,
+): Promise<{ ok: boolean; message?: string }> {
   const me = await currentUserId();
   if (!me) {
-    redirect('/sign-in');
+    return { ok: false, message: 'Sign in to change visibility.' };
   }
 
   const supabase = await createServerSupabase();
@@ -516,7 +526,8 @@ export async function toggleTradeHistoryAction(show: boolean, next: string): Pro
     .eq('id', me);
 
   if (error) {
-    redirectWithError(safeNextPath(next) || '/dashboard', error.message);
+    return { ok: false, message: error.message };
   }
-  redirect(safeNextPath(next) || '/dashboard');
+  revalidatePath(safeNextPath(next) || '/dashboard');
+  return { ok: true };
 }
