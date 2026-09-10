@@ -19,7 +19,7 @@ export interface BadgeProps {
 const TONE: Record<BadgeTone, { border: string; text: string; square: string }> =
   {
     neutral: { border: "#3A3A3A", text: "#9A9A9A", square: "#6B6B6B" },
-    accent: { border: "#35F07A", text: "#35F07A", square: "#35F07A" },
+    accent: { border: "#00E676", text: "#00E676", square: "#00E676" },
     info: { border: "#3B9EFF", text: "#3B9EFF", square: "#3B9EFF" },
     warn: { border: "#E8B33A", text: "#E8B33A", square: "#E8B33A" },
     danger: { border: "#FF4444", text: "#FF4444", square: "#FF4444" },

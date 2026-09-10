@@ -101,12 +101,18 @@ export function Sidebar({ items }: SidebarProps) {
             aria-current={active ? "page" : undefined}
             title={item.label}
             className={cn(
-              "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
+              "relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
               active
-                ? "bg-accent/15 text-accent"
+                ? "bg-gradient-to-r from-accent/20 via-accent/5 to-transparent font-semibold text-accent"
                 : "text-muted hover:bg-overlay hover:text-foreground",
             )}
           >
+            {active && (
+              <span
+                aria-hidden="true"
+                className="absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-accent"
+              />
+            )}
             <Icon icon={item.icon} />
             <span className="hidden lg:inline">{item.label}</span>
           </Link>

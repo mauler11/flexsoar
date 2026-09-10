@@ -174,7 +174,7 @@ export function AuthForm({ mode, next = "/" }: AuthFormProps) {
       type="button"
       variant="secondary"
       size="lg"
-      className="w-full gap-2"
+      className="w-full gap-2 rounded-lg py-3 text-base"
       onClick={handleGoogleSignIn}
       disabled={isLoading}
     >
@@ -302,7 +302,7 @@ export function AuthForm({ mode, next = "/" }: AuthFormProps) {
         <Button
           type="submit"
           size="lg"
-          className="w-full"
+          className="w-full rounded-lg py-3 text-base"
           disabled={
             isLoading ||
             !isValidEmail(email) ||

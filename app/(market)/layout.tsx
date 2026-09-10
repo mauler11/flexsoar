@@ -235,7 +235,7 @@ export default async function MarketLayout({
         <div className="flex flex-1">
           <Sidebar items={sidebarItems} />
           <div className="flex min-w-0 flex-1 flex-col">
-            <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
+            <main className="mx-auto w-full max-w-6xl flex-1 px-3 py-6">
               {children}
             </main>
 

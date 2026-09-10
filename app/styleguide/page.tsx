@@ -54,7 +54,7 @@ const SWATCHES: { name: string; value: string }[] = [
   { name: "line-strong", value: "#3A3A3A" },
   { name: "muted", value: "#9A9A9A" },
   { name: "foreground", value: "#EDECE7" },
-  { name: "accent", value: "#35F07A" },
+  { name: "accent", value: "#00E676" },
 ];
 
 /** Representative fixture cards, one per tier plus the exceptional flag. */

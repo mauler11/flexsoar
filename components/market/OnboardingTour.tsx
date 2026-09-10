@@ -208,7 +208,7 @@ export function OnboardingTour({
                     type="checkbox"
                     checked={agreed}
                     onChange={(e) => setAgreed(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 accent-[#35F07A]"
+                    className="mt-0.5 h-4 w-4 accent-[#00E676]"
                   />
                   <span>
                     I agree to the{" "}
