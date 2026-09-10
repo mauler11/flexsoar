@@ -24,6 +24,7 @@ import {
   publishedConditionLabel,
 } from "@/lib/domain/rarity";
 import { toggleCardVisibilityAction } from "@/app/(market)/actions";
+import { formatMyr } from "@/components/card/format";
 import { cn } from "@/components/ui/cn";
 
 export interface HeldCardProps {
@@ -32,6 +33,10 @@ export interface HeldCardProps {
   shownInProfile: boolean;
   /** Dashboard shows the toggle; the public profile never does. */
   showToggle?: boolean;
+  /** Ask price when listed, else the oracle market value. Omitted when unknown. */
+  priceCents?: number | null;
+  /** Small caption under the price: "Ask" or "Oracle". */
+  priceCaption?: string;
 }
 
 export function HeldCard({
@@ -39,6 +44,8 @@ export function HeldCard({
   statusLabel,
   shownInProfile,
   showToggle = true,
+  priceCents = null,
+  priceCaption,
 }: HeldCardProps) {
   const sku = toSku(card.sku);
   const band = card.condition_grade
@@ -87,6 +94,16 @@ export function HeldCard({
             className="mt-0.5 w-fit"
           />
           <p className="mt-0.5 text-xs text-muted">{statusLabel}</p>
+          {priceCents != null && (
+            <p className="mt-0.5 flex items-baseline gap-1.5">
+              <span className="text-base font-extrabold tracking-tight">
+                {formatMyr(priceCents)}
+              </span>
+              {priceCaption && (
+                <span className="text-[11px] text-muted">{priceCaption}</span>
+              )}
+            </p>
+          )}
         </div>
       </Link>
       {showToggle && (

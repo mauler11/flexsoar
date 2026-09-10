@@ -71,6 +71,8 @@ export default async function ProfilePage({
   const visibleTrades = trades.filter((t) => !hiddenIds.has(t.cardId));
   const tradesVisible = profile.show_trade_history || isOwner;
 
+  const livePriceByCardId = new Map(visibleLive.map((l) => [l.card_id, l.price_cents]));
+
   // Portfolio matches exactly what the profile shows: live ask prices plus
   // the oracle market price of unlisted collection shoes on display.
   const visiblePortfolioCents =
@@ -159,23 +161,29 @@ export default async function ProfilePage({
           />
         ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {shownCollection.map(({ card, hidden }) => (
-              <div key={card.id} className="relative">
-                {hidden && (
-                  <span className="absolute left-2 top-2 z-10 rounded-md bg-overlay/80 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-muted">
-                    Hidden
-                  </span>
-                )}
-                <div className={hidden ? "opacity-60" : undefined}>
-                  <HeldCard
-                    card={card}
-                    statusLabel="In collection"
-                    shownInProfile={!hidden}
-                    showToggle={false}
-                  />
+            {shownCollection.map(({ card, hidden }) => {
+              const ask = livePriceByCardId.get(card.id) ?? null;
+              const oracle = card.sku.market_price_cents ?? null;
+              return (
+                <div key={card.id} className="relative">
+                  {hidden && (
+                    <span className="absolute left-2 top-2 z-10 rounded-md bg-overlay/80 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-muted">
+                      Hidden
+                    </span>
+                  )}
+                  <div className={hidden ? "opacity-60" : undefined}>
+                    <HeldCard
+                      card={card}
+                      statusLabel="In collection"
+                      shownInProfile={!hidden}
+                      showToggle={false}
+                      priceCents={ask ?? oracle}
+                      priceCaption={ask != null ? "Ask" : oracle != null ? "Oracle" : undefined}
+                    />
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
