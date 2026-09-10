@@ -18,6 +18,7 @@ import { signOut } from "@/app/(auth)/actions";
 import { currentUserId } from "@/app/(market)/queries";
 import { SearchInput } from "@/components/market/SearchInput";
 import { Sidebar, type SidebarItem } from "@/components/market/Sidebar";
+import { OnboardingTour } from "@/components/market/OnboardingTour";
 import { NotificationBell } from "@/components/market/NotificationBell";
 
 interface NotificationPayload {
@@ -158,6 +159,7 @@ export default async function MarketLayout({
   return (
     <div className="flex min-h-screen flex-col">
       <ToastProvider>
+        <OnboardingTour />
         <header className="sticky top-0 z-40 border-b border-line bg-background/80 backdrop-blur">
           <div className="flex w-full items-center gap-3 px-4 py-3">
             <Link

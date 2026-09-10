@@ -3012,85 +3012,31 @@ vi.mock('@/lib/supabase/server', () => ({
 }));
 
 // Import page components after mocks
-import LandingPage from '@/app/page';
 import TermsPage from '@/app/terms/page';
 import PrivacyPage from '@/app/privacy/page';
 import MarketPage from '@/app/(market)/market/page';
 
-describe('Landing page (/) — signed out render', () => {
-  it('renders without crashing and contains key messaging', async () => {
-    const element = await LandingPage();
-    const html = renderToStaticMarkup(element);
-    expect(html).toContain('Authenticated secondhand sneakers');
-    expect(html).toContain('Every pair is a card');
+// The landing page is gone: / redirects straight into /market.
+describe('Onboarding tour content (components/market/OnboardingTour)', () => {
+  it('walks condition, rarity, vault, and redemption before the terms gate', async () => {
+    const { TOUR_SLIDES } = await import('@/components/market/OnboardingTour');
+    expect(TOUR_SLIDES).toHaveLength(7);
+    const titles = TOUR_SLIDES.map((s) => s.title);
+    expect(titles[0]).toContain('Buy. Sell. Redeem.');
+    expect(titles.join(' ')).toContain('Graded');
+    expect(titles.join(' ')).toContain('Tier is value');
+    expect(titles.join(' ')).toContain('freeze');
+    expect(titles.join(' ')).toContain('physical pair');
+    expect(titles[TOUR_SLIDES.length - 1]).toContain('Terms');
   });
 
-  it('includes How It Works 4-step timeline', async () => {
-    const element = await LandingPage();
-    const html = renderToStaticMarkup(element);
-    expect(html).toContain('How It Works');
-    expect(html).toContain('List or Buy');
-    expect(html).toContain('Authenticate');
-    expect(html).toContain('Vault');
-    expect(html).toContain('Trade Freely');
-    expect(html).toContain('Redeem Anytime');
-  });
-
-  it('includes footer links to /terms and /privacy', async () => {
-    const element = await LandingPage();
-    const html = renderToStaticMarkup(element);
-    expect(html).toContain('href="/terms"');
-    expect(html).toContain('href="/privacy"');
-  });
-
-  it('has split CTA: Explore the Vault (buyers) and List Your Sneakers (sellers)', async () => {
-    const element = await LandingPage();
-    const html = renderToStaticMarkup(element);
-    expect(html).toContain('href="/market"');
-    expect(html).toContain('Explore the Vault');
-    expect(html).toContain('href="/list"');
-    expect(html).toContain('List Your Sneakers');
-  });
-
-  it('does not claim FlexSoar covers consignor shipping to vault (matches TERMS.md 4.6)', async () => {
-    const element = await LandingPage();
-    const html = renderToStaticMarkup(element);
-    // TERMS.md 4.6: "You arrange and pay for shipping to our vault using a tracked service."
-    // Landing page must not say we cover/pay for shipping TO the vault.
-    expect(html).not.toContain('cover.*ship'); // no "cover shipping" or "covers shipping"
-    expect(html).not.toContain('we pay.*ship'); // no "we pay for shipping"
-    expect(html).not.toContain('we cover.*shipping'); // no "we cover shipping"
-    // It should correctly state we cover shipping TO THE BUYER
-    expect(html).toContain('shipping to the buyer');
-  });
-
-  it('includes trust signals', async () => {
-    const element = await LandingPage();
-    const html = renderToStaticMarkup(element);
-    expect(html).toContain('100% Authenticity Guaranteed');
-    expect(html).toContain('Climate-Controlled Vault Storage');
-    expect(html).toContain('Zero Upfront Listing Fees');
-  });
-
-  it('includes legal disclosures accordion', async () => {
-    const element = await LandingPage();
-    const html = renderToStaticMarkup(element);
-    expect(html).toContain('Legal disclosures');
-    expect(html).toContain('not a security');
-    expect(html).toContain('investment advice');
-  });
-
-  it('contains no hardcoded numeric activity claims (vaulted count, trade count)', async () => {
-    const element = await LandingPage();
-    const html = renderToStaticMarkup(element);
-    // No fabricated stats like "1,247 pairs vaulted" or "3,892 trades this month"
-    // Real metrics must come from a live query, not hardcoded HTML.
-    expect(html).not.toContain('vaulted-count');
-    expect(html).not.toContain('traded-count');
-    expect(html).not.toContain('Pairs Currently Vaulted');
-    expect(html).not.toContain('Cards Traded This Month');
-    // No hardcoded numbers with comma formatting that look like activity counters
-    expect(html).not.toMatch(/>\d{1,3}(,\d{3})+\s*(pairs?|cards?|trades?)/i);
+  it('gates dismissal behind localStorage (no window during SSR means seen)', async () => {
+    const { hasSeenTour, markTourSeen, TOUR_STORAGE_KEY } = await import(
+      '@/components/market/OnboardingTour'
+    );
+    expect(TOUR_STORAGE_KEY).toBe('flexsoar-tour-seen-v1');
+    expect(hasSeenTour()).toBe(true);
+    expect(() => markTourSeen()).not.toThrow();
   });
 });
 
