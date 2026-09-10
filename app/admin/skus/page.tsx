@@ -20,6 +20,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Table, TBody, THead, Td, Th, Tr } from "@/components/ui/Table";
 import { formatMyr } from "@/components/card/format";
 import { listSkuModels } from "@/lib/api/contract";
+import { createServerSupabase } from "@/lib/supabase/server";
 import { borderColorFor, tierForPrice, tierName } from "@/lib/domain/rarity";
 
 export const metadata: Metadata = {
@@ -37,6 +38,12 @@ export default async function SkuModelsPage() {
   const models = await listSkuModels({ limit: 200 });
   const unpricedCount = models.filter((m) => m.base_price_cents == null).length;
 
+  const supabase = await createServerSupabase();
+  const { count: pendingRequests } = await supabase
+    .from("sku_requests")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "pending");
+
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
@@ -48,9 +55,18 @@ export default async function SkuModelsPage() {
             One art asset and one oracle price per model; sizes live on its page.
           </p>
         </div>
-        <Button size="sm" href="/admin/skus/new">
-          New model
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant={(pendingRequests ?? 0) > 0 ? "primary" : "secondary"}
+            href="/admin/requests"
+          >
+            Requests{pendingRequests ? ` (${pendingRequests})` : ""}
+          </Button>
+          <Button size="sm" href="/admin/skus/new">
+            New model
+          </Button>
+        </div>
       </header>
 
       {models.length === 0 ? (

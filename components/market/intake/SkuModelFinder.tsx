@@ -220,7 +220,7 @@ export function SkuModelFinder({
                   </span>
                 </span>
                 <span className="shrink-0 text-accent">
-                  {m.basePriceCents != null ? `$${(m.basePriceCents / 100).toFixed(0)}` : "unpriced"}
+                  {m.basePriceCents != null ? `RM ${(m.basePriceCents / 100).toFixed(0)}` : "unpriced"}
                 </span>
               </button>
             ))}

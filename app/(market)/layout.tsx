@@ -28,6 +28,11 @@ interface NotificationPayload {
   net_cents?: number;
   first_sale?: boolean;
   must_ship?: boolean;
+  brand?: string;
+  model?: string;
+  colorway?: string;
+  model_id?: string;
+  review_note?: string;
 }
 
 function formatRm(cents: number): string {
@@ -44,6 +49,10 @@ function notificationTitle(type: ContractNotification["type"], payload: Json): s
       return "Card redeemed";
     case "payout_sent":
       return "Payout sent";
+    case "request_approved":
+      return "Product request approved";
+    case "request_rejected":
+      return "Product request update";
   }
 }
 
@@ -64,6 +73,10 @@ function notificationBody(type: ContractNotification["type"], payload: Json): st
       return `Your ${p.sku?.brand ?? "card"} ${p.sku?.model ?? ""} was redeemed and is being shipped.`;
     case "payout_sent":
       return `A payout of ${p.amount_cents ? formatRm(p.amount_cents) : "funds"} was sent to your account.`;
+    case "request_approved":
+      return `Your request for ${p.brand ?? "the shoe"} ${p.model ?? ""} was approved — it's now in the catalog and ready to list.`;
+    case "request_rejected":
+      return `Your request for ${p.brand ?? "the shoe"} ${p.model ?? ""} wasn't added${p.review_note ? `: ${p.review_note}` : "."}`;
   }
 }
 
@@ -78,6 +91,10 @@ function notificationLink(type: ContractNotification["type"], payload: Json): st
       return p.card_id ? `/card/${p.card_id}` : undefined;
     case "payout_sent":
       return "/dashboard";
+    case "request_approved":
+      return p.model_id ? `/list/${p.model_id}` : "/list";
+    case "request_rejected":
+      return "/list";
   }
 }
 
@@ -89,6 +106,10 @@ function notificationLinkLabel(type: ContractNotification["type"]): string | und
       return "View card";
     case "payout_sent":
       return "View dashboard";
+    case "request_approved":
+      return "List it now";
+    case "request_rejected":
+      return "Back to list";
   }
 }
 

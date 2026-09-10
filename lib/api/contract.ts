@@ -4596,7 +4596,9 @@ export type NotificationType =
   | 'submission_approved'
   | 'card_sold'
   | 'card_redeemed'
-  | 'payout_sent';
+  | 'payout_sent'
+  | 'request_approved'
+  | 'request_rejected';
 
 export interface Notification {
   id: UUID;

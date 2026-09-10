@@ -25,6 +25,12 @@ import {
   getSkuModel,
   ContractError,
 } from "@/lib/api/contract";
+import { createServerSupabase } from "@/lib/supabase/server";
+import type { UUID } from "@/lib/db/types";
+import {
+  validateSkuRequestInput,
+  type SkuRequestInput,
+} from "@/components/market/sku-request";
 import { gradeFloatFromComponents } from "@/lib/db/grading";
 import type { GradeComponents } from "@/lib/db/grading";
 import { currentUserId } from "@/app/(market)/queries";
@@ -269,6 +275,7 @@ export interface SkuModelSearchResult {
     model: string;
     colorway: string;
     basePriceCents: number | null;
+    artUrl: string | null;
     variantCount: number;
     cardCount: number;
   }>;
@@ -319,6 +326,7 @@ export async function searchSkuModelsAction(
         model: m.model,
         colorway: m.colorway,
         basePriceCents: m.base_price_cents,
+        artUrl: m.art_url ?? null,
         variantCount: m.variant_count,
         cardCount: m.card_count,
         score,
@@ -336,6 +344,63 @@ export async function searchSkuModelsAction(
       ok: false,
       code: "SEARCH_FAILED",
       message: thrown instanceof Error ? thrown.message : "model search failed",
+    };
+  }
+}
+
+// ------------------------------------------------------------
+// Product requests (044) — the "my shoe isn't here" path
+// ------------------------------------------------------------
+
+/**
+ * Files a product request for the signed-in seller. Session insert — 044's
+ * sku_requests_own_insert policy vets requester_id, so this runs as the
+ * user, never service-role. Validation lives in
+ * components/market/sku-request.ts ('use server' modules may only export
+ * async functions, and the contract is frozen).
+ */
+export async function submitSkuRequestAction(
+  input: SkuRequestInput,
+): Promise<ActionResult<{ requestId: UUID }>> {
+  const me = await currentUserId();
+  if (!me) {
+    return { ok: false, code: "SIGN_IN_REQUIRED", message: "Sign in to request a product." };
+  }
+
+  const validated = validateSkuRequestInput(input);
+  if (!validated.ok) {
+    return { ok: false, code: "INVALID", message: validated.message };
+  }
+
+  try {
+    const supabase = await createServerSupabase();
+    const { data, error } = await supabase
+      .from("sku_requests")
+      .insert({
+        requester_id: me,
+        brand: validated.value.brand,
+        model: validated.value.model,
+        colorway: validated.value.colorway,
+        size_us: validated.value.sizeUs,
+        notes: validated.value.notes,
+        photos: validated.value.photos,
+      })
+      .select("id")
+      .maybeSingle();
+
+    if (error || !data) {
+      return {
+        ok: false,
+        code: "SUBMIT_FAILED",
+        message: error?.message ?? "could not file the request",
+      };
+    }
+    return { ok: true, requestId: (data as { id: UUID }).id };
+  } catch (thrown) {
+    return {
+      ok: false,
+      code: "SUBMIT_FAILED",
+      message: thrown instanceof Error ? thrown.message : "could not file the request",
     };
   }
 }

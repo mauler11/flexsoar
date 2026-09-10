@@ -39,6 +39,12 @@ export interface IntakeWizardProps {
   skus: readonly Sku[];
   signedIn: boolean;
   /**
+   * Novelship-style entry: the seller picked model + size on the product
+   * page, so SKU selection is done — the wizard opens at Photos. Null (the
+   * /list default) keeps the SKU picker as step 0.
+   */
+  preselected?: { sku: Sku; unpriced: boolean } | null;
+  /**
    * How THIS seller is actually paid — fn_payout_method_for_user, derived
    * from their country. Distinct from `payout` (the buyer settlement method
    * this listing accepts, chosen in PricePayout below): this is the seller's
@@ -64,9 +70,12 @@ export function IntakeWizard({
   sellerPayoutMethod,
   initialCountryCode,
   cashPayoutCountryCodes = [],
+  preselected = null,
 }: IntakeWizardProps) {
-  const [step, setStep] = useState<StepIndex>(0);
-  const [selectedSku, setSelectedSku] = useState<Sku | null>(null);
+  const [step, setStep] = useState<StepIndex>(preselected ? 1 : 0);
+  const [selectedSku, setSelectedSku] = useState<Sku | null>(
+    preselected?.sku ?? null,
+  );
   const [selectedModel, setSelectedModel] = useState<{
     modelId: string;
     brand: string;
@@ -77,7 +86,9 @@ export function IntakeWizard({
     sizeUs: number | null;
   } | null>(null);
   const [isNewModel, setIsNewModel] = useState(false);
-  const [isUnpricedModel, setIsUnpricedModel] = useState(false);
+  const [isUnpricedModel, setIsUnpricedModel] = useState(
+    preselected?.unpriced ?? false,
+  );
   const [showModelFinder, setShowModelFinder] = useState(false);
   const [submittingModel, setSubmittingModel] = useState(false);
   const [photos, setPhotos] = useState<IntakePhoto[]>([]);

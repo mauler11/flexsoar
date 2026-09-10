@@ -348,6 +348,30 @@ export interface SkuModel {
   created_at: Timestamptz;
 }
 
+/**
+ * sku_requests (044). A seller's "my shoe isn't in the catalog" request:
+ * identity + size + notes + R2 photo URLs. Sits pending until an admin
+ * approves (creates the model + variant, submittable immediately after) or
+ * rejects with a note.
+ */
+export type SkuRequestStatus = 'pending' | 'approved' | 'rejected';
+
+export interface SkuRequest {
+  id: UUID;
+  requester_id: UUID;
+  brand: string;
+  model: string;
+  colorway: string;
+  size_us: number | null;
+  notes: string;
+  photos: Json;
+  status: SkuRequestStatus;
+  reviewed_by: UUID | null;
+  reviewed_at: Timestamptz | null;
+  review_note: string | null;
+  created_at: Timestamptz;
+}
+
 /** Value multiplier by condition. Oracle writes this per SKU. */
 export interface SkuFloatCurve {
   sku_id: UUID;

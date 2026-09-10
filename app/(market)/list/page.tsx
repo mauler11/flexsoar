@@ -1,51 +1,48 @@
 /**
  * app/(market)/list/page.tsx
  *
- * The self-serve listing flow. Server page: it resolves the live SKU catalog
- * and the caller's payout facts once, then hands the wizard all the data it
- * needs as props. The wizard stays client-side so steps survive back/next
- * without re-fetching.
+ * The sell landing: a centered product search over the live catalog. Pick a
+ * result to open its product page (sizes live there); a miss offers the
+ * Product Request path. The steps below describe the real flow — submit
+ * with photos, authentication, live listing, ship on sale, payout after
+ * the hold — never instant offers or prepaid labels, which don't exist here.
  */
 import type { Metadata } from "next";
-import { getSkus, getPayoutMethodForUser, getUser } from "@/lib/api/contract";
-import { currentUserId, getCashPayoutCountryCodes } from "@/app/(market)/queries";
-import { IntakeWizard } from "@/components/market/intake/IntakeWizard";
+import Link from "next/link";
+import { ListSearch } from "@/components/market/ListSearch";
 
 export const metadata: Metadata = {
-  title: "List a shoe — FlexSoar Market",
+  title: "Sell — FlexSoar Market",
 };
 
-export default async function ListPage() {
-  const skus = await getSkus({});
+const STEPS: ReadonlyArray<{ title: string }> = [
+  { title: "Search for the product you'd like to sell." },
+  { title: "Submit your pair — photos, honest condition, your price." },
+  { title: "We authenticate it and your listing goes live." },
+  { title: "Ship within 48 hours when it sells." },
+  { title: "Receive your payout after the clearing hold." },
+  { title: "Sell more, level up, unlock lower selling fees." },
+];
 
-  // How THIS seller will actually be paid — geography-derived
-  // (fn_payout_method_for_user), never a choice. Read before they commit to
-  // a listing, not surfaced only after it sells.
-  const me = await currentUserId();
-  const [sellerPayoutMethod, existingCountryCode, cashPayoutCountryCodes] = await Promise.all([
-    me ? getPayoutMethodForUser(me).catch(() => null) : Promise.resolve(null),
-    me ? getUser({ id: me }).then((u) => u?.country_code ?? null) : Promise.resolve(null),
-    getCashPayoutCountryCodes().catch(() => [] as string[]),
-  ]);
-
+export default function ListLandingPage() {
   return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-extrabold tracking-tight">
-          List a shoe
-        </h1>
-        <p className="font-mono text-[10px] uppercase tracking-tight text-muted">
-          Four photos · honest condition · you set the reserve
-        </p>
-      </div>
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 py-8">
+      <ListSearch />
 
-      <IntakeWizard
-        skus={skus}
-        signedIn={me != null}
-        sellerPayoutMethod={sellerPayoutMethod}
-        initialCountryCode={existingCountryCode}
-        cashPayoutCountryCodes={cashPayoutCountryCodes}
-      />
+      <ol className="flex flex-col gap-3">
+        {STEPS.map((step, i) => (
+          <li key={step.title} className="flex items-center gap-3 text-[15px]">
+            <span className="font-bold text-foreground">{i + 1}.</span>
+            <span className="text-muted">{step.title}</span>
+          </li>
+        ))}
+      </ol>
+
+      <p className="text-center text-sm">
+        <Link href="/terms" className="font-semibold text-accent hover:underline">
+          Seller FAQ
+        </Link>
+      </p>
     </div>
   );
 }
