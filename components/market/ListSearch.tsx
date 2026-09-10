@@ -12,7 +12,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { searchSkuModelsAction } from "@/app/(market)/list/actions";
-import { Button } from "@/components/ui/Button";
 
 interface ModelHit {
   id: string;
@@ -142,9 +141,6 @@ export function ListSearch() {
               Product Request
             </Link>
           </p>
-          <Button variant="secondary" size="sm" href="/list/request">
-            Request a product
-          </Button>
         </div>
       )}
 

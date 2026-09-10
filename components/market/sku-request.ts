@@ -40,13 +40,16 @@ export function validateSkuRequestInput(input: SkuRequestInput):
     }
     sizeUs = input.sizeUs;
   }
-  if (!Array.isArray(input.photos) || input.photos.length < 1) {
-    return { ok: false, message: "Add at least one photo of the shoe." };
+  // Photos are optional on requests — catalog identity (brand/model/
+  // colorway) is what the review needs. Anything attached must still be an
+  // uploaded https URL.
+  const photos: Array<{ url: string; angle: string }> = [];
+  if (!Array.isArray(input.photos)) {
+    return { ok: false, message: "Invalid photos payload." };
   }
   if (input.photos.length > 8) {
     return { ok: false, message: "At most 8 photos per request." };
   }
-  const photos: Array<{ url: string; angle: string }> = [];
   for (const p of input.photos) {
     if (
       typeof p !== "object" || p === null ||

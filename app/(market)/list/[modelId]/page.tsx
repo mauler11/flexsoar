@@ -12,6 +12,7 @@ import { notFound } from "next/navigation";
 import { getSkuModel } from "@/lib/api/contract";
 import { SizeChartButton } from "@/components/market/SizeChartModal";
 import { SellerGuideButton } from "@/components/market/SellerGuideModal";
+import { SizeGrid } from "@/components/market/SizeGrid";
 import { formatMyr } from "@/components/card/format";
 import type { UUID } from "@/lib/db/types";
 
@@ -19,11 +20,7 @@ export const metadata: Metadata = {
   title: "Sell your pair — FlexSoar Market",
 };
 
-/** Standard US men's run,matching the size chart. Whole + half sizes 3–13. */
-export const SIZE_RUN: readonly number[] = Array.from(
-  { length: 21 },
-  (_, i) => 3 + i * 0.5,
-);
+
 
 export default async function ListProductPage({
   params,
@@ -99,29 +96,10 @@ export default async function ListProductPage({
             <SellerGuideButton />
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {SIZE_RUN.map((size) => (
-              <Link
-                key={size}
-                href={`/list/new?modelId=${model.id}&sizeUs=${size}`}
-                aria-label={`List US size ${size}`}
-                className={`flex flex-col items-center gap-0.5 rounded-xl border px-2 py-2.5 text-center transition ${
-                  existingSizes.has(size)
-                    ? "border-line-strong bg-raised hover:border-accent"
-                    : "border-dashed border-line-strong bg-raised/40 hover:border-accent"
-                }`}
-              >
-                <span className="text-sm font-extrabold">US M {size}</span>
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-                  Make list
-                </span>
-              </Link>
-            ))}
-          </div>
-          <p className="text-xs text-muted">
-            Dashed sizes aren&apos;t in the catalog yet — picking one creates
-            the variant as part of your submission.
-          </p>
+          <SizeGrid
+            modelId={model.id}
+            existingSizes={[...existingSizes]}
+          />
         </div>
       </div>
     </div>

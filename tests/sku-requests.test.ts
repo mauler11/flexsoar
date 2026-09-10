@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { validateSkuRequestInput } from '@/components/market/sku-request';
-import { SIZE_RUN } from '@/app/(market)/list/[modelId]/page';
+import { SIZE_RUN } from '@/components/market/size-run';
 
 describe('validateSkuRequestInput (044 product requests)', () => {
   const base = {
@@ -33,8 +33,8 @@ describe('validateSkuRequestInput (044 product requests)', () => {
     expect(validateSkuRequestInput({ ...base, sizeUs: null }).ok).toBe(true);
   });
 
-  it('requires at least one uploaded https photo', () => {
-    expect(validateSkuRequestInput({ ...base, photos: [] }).ok).toBe(false);
+  it('accepts zero photos; rejects non-https ones', () => {
+    expect(validateSkuRequestInput({ ...base, photos: [] }).ok).toBe(true);
     expect(
       validateSkuRequestInput({
         ...base,
