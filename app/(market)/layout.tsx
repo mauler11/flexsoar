@@ -197,38 +197,52 @@ export default async function MarketLayout({
                     <SearchInput />
                   </Suspense>
                 </div>
-                <div className="flex shrink-0 items-center gap-4">
-              {me ? (
-                <>
-                  <NotificationBell
-                    notifications={notifications}
-                    unreadCount={unreadCount}
-                  />
-                  <Link
-                    href="/dashboard"
-                    title="Your XP"
-                    className="hidden rounded-lg border border-accent/50 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/10 sm:inline-block"
-                  >
-                    {(me.xp_total ?? 0).toLocaleString()} XP
-                  </Link>
-                  <a
-                    href={`/u/${me.handle}`}
-                    className="hidden text-xs text-muted hover:text-foreground md:inline"
-                  >
-                    @{me.handle} · LV {me.level}
-                  </a>
+                <div className="flex shrink-0 items-center gap-3">
+                  {me ? (
+                    <>
+                      <NotificationBell
+                        notifications={notifications}
+                        unreadCount={unreadCount}
+                      />
+                      <a
+                        href={`/u/${me.handle}`}
+                        className="hidden items-center gap-1.5 md:inline-flex"
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="flex h-6 w-6 items-center justify-center rounded-full bg-raised text-[11px] font-extrabold text-foreground"
+                        >
+                          {me.handle.slice(0, 1).toUpperCase()}
+                        </span>
+                        <span className="text-[13px] text-muted hover:text-foreground">
+                          @{me.handle}
+                        </span>
+                      </a>
+                      <span className="hidden text-xs font-semibold text-muted sm:inline">
+                        LV {me.level}
+                      </span>
+                      <Link
+                        href="/dashboard"
+                        title="Your XP"
+                        className="hidden rounded-lg border border-accent/50 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/10 sm:inline-block"
+                      >
+                        {(me.xp_total ?? 0).toLocaleString()} XP
+                      </Link>
                       <form action={signOut}>
-                        <Button type="submit" variant="secondary" size="sm">
+                        <button
+                          type="submit"
+                          className="text-xs text-muted/70 transition hover:text-foreground"
+                        >
                           Sign out
-                        </Button>
+                        </button>
                       </form>
-                </>
-              ) : (
-                <Button href="/sign-in" size="sm" variant="secondary">
-                  Sign in
-                </Button>
-              )}
-            </div>
+                    </>
+                  ) : (
+                    <Button href="/sign-in" size="sm" variant="secondary" className="rounded-lg">
+                      Sign in
+                    </Button>
+                  )}
+                </div>
           </div>
         </header>
 

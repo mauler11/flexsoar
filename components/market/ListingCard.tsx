@@ -136,7 +136,7 @@ export function ListingCard({
           </p>
         )}
 
-        <span className="mt-2 inline-flex items-center justify-center rounded-lg bg-accent px-3 py-2 text-sm font-bold text-[#0B0B0B] transition group-hover:brightness-110">
+        <span className="mt-2 inline-flex w-full items-center justify-center rounded-md bg-accent px-3 py-2.5 text-sm font-extrabold uppercase tracking-wide text-[#0B0B0B] transition group-hover:brightness-110">
           Buy now
         </span>
       </div>

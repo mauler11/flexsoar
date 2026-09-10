@@ -62,7 +62,7 @@ export function SearchInput({ initial = "" }: SearchInputProps) {
         onChange={(e) => setValue(e.target.value)}
         className="w-full rounded-xl border border-line-strong bg-raised py-2 pl-9 pr-8 text-sm text-foreground placeholder:text-muted/60 hover:border-muted focus:border-accent focus:outline-none"
       />
-      {value && (
+      {value ? (
         <button
           type="button"
           aria-label="Clear search"
@@ -71,6 +71,13 @@ export function SearchInput({ initial = "" }: SearchInputProps) {
         >
           ×
         </button>
+      ) : (
+        <kbd
+          aria-hidden="true"
+          className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 rounded-md border border-line-strong px-1.5 text-[11px] text-muted sm:block"
+        >
+          /
+        </kbd>
       )}
     </div>
   );
