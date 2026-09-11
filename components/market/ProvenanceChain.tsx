@@ -7,6 +7,11 @@ import { formatMyr } from "@/components/card/format";
 
 export interface ProvenanceChainProps {
   provenance: ProvenanceEntry[];
+  /**
+   * Ends only: first hop (mint) + current owner. Long chains collapse the
+   * middle behind a count line instead of scrolling the page.
+   */
+  endsOnly?: boolean;
 }
 
 function ActionIcon({ action }: { action: "mint" | "sold" | "acquired" }) {
@@ -32,8 +37,14 @@ function ActionIcon({ action }: { action: "mint" | "sold" | "acquired" }) {
   }
 }
 
-export function ProvenanceChain({ provenance }: ProvenanceChainProps) {
+export function ProvenanceChain({ provenance, endsOnly = false }: ProvenanceChainProps) {
   const [isExpanded, setIsExpanded] = useState(true);
+
+  const entries =
+    endsOnly && provenance.length > 2
+      ? [provenance[0], provenance[provenance.length - 1]]
+      : provenance;
+  const hiddenCount = provenance.length - entries.length;
 
   if (provenance.length === 0) {
     return (
@@ -63,9 +74,9 @@ export function ProvenanceChain({ provenance }: ProvenanceChainProps) {
       </button>
 
       <ol className={cn("space-y-5", !isExpanded && "hidden lg:block")}>
-        {provenance.map((entry, index) => {
+        {entries.map((entry, index) => {
           const released = entry.released_at ? entry.released_at.slice(0, 10) : null;
-          const isMint = index === 0;
+          const isMint = entry === provenance[0];
           const action = isMint ? "mint" : (released ? "sold" : "acquired");
 
           return (
@@ -105,6 +116,11 @@ export function ProvenanceChain({ provenance }: ProvenanceChainProps) {
             </li>
           );
         })}
+        {hiddenCount > 0 && (
+          <li className="text-xs text-muted">
+            + {hiddenCount} earlier {hiddenCount === 1 ? "hop" : "hops"} in between
+          </li>
+        )}
         {provenance.length === 0 && (
           <li className="text-sm tracking-tight text-muted py-4">
             No provenance recorded.

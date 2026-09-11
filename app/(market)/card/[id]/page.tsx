@@ -28,8 +28,14 @@ import { Countdown } from "@/components/market/Countdown";
 import { ExpandableSection } from "@/components/ui/ExpandableSection";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { ConditionBadge } from "@/components/card/ConditionBadge";
 import { formatMyr } from "@/components/card/format";
-import { publishedConditionLabel } from "@/lib/domain/rarity";
+import { fairIndicator } from "@/components/market/ListingCard";
+import {
+  conditionGradeBand,
+  floatBand,
+  publishedConditionLabel,
+} from "@/lib/domain/rarity";
 
 /** Parse the photos JSON field into a string array. */
 function parsePhotos(json: unknown): string[] {
@@ -178,14 +184,21 @@ export default async function CardPage({
             <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
               Provenance
             </h2>
-            <ProvenanceChain provenance={detail.provenance} />
+            <ProvenanceChain provenance={detail.provenance} endsOnly />
           </div>
 
           <ExpandableSection title="Details">
             <div className="flex flex-col gap-3 text-sm">
               <div className="flex items-baseline justify-between text-sm text-muted">
                 <span>Condition</span>
-                <span className="text-foreground font-medium">{conditionLabel}</span>
+                <ConditionBadge
+                  band={
+                    detail.condition_grade
+                      ? conditionGradeBand(detail.condition_grade)
+                      : floatBand(detail.float_value)
+                  }
+                  label={conditionLabel}
+                />
               </div>
               {listing?.fair_price_cents != null && (
                 <div className="flex items-baseline justify-between text-sm text-muted">
@@ -319,6 +332,11 @@ function OwnerListingPanel({
   listing: NonNullable<Awaited<ReturnType<typeof getListing>>>;
 }) {
   const sold = listing.order != null;
+  const fair = fairIndicator(
+    listing.price_cents,
+    listing.fair_price_cents,
+    listing.oracle_value_cents,
+  );
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-line bg-raised p-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -340,8 +358,19 @@ function OwnerListingPanel({
         </p>
       )}
       {listing.fair_price_cents != null && (
-        <p className="font-mono text-[10px] tracking-tight text-muted">
+        <p className="text-[11px] text-muted">
           Fair price {formatMyr(listing.fair_price_cents)}
+        </p>
+      )}
+      {fair != null && (
+        <p
+          className={
+            fair.below
+              ? "text-[11px] font-semibold text-accent"
+              : "text-[11px] font-semibold text-[#E8B33A]"
+          }
+        >
+          {fair.text}
         </p>
       )}
 
