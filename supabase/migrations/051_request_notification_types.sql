@@ -1,5 +1,5 @@
 -- ============================================================================
--- 049_request_notification_types.sql
+-- 051_request_notification_types.sql
 --
 -- 028's notifications.type CHECK constraint allows only the original four
 -- types, so request_approved / request_rejected inserts (admin review queue)
@@ -34,11 +34,11 @@ BEGIN
   WHERE conname = 'notifications_type_check';
 
   IF v_def IS NULL THEN
-    RAISE EXCEPTION '049: notifications_type_check missing';
+    RAISE EXCEPTION '051: notifications_type_check missing';
   END IF;
   IF v_def NOT LIKE '%request_approved%' OR v_def NOT LIKE '%request_rejected%' THEN
-    RAISE EXCEPTION '049: constraint lacks request types: %', v_def;
+    RAISE EXCEPTION '051: constraint lacks request types: %', v_def;
   END IF;
 
-  RAISE NOTICE '049 ok: notification types extended';
+  RAISE NOTICE '051 ok: notification types extended';
 END $$;
