@@ -33,7 +33,7 @@ export interface HeldCardProps {
   shownInProfile: boolean;
   /** Dashboard shows the toggle; the public profile never does. */
   showToggle?: boolean;
-  /** Ask price when listed, else the oracle market value. Omitted when unknown. */
+  /** Ask price when listed, else the market value. Omitted when unknown. */
   priceCents?: number | null;
   /** Small caption under the price: "Ask" or "Oracle". */
   priceCaption?: string;

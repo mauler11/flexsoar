@@ -56,17 +56,26 @@ export default function PrivacyPage() {
       </main>
 
       <footer className="border-t border-line py-8 text-center">
-        <nav className="flex flex-col sm:flex-row items-center justify-center gap-4 text-[11px] uppercase tracking-wide text-muted">
-          <Link href="/" className="hover:text-foreground">
-            Home
-          </Link>
-          <Link href="/market" className="hover:text-foreground">
-            Market
+        <nav className="flex flex-col sm:flex-row items-center justify-center gap-4 text-[13px] text-muted">
+          <Link href="/about" className="hover:text-foreground">
+            About Us
           </Link>
           <Link href="/terms" className="hover:text-foreground">
             Terms
           </Link>
+          <Link href="/privacy" className="hover:text-foreground">
+            Privacy
+          </Link>
+          <Link href="/contact" className="hover:text-foreground">
+            Contact
+          </Link>
+          <Link href="/socials" className="hover:text-foreground">
+            Socials
+          </Link>
         </nav>
+        <p className="mt-3 text-xs text-muted">
+          © 2026 FlexSoar. All rights reserved.
+        </p>
       </footer>
     </div>
   );

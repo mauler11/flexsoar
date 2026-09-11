@@ -19,6 +19,7 @@ import { signOut } from "@/app/(auth)/actions";
 import { currentUserId } from "@/app/(market)/queries";
 import { SearchInput } from "@/components/market/SearchInput";
 import { Sidebar, type SidebarItem } from "@/components/market/Sidebar";
+import { SiteFooter } from "@/components/market/SiteFooter";
 import { OnboardingTour } from "@/components/market/OnboardingTour";
 import { NotificationBell } from "@/components/market/NotificationBell";
 
@@ -118,7 +119,7 @@ function notificationLinkLabel(type: ContractNotification["type"]): string | und
 export const metadata: Metadata = {
   title: "FlexSoar Market",
   description:
-    "Level-gated, oracle-priced card market. Mint cards into claims, list them, and settle sales through Stripe.",
+    "Fair-priced card market. Mint cards into claims, list them, and settle sales through Stripe.",
 };
 
 export default async function MarketLayout({
@@ -245,13 +246,7 @@ export default async function MarketLayout({
               {children}
             </main>
 
-            <footer className="border-t border-line py-4 text-center text-[11px] text-muted">
-              <nav className="flex flex-col sm:flex-row items-center justify-center gap-3">
-                <Link href="/terms" className="hover:text-foreground">Terms</Link>
-                <Link href="/privacy" className="hover:text-foreground">Privacy</Link>
-                <span>FlexSoar · Market — Buy. Sell. Redeem.</span>
-              </nav>
-            </footer>
+            <SiteFooter />
           </div>
         </div>
       </ToastProvider>

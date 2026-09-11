@@ -172,11 +172,6 @@ export default async function DashboardPage() {
         visibility={visibility}
       />
 
-      <p className="border-t border-line-strong pt-2 text-xs text-muted">
-        Anything stale? The fulfilment SLA (M5) is flagged in
-        docs/handoff/market.md — the dashboard renders the reads the contract
-        has today.
-      </p>
     </div>
   );
 }

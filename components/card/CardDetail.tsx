@@ -187,7 +187,7 @@ export function CardDetail({
             )}
             {listing && listing.oracle_value_cents != null && (
               <div className="mt-1 text-sm text-muted">
-                Oracle fair value {formatMyr(listing.oracle_value_cents)}
+                Fair Price {formatMyr(listing.oracle_value_cents)}
               </div>
             )}
           </div>
