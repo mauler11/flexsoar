@@ -105,7 +105,9 @@ export function DashboardTabs({
                   statusLabel={
                     card.status === "active"
                       ? "Held — not listed"
-                      : card.status.replace(/_/g, " ")
+                      : card.status === "pending_vault"
+                        ? "Pending vault — frozen in transit"
+                        : card.status.replace(/_/g, " ")
                   }
                   shownInProfile={visibility[card.id] ?? true}
                 />

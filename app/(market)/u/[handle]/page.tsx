@@ -52,7 +52,15 @@ export default async function ProfilePage({
     holdingsVisible ? getListings({ sellerId: profile.id }) : Promise.resolve([]),
     holdingsVisible ? getTradeHistory(profile.id) : Promise.resolve([]),
     holdingsVisible
-      ? getCards({ ownerId: profile.id, status: ["active", "locked"], limit: 200 }).catch(() => [])
+      ? getCards({
+          ownerId: profile.id,
+          // Pending-vault cards are still yours — see dashboard's
+          // HELD_CARD_STATUSES note on the CardStatus/023a gap.
+          status: ["active", "locked", "pending_vault"] as NonNullable<
+            Parameters<typeof getCards>[0]
+          >["status"],
+          limit: 200,
+        }).catch(() => [])
       : Promise.resolve([]),
     getHiddenCardIds(profile.id),
     getPlatformConfig(),

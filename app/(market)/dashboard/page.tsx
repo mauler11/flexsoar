@@ -83,7 +83,14 @@ const HELD_STATUSES: readonly ItemSummary["status"][] = [
   "redemption_hold",
 ];
 
-const HELD_CARD_STATUSES: CardSummary["status"][] = ["active", "locked"];
+/**
+ * Held stock includes frozen first sales: a pending_vault card is still
+ * yours, just unmovable until the shoe reaches us — hiding it reads as
+ * losing the shoe. The cast is load-bearing: CardStatus in lib/db/types.ts
+ * predates 023a's pending_vault enum value (track/data's lane), while the
+ * database accepts it.
+ */
+const HELD_CARD_STATUSES = ["active", "locked", "pending_vault"] as CardSummary["status"][];
 
 export default async function DashboardPage() {
   const me = await currentUserId();
