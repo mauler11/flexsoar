@@ -31,15 +31,6 @@ export default function ContactPage() {
           </a>
         </p>
         <p>
-          <span className="text-muted">Phone / WhatsApp — </span>
-          <a
-            href="tel:+601128375246"
-            className="font-semibold text-accent hover:underline"
-          >
-            +60 11-2837 5246
-          </a>
-        </p>
-        <p>
           <span className="text-muted">Community — </span>
           <Link
             href="/socials"

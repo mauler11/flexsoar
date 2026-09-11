@@ -3,7 +3,6 @@ import { Resend } from 'resend';
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const FROM_EMAIL = process.env.FROM_EMAIL ?? 'FlexSoar <noreply@flexsoar.net>';
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL ?? 'info@flexsoar.net';
-const SUPPORT_PHONE = process.env.SUPPORT_PHONE ?? '+601128375246';
 
 let resend: Resend | null = null;
 
@@ -169,8 +168,8 @@ export function buildCardSoldEmail(input: CardSoldEmailInput): {
     <p>This is not a warning — it is the automatic consequence (Terms section 4.5).</p>
     <h3 style="margin-top: 24px; font-size: 16px;">Why tracking matters</h3>
     <p>If you ship within 48 hours <strong>with tracking</strong> and the courier loses the parcel, FlexSoar absorbs the loss (Terms section 4.5). Without tracking, you bear the loss. Tracking is required — not optional.</p>
-    <h3 style="margin-top: 24px; font-size: 16px;">Questions about courier or drop-off?</h3>
-    <p>Contact <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> or call/WhatsApp ${SUPPORT_PHONE}.</p>
+  <h3 style="margin-top: 24px; font-size: 16px;">Questions about courier or drop-off?</h3>
+  <p>Contact <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> — we reply within a day.</p>
     <p>— FlexSoar</p>
     <hr style="border: none; border-top: 1px solid #e5e5e5; margin: 24px 0;" />
     <p style="font-size: 12px; color: #666;">This is a transactional email about your sale. You cannot opt out while you have an active listing.</p>
@@ -205,7 +204,7 @@ Why tracking matters:
 If you ship within 48 hours with tracking and the courier loses the parcel, FlexSoar absorbs the loss (Terms section 4.5). Without tracking, you bear the loss. Tracking is required — not optional.
 
 Questions about courier or drop-off?
-Contact ${SUPPORT_EMAIL} or call/WhatsApp ${SUPPORT_PHONE}.
+Contact ${SUPPORT_EMAIL} — we reply within a day.
 
 — FlexSoar
 This is a transactional email about your sale. You cannot opt out while you have an active listing.

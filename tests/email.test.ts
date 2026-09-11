@@ -134,12 +134,12 @@ describe('email templates', () => {
       expect(text).toContain('courier loses the parcel, FlexSoar absorbs the loss');
     });
 
-    it('includes support email and phone for courier questions', () => {
+    it('includes support email (never a personal phone number) for courier questions', () => {
       const { html, text } = buildCardSoldEmail(baseInput);
       expect(html).toContain('info@flexsoar.net');
-      expect(html).toContain('+601128375246');
+      expect(html).not.toContain('+601128375246');
       expect(text).toContain('info@flexsoar.net');
-      expect(text).toContain('+601128375246');
+      expect(text).not.toContain('+601128375246');
     });
 
     it('uses the exact due_by from vault_intakes, not a recalculated value', () => {

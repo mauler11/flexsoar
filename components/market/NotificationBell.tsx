@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { createBrowserClient } from "@supabase/ssr";
 import { cn } from "@/components/ui/cn";
 import { Button } from "@/components/ui/Button";
 import { formatMyr } from "@/components/card/format";
@@ -37,6 +39,32 @@ export function NotificationBell({
   // Expanded by default so the full message reads; the triangle collapses
   // long bodies back to one line. Absent id = expanded.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const router = useRouter();
+
+  // Live bell (052): new rows refresh the server-rendered list in place —
+  // no filter needed, RLS scopes delivery to the caller's own rows.
+  useEffect(() => {
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    );
+    const channel = supabase
+      .channel("notifications-bell")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "notifications" },
+        () => router.refresh(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "notifications" },
+        () => router.refresh(),
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [router]);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
