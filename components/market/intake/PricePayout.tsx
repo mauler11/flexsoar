@@ -198,7 +198,7 @@ export function PricePayout({
         </span>
         <div className="flex items-baseline justify-between gap-2">
           <span className="text-[11px] tracking-tight text-muted">
-            Oracle reference value (deadstock)
+            Fair price reference (brand new)
           </span>
           <span className="text-[13px] font-bold tracking-tight text-accent">
             {oracle != null ? formatMyr(oracle) : "unpriced"}

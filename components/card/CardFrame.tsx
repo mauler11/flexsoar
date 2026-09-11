@@ -24,6 +24,13 @@ export interface CardFrameProps {
   isExceptional?: boolean;
   className?: string;
   children: ReactNode;
+  /**
+   * Plain mode: tier-coloured rounded border only, no studs/bars/ticks.
+   * Used at large scale (card detail), where the full ornament set reads
+   * busy and the square ornaments fight the rounded corners. Small tiles
+   * keep the full set — it reads cleanly at 180px.
+   */
+  plain?: boolean;
 }
 
 export function CardFrame({
@@ -31,6 +38,7 @@ export function CardFrame({
   isExceptional = false,
   className,
   children,
+  plain = false,
 }: CardFrameProps) {
   const color = borderColorFor(tier, isExceptional);
   return (
@@ -38,15 +46,15 @@ export function CardFrame({
       className={cn("relative rounded-2xl", className)}
       style={{
         borderColor: color,
-        borderWidth: isExceptional ? 2 : 1,
+        borderWidth: isExceptional || plain ? 2 : 1,
         borderStyle: "solid",
       }}
     >
       {children}
-      {tier >= 2 && <CornerStuds color={color} />}
-      {tier >= 3 && <TopAccentBar color={color} />}
-      {tier >= 4 && <InnerHairline color={color} />}
-      {tier >= 5 && <EdgeMarks color={color} />}
+      {!plain && tier >= 2 && <CornerStuds color={color} />}
+      {!plain && tier >= 3 && <TopAccentBar color={color} />}
+      {!plain && tier >= 4 && <InnerHairline color={color} />}
+      {!plain && tier >= 5 && <EdgeMarks color={color} />}
       {isExceptional && <ExceptionalRibbon />}
     </div>
   );

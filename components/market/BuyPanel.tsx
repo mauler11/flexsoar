@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Banner } from "@/components/market/Banner";
 import { OrderPoll } from "@/components/market/OrderPoll";
-import { formatFsc, formatMyr } from "@/components/card/format";
+import { formatMyr } from "@/components/card/format";
 
 export interface BuyPanelListing {
   id: string;
@@ -54,14 +54,10 @@ export interface BuyPanelProps {
 export function BuyPanel({
   listing,
   checkoutActive,
-  availableCreditCents,
   firstSalePending,
 }: BuyPanelProps) {
   const [pending, startTransition] = useTransition();
   const [unlocked, setUnlocked] = useState(false);
-
-  const maxCreditCents = Math.min(availableCreditCents ?? 0, listing.priceCents);
-  const [creditInput, setCreditInput] = useState(() => (maxCreditCents / 100).toFixed(2));
 
   if (checkoutActive) {
     return (
@@ -79,24 +75,8 @@ export function BuyPanel({
     listing.oracleValueCents != null &&
     listing.priceCents < listing.oracleValueCents * 0.85;
 
-  // Clamped for DISPLAY only — the server independently re-validates against
-  // getCreditAvailable() and REFUSES an over-available request rather than
-  // clamping it (createCheckoutAction). This just keeps the input honest
-  // about what the buyer can actually apply. Plain arithmetic, not useMemo —
-  // this runs after the checkoutActive early return, so a hook here would
-  // violate rules-of-hooks, and the computation is cheap enough not to need
-  // memoizing anyway.
-  const parsedCredit = Math.round(Number(creditInput) * 100);
-  const creditCents =
-    !Number.isFinite(parsedCredit) || parsedCredit < 0
-      ? 0
-      : Math.min(parsedCredit, maxCreditCents);
-
-  const cashCents = Math.max(listing.priceCents - creditCents, 0);
-  const fscOnly = cashCents === 0 && creditCents > 0;
-
   function checkout() {
-    startTransition(() => createCheckoutAction(listing.id, creditCents));
+    startTransition(() => createCheckoutAction(listing.id, 0));
   }
 
   return (
@@ -112,19 +92,19 @@ export function BuyPanel({
       </div>
 
       {listing.oracleValueCents != null && (
-        <p className="text-[10px] tracking-tight text-muted">
-          Oracle fair value {formatMyr(listing.oracleValueCents)}
+        <p className="text-[11px] text-muted">
+          Fair Price {formatMyr(listing.oracleValueCents)}
         </p>
       )}
       {listing.fairPriceCents != null && (
-        <p className="text-[10px] tracking-tight text-muted">
+        <p className="text-[11px] text-muted">
           Fair price (this condition) {formatMyr(listing.fairPriceCents)}
         </p>
       )}
 
       {underOracle && (
-        <Banner tone="warn" title="Ask under oracle value">
-          This ask is more than 15% below the oracle&apos;s fair value.
+        <Banner tone="warn" title="Ask under fair price">
+          This ask is more than 15% below fair price.
         </Banner>
       )}
 
@@ -138,63 +118,17 @@ export function BuyPanel({
         </Banner>
       )}
 
-      {buyable && (
-        <div className="flex flex-col gap-1.5 rounded-xl rounded-xl border border-line bg-overlay p-3">
-          <div className="flex items-center justify-between gap-2">
-            <label
-              htmlFor="buy-credit-input"
-              className="text-[10px] uppercase tracking-tight text-muted"
-            >
-              Apply FSC
-            </label>
-            <span className="text-[9px] uppercase tracking-tight text-muted">
-              {formatFsc(maxCreditCents)} available
-            </span>
-          </div>
-          <input
-            id="buy-credit-input"
-            type="number"
-            inputMode="decimal"
-            min={0}
-            max={maxCreditCents / 100}
-            step="0.01"
-            value={creditInput}
-            disabled={maxCreditCents <= 0}
-            onChange={(e) => setCreditInput(e.target.value)}
-            className="rounded-xl border border-line-strong bg-overlay px-2.5 py-2 text-[13px] text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-            aria-label="FSC to apply to this purchase"
-          />
-          <div className="flex items-baseline justify-between text-[10px] tracking-tight text-muted">
-            <span>{fscOnly ? "Settles entirely in FSC" : "Due by card"}</span>
-            <span className="text-foreground">
-              {fscOnly ? formatFsc(creditCents) : formatMyr(cashCents)}
-            </span>
-          </div>
-        </div>
-      )}
-
       <Button
         type="button"
         size="lg"
         disabled={!buyable || pending}
         onClick={checkout}
+        className="py-3 text-base"
       >
-        {pending
-          ? fscOnly
-            ? "Settling…"
-            : "Redirecting…"
-          : buyable
-            ? fscOnly
-              ? "Pay with FSC"
-              : creditCents > 0
-                ? `Pay ${formatMyr(cashCents)} + ${formatFsc(creditCents)}`
-                : "Buy with Stripe"
-            : "Sign in"}
+        {pending ? "Redirecting…" : buyable ? "Buy Now" : "Sign in"}
       </Button>
-      <p className="text-[9px] uppercase tracking-tight text-muted">
-        {fscOnly
-          ? "FSC settles immediately — no card charge, no Stripe redirect."
-          : "Sale is recorded when payment settles — never by this page."}
+      <p className="text-[11px] text-muted">
+        Sale is recorded when payment settles — never by this page.
       </p>
     </div>
   );

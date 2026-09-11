@@ -521,7 +521,14 @@ export interface CardDetail extends CardSummary {
   /** The physical side. Photos and grading notes come from intake. */
   item: Pick<
     Item,
-    'id' | 'status' | 'photos' | 'grading_notes' | 'graded_at' | 'authenticated_at' | 'custody_location'
+    | 'id'
+    | 'status'
+    | 'photos'
+    | 'grading_notes'
+    | 'graded_at'
+    | 'authenticated_at'
+    | 'custody_location'
+    | 'custody'
   >;
   /** fn_card_value_cents(). Shown beside any price, never hidden. */
   oracle_value_cents: Cents | null;
@@ -3344,7 +3351,7 @@ export async function getCard(cardId: UUID): Promise<CardDetail | null> {
       `${CARD_SUMMARY_COLUMNS}, exceptional_reason, ` +
         `sku:skus(${SKU_REF_COLUMNS}), ` +
         `owner:public_profiles(${PUBLIC_PROFILE_COLUMNS}), ` +
-        `item:items(id, status, photos, grading_notes, graded_at, authenticated_at)`,
+        `item:items(id, status, photos, grading_notes, graded_at, authenticated_at, custody)`,
     )
     .eq('id', cardId)
     .maybeSingle();

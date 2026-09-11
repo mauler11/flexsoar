@@ -69,8 +69,8 @@ export default async function ListProductPage({
             <p className="mt-1 text-sm text-muted">
               {model.colorway}
               {model.base_price_cents != null
-                ? ` · Oracle ${formatMyr(model.base_price_cents)}`
-                : " · Unpriced — admin sets the oracle before it can mint"}
+                ? ` · Fair price ${formatMyr(model.base_price_cents)}`
+                : " · Unpriced — needs a fair price before it can mint"}
             </p>
           </div>
         </div>

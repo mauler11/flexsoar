@@ -35,6 +35,8 @@ export interface CardDetailProps {
   showNumericFloat?: boolean;
   /** Photos from the item for the carousel */
   photos?: string[];
+  /** True when the physical pair sits in the warehouse — badged Vaulted. */
+  vaulted?: boolean;
 }
 
 export function CardDetail({
@@ -45,6 +47,7 @@ export function CardDetail({
   className,
   showNumericFloat = false,
   photos = [],
+  vaulted = false,
 }: CardDetailProps) {
   const value = displayPriceCents(card, sku, priceCents);
   const percentile =
@@ -85,6 +88,7 @@ export function CardDetail({
     <CardFrame
       tier={card.tier}
       isExceptional={card.is_exceptional}
+      plain
       className={cn("w-full overflow-hidden rounded-2xl bg-raised", className)}
     >
       <div className="grid gap-6 p-5 sm:grid-cols-2">
@@ -113,6 +117,11 @@ export function CardDetail({
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <TierBadge tier={card.tier} isExceptional={card.is_exceptional} />
+            {vaulted && (
+              <span className="rounded-md border border-accent/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-accent">
+                Vaulted
+              </span>
+            )}
             <span className="rounded-full border border-line px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
               {card.status}
             </span>

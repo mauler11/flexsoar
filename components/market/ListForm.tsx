@@ -135,7 +135,7 @@ export function ListForm({
 
       {oracleValueCents != null && (
         <div className="flex items-baseline justify-between text-[10px] uppercase tracking-tight text-muted">
-          <span>Oracle fair value</span>
+          <span>Fair price</span>
           <span className="text-foreground">
             {formatMyr(oracleValueCents)}
           </span>
@@ -156,8 +156,8 @@ export function ListForm({
       />
 
       {belowOracle && (
-        <Banner tone="warn" title="15% below oracle value">
-          Buyers compare every ask to the oracle — a below-oracle list sells
+        <Banner tone="warn" title="15% below fair price">
+          Buyers compare every ask to the fair price — a below-fair list sells
           the fastest. This is a warning, not a block.
         </Banner>
       )}
@@ -165,7 +165,7 @@ export function ListForm({
 
       <div className="mt-1 flex items-center justify-between gap-2">
         <p className="text-[9px] uppercase tracking-tight text-muted">
-          Listing opens a level-gated window, then becomes public
+          Listing goes public immediately
         </p>
         <Button
           type="button"

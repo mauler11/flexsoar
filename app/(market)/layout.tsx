@@ -153,7 +153,7 @@ export default async function MarketLayout({
       ? [{ href: `/u/${me.handle}`, label: "Profile", icon: "profile" as const }]
       : [{ href: "/sign-in", label: "Profile", icon: "profile" as const }]),
     ...(me?.is_admin
-      ? [{ href: "/admin/submissions", label: "Admin", icon: "admin" as const }]
+      ? [{ href: "/admin", label: "Admin", icon: "admin" as const }]
       : []),
   ];
 

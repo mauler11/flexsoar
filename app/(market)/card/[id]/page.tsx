@@ -29,6 +29,7 @@ import { ExpandableSection } from "@/components/ui/ExpandableSection";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { formatMyr } from "@/components/card/format";
+import { publishedConditionLabel } from "@/lib/domain/rarity";
 
 /** Parse the photos JSON field into a string array. */
 function parsePhotos(json: unknown): string[] {
@@ -143,6 +144,10 @@ export default async function CardPage({
   const oracleCents = detail.oracle_value_cents;
   const item = detail.item;
   const photos = parsePhotos(item.photos);
+  const conditionLabel = publishedConditionLabel(
+    detail.float_value,
+    detail.condition_grade,
+  );
 
   return (
     <div className="flex flex-col gap-8">
@@ -164,6 +169,7 @@ export default async function CardPage({
         priceCents={listing?.price_cents}
         listing={listingForCard}
         photos={photos}
+        vaulted={item.custody === "warehouse"}
       />
 
       <div className="grid gap-8 lg:grid-cols-2">
@@ -175,26 +181,23 @@ export default async function CardPage({
             <ProvenanceChain provenance={detail.provenance} />
           </div>
 
-          <ExpandableSection title="Oracle & grading details">
+          <ExpandableSection title="Details">
             <div className="flex flex-col gap-3 text-sm">
-              {oracleCents != null && (
-                <div className="flex items-baseline justify-between text-sm text-muted">
-                  <span>Oracle fair value</span>
-                  <span className="text-foreground font-medium">{formatMyr(oracleCents)}</span>
-                </div>
-              )}
+              <div className="flex items-baseline justify-between text-sm text-muted">
+                <span>Condition</span>
+                <span className="text-foreground font-medium">{conditionLabel}</span>
+              </div>
               {listing?.fair_price_cents != null && (
                 <div className="flex items-baseline justify-between text-sm text-muted">
-                  <span>Fair price (this condition)</span>
+                  <span>Fair price</span>
                   <span className="text-foreground font-medium">{formatMyr(listing.fair_price_cents)}</span>
                 </div>
               )}
               {item.grading_notes && (
                 <p className="leading-snug tracking-tight text-muted">{item.grading_notes}</p>
               )}
-              <p className="font-mono text-[10px] uppercase tracking-tight text-muted">
-                Graded {item.graded_at?.slice(0, 10) ?? "—"} · Authenticated{" "}
-                {item.authenticated_at?.slice(0, 10) ?? "—"}
+              <p className="text-[11px] uppercase tracking-wide text-muted">
+                Graded {item.graded_at?.slice(0, 10) ?? "—"}
               </p>
             </div>
           </ExpandableSection>
@@ -332,8 +335,8 @@ function OwnerListingPanel({
         </span>
       </div>
       {listing.oracle_value_cents != null && (
-        <p className="font-mono text-[10px] tracking-tight text-muted">
-          Oracle fair value {formatMyr(listing.oracle_value_cents)}
+        <p className="text-[11px] text-muted">
+          Fair Price {formatMyr(listing.oracle_value_cents)}
         </p>
       )}
       {listing.fair_price_cents != null && (

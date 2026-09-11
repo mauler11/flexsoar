@@ -27,16 +27,33 @@ async function notifyRequester(
   type: "request_approved" | "request_rejected",
   payload: Record<string, unknown>,
 ): Promise<void> {
+  // Best-effort, but LOUD: 049's prehistory is a swallowed rpc error (the
+  // type CHECK rejected the new types) that made approvals look notifying.
+  // supabase-js resolves — never throws — on database errors, so the
+  // result MUST be inspected; try/catch alone catches nothing here.
   try {
     const service = createServiceSupabase();
-    await service.rpc("fn_notify", {
+    const { error } = await service.rpc("fn_notify", {
       p_user: userId,
       p_type: type,
       p_payload: payload,
     });
+    if (error) {
+      console.error("[requests] notify refused:", {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        type,
+        userId,
+      });
+    }
   } catch (thrown) {
-    // Notifications are best-effort here — the review itself already landed.
-    console.error("[requests] notify failed:", thrown instanceof Error ? thrown.message : String(thrown));
+    console.error("[requests] notify threw:", {
+      message: thrown instanceof Error ? thrown.message : String(thrown),
+      type,
+      userId,
+    });
   }
 }
 

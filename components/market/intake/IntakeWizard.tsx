@@ -356,8 +356,8 @@ function ReviewPane({
       {(isNewModel || isUnpricedModel) && (
         <div className="rounded-xl border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 text-[10px] tracking-tight text-[#E8B33A]">
           {isNewModel
-            ? `This is a NEW model — it has no oracle price yet. Your submission will be recorded, but the card CANNOT MINT until an admin sets the base price. You&apos;ll see "pending review AND pricing" in your dashboard.`
-            : `This model exists but has NO oracle price. Your submission will be recorded, but the card CANNOT MINT until an admin sets the base price. You&apos;ll see "pending review AND pricing" in your dashboard.`}
+            ? `This is a NEW model — it has no fair price yet. Your submission will be recorded, but the card CANNOT MINT until an admin sets the base price. You&apos;ll see "pending review AND pricing" in your dashboard.`
+            : `This model exists but has NO fair price. Your submission will be recorded, but the card CANNOT MINT until an admin sets the base price. You&apos;ll see "pending review AND pricing" in your dashboard.`}
         </div>
       )}
 
@@ -430,8 +430,8 @@ function DoneState({
 {(isNewModel || isUnpricedModel) && (
         <div className="rounded-xl border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 text-[10px] tracking-tight text-[#E8B33A]">
           {isNewModel
-            ? `This is a NEW model — it has no oracle price yet. The card CANNOT MINT until an admin sets the base price. Your dashboard will show "pending review AND pricing".`
-            : `This model has NO oracle price. The card CANNOT MINT until an admin sets the base price. Your dashboard will show "pending review AND pricing".`}
+            ? `This is a NEW model — it has no fair price yet. The card CANNOT MINT until an admin sets the base price. Your dashboard will show "pending review AND pricing".`
+            : `This model has NO fair price. The card CANNOT MINT until an admin sets the base price. Your dashboard will show "pending review AND pricing".`}
         </div>
       )}
       <div className="flex gap-2">

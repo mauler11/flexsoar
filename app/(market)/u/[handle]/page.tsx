@@ -178,7 +178,7 @@ export default async function ProfilePage({
                       shownInProfile={!hidden}
                       showToggle={false}
                       priceCents={ask ?? oracle}
-                      priceCaption={ask != null ? "Ask" : oracle != null ? "Oracle" : undefined}
+                      priceCaption={ask != null ? "Ask" : oracle != null ? "Market" : undefined}
                     />
                   </div>
                 </div>
