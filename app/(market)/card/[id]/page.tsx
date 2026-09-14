@@ -24,7 +24,7 @@ import { BuyPanel } from "@/components/market/BuyPanel";
 import { ListForm } from "@/components/market/ListForm";
 import { RedeemForm } from "@/components/market/RedeemForm";
 import { ProvenanceChain } from "@/components/market/ProvenanceChain";
-import { PriceChart } from "@/components/market/PriceChart";
+import { PriceChart, fairMarketPrice } from "@/components/market/PriceChart";
 import { Countdown } from "@/components/market/Countdown";
 import { ExpandableSection } from "@/components/ui/ExpandableSection";
 import { Button } from "@/components/ui/Button";
@@ -163,6 +163,14 @@ export default async function CardPage({
     .then((models) => models.find((m) => m.colorway === detail.sku.colorway) ?? null)
     .then((match) => (match ? getPriceHistory(match.id) : []))
     .catch(() => []);
+
+  // The Fair Market Price is derived from the tape (median, trailing 90d),
+  // never typed: the market-derived value first, then the listing's stored
+  // fair (admin-set rows predating the tape), then the card value.
+  const fairMarket =
+    fairMarketPrice(history) ??
+    listing?.fair_price_cents ??
+    detail.oracle_value_cents;
   const conditionLabel = publishedConditionLabel(
     detail.float_value,
     detail.condition_grade,
@@ -213,10 +221,10 @@ export default async function CardPage({
                   label={conditionLabel}
                 />
               </div>
-              {listing?.fair_price_cents != null && (
+              {fairMarket != null && (
                 <div className="flex items-baseline justify-between text-sm text-muted">
-                  <span>Fair price</span>
-                  <span className="text-foreground font-medium">{formatMyr(listing.fair_price_cents)}</span>
+                  <span>Fair Market Price</span>
+                  <span className="text-foreground font-medium">{formatMyr(fairMarket)}</span>
                 </div>
               )}
               {item.grading_notes && (
@@ -232,9 +240,9 @@ export default async function CardPage({
         </section>
 
         <section className="flex flex-col gap-6">
-          {isOwner ? (
-            listing ? (
-              <OwnerListingPanel listing={listing} />
+      {isOwner ? (
+        listing ? (
+          <OwnerListingPanel listing={listing} fairMarket={fairMarket} />
             ) : isPendingVault(detail.status) ? (
               <PendingVaultPanel intake={vaultIntake} />
             ) : detail.status === "active" ? (
@@ -267,7 +275,7 @@ export default async function CardPage({
                 id: listing.id,
                 cardId: listing.card_id,
                 priceCents: listing.price_cents,
-                fairPriceCents: listing.fair_price_cents,
+                fairPriceCents: fairMarket,
                 oracleValueCents: listing.oracle_value_cents,
                 status: listing.status,
                 sellerId: listing.seller_id,
@@ -343,13 +351,15 @@ function PendingVaultPanel({ intake }: { intake: VaultIntakeStatus | null }) {
 
 function OwnerListingPanel({
   listing,
+  fairMarket,
 }: {
   listing: NonNullable<Awaited<ReturnType<typeof getListing>>>;
+  fairMarket: number | null;
 }) {
   const sold = listing.order != null;
   const fair = fairIndicator(
     listing.price_cents,
-    listing.fair_price_cents,
+    fairMarket ?? listing.fair_price_cents,
     listing.oracle_value_cents,
   );
   return (
@@ -369,12 +379,12 @@ function OwnerListingPanel({
       </div>
       {listing.oracle_value_cents != null && (
         <p className="text-[11px] text-muted">
-          Fair Price {formatMyr(listing.oracle_value_cents)}
+          Fair Market Price {formatMyr(listing.oracle_value_cents)}
         </p>
       )}
-      {listing.fair_price_cents != null && (
+      {(fairMarket ?? listing.fair_price_cents) != null && (
         <p className="text-[11px] text-muted">
-          Fair price {formatMyr(listing.fair_price_cents)}
+          Fair Market Price {formatMyr((fairMarket ?? listing.fair_price_cents)!)}
         </p>
       )}
       {fair != null && (

@@ -13,7 +13,7 @@ import { getSkuModel, getPriceHistory } from "@/lib/api/contract";
 import { SizeChartButton } from "@/components/market/SizeChartModal";
 import { SellerGuideButton } from "@/components/market/SellerGuideModal";
 import { SizeGrid } from "@/components/market/SizeGrid";
-import { PriceChart } from "@/components/market/PriceChart";
+import { PriceChart, fairMarketPrice } from "@/components/market/PriceChart";
 import { formatMyr } from "@/components/card/format";
 import type { UUID } from "@/lib/db/types";
 
@@ -40,8 +40,12 @@ export default async function ListProductPage({
 
   // Trading tape: settled FlexSoar sales plus admin market refs, oldest
   // first. Empty until 053 lands or the first point is entered — the chart
-  // renders its own empty state, never an error.
+  // renders its own empty state, never an error. The header's Fair Market
+  // Price is derived from the same tape (median, trailing 90d) — nobody
+  // types it — falling back to the model's base only when the tape is
+  // empty.
   const history = await getPriceHistory(model.id).catch(() => []);
+  const marketPrice = fairMarketPrice(history) ?? model.base_price_cents;
 
   return (
     <div className="flex flex-col gap-4">
@@ -74,8 +78,8 @@ export default async function ListProductPage({
             </h1>
             <p className="mt-1 text-sm text-muted">
               {model.colorway}
-              {model.base_price_cents != null
-                ? ` · Fair price ${formatMyr(model.base_price_cents)}`
+              {marketPrice != null
+                ? ` · Fair Market Price ${formatMyr(marketPrice)}`
                 : " · Unpriced — needs a fair price before it can mint"}
             </p>
           </div>

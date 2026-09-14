@@ -4883,6 +4883,41 @@ export async function recordMarketRefsService(
   return result.data?.length ?? 0;
 }
 
+/**
+ * updateFairMarketCache(modelId, cents|null) -> void
+ *
+ * Refreshes the 054 display cache from the cron after every run (null
+ * clears a model back to "no market yet"). Service-role, same reasoning
+ * as recordMarketRefsService — and the ONLY write path to this column:
+ * no RLS bench policy names it, updateSkuModel() has no such field, and
+ * no UI exposes it, so it cannot be set by hand, only recomputed.
+ */
+export async function updateFairMarketCache(
+  modelId: UUID,
+  cents: Cents | null,
+): Promise<void> {
+  if (cents !== null && (!Number.isInteger(cents) || cents <= 0)) {
+    throw new ContractError(
+      'INVALID_AMOUNT',
+      `fair market cache must be a positive integer cents or null, got ${cents}`,
+      { modelId },
+    );
+  }
+  const supabase = await createServiceSupabase();
+
+  const result = await supabase
+    .from('sku_models')
+    .update({ fair_market_cents: cents })
+    .eq('id', modelId)
+    .select('id');
+  if (result.error) fail(result.error, 'sku_models');
+  if (!result.data || result.data.length === 0) {
+    throw new ContractError('NOT_FOUND', `model ${modelId} not found`, {
+      modelId,
+    });
+  }
+}
+
 // Re-exported so consumers import row types and the contract from one place.
 export type {
   Card,

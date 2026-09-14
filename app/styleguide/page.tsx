@@ -311,7 +311,7 @@ export default function StyleguidePage() {
         {/* ------------------------------------------------------------ */}
         <Section
           title="Card detail (hero)"
-          subtitle="Full-width frame, sprite at scale, condition badge, mint number, price in MYR. Fair price is always shown beside an ask. The second card demos showNumericFloat=true — the numeric gradient bar + percentile, gated behind platform_config.show_numeric_float (live-verified false today)."
+          subtitle="Full-width frame, sprite at scale, condition badge, mint number, price in MYR. Fair Market Price is always shown beside an ask. The second card demos showNumericFloat=true — the numeric gradient bar + percentile, gated behind platform_config.show_numeric_float (live-verified false today)."
         >
           <div className="flex flex-col gap-6">
             <CardDetail

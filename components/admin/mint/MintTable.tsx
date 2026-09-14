@@ -103,7 +103,7 @@ export function MintTable({ items }: { items: ItemSummary[] }) {
             </Th>
             <Th>SKU</Th>
             <Th className="text-right">Float</Th>
-            <Th className="text-right">Fair price</Th>
+            <Th className="text-right">Fair Market Price</Th>
             <Th>Result</Th>
           </Tr>
         </THead>

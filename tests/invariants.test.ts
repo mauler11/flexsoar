@@ -83,7 +83,7 @@ import { SkuModelForm, parseDraft, type Draft } from '../components/admin/skus/S
 import { VariantsTable } from '../components/admin/skus/VariantsTable';
 import { MintTable } from '../components/admin/mint/MintTable';
 import { DecisionControls, oracleHint, askingNote } from '../components/admin/submissions/DecisionControls';
-import { PriceChart, priceChange, filterByRange } from '../components/market/PriceChart';
+import { PriceChart, priceChange, filterByRange, fairMarketPrice } from '../components/market/PriceChart';
 import type { PricePoint } from '../lib/api/contract';
 import { medianSen, toMyrSen } from '../lib/market/ebay';
 import SubmissionsQueuePage from '../app/admin/submissions/page';
@@ -2385,7 +2385,7 @@ describe('SkuModelForm — rendered output agrees with parseDraft', () => {
 
   it('edit mode with base_price_cents null: price renders blank and Save changes stays enabled', () => {
     const html = renderToStaticMarkup(createElement(SkuModelForm, { model: baseSkuModel }));
-    const priceInput = html.match(/id="input-Fair price \(cents\)"[^>]*value="([^"]*)"/);
+    const priceInput = html.match(/id="input-Fair Market Price \(cents\)"[^>]*value="([^"]*)"/);
     expect(priceInput?.[1] ?? '').toBe('');
 
     const button = html.match(/<button[^>]*>Save changes<\/button>/);
@@ -2481,7 +2481,7 @@ describe('VariantsTable — price column and override helper text render MYR, ne
 // formatMyr in the first place.
 // ------------------------------------------------------------
 
-describe('MintTable — fair price column renders MYR, never FSC', () => {
+describe('MintTable — Fair Market Price column renders MYR, never FSC', () => {
   const baseItem: ItemSummary = {
     id: 'item-1',
     sku_id: 'sku-1',
@@ -2517,7 +2517,7 @@ describe('MintTable — fair price column renders MYR, never FSC', () => {
     last_proof_at: null,
   };
 
-  it('a mintable item with a fair price: the Fair price column shows a dollar amount, never FSC', () => {
+  it('a mintable item with a fair price: the Fair Market Price column shows a dollar amount, never FSC', () => {
     const html = renderToStaticMarkup(createElement(MintTable, { items: [baseItem] }));
     expect(html).toContain(formatMyr(26000));
     expect(html).not.toContain('FSC');
@@ -3259,6 +3259,20 @@ describe('PriceChart — trading tape renders MYR, never FSC', () => {
     expect(filterByRange([old, mid, recent], 'ALL', now)).toEqual([old, mid, recent]);
     // Only one point in window — falls back to the full tape, never empty.
     expect(filterByRange([old, recent], '1M', now)).toEqual([old, recent]);
+  });
+
+  it('fairMarketPrice: median in window, latest-point fallback, null on empty', () => {
+    const now = new Date('2026-09-01T00:00:00.000Z').getTime();
+    const pts: PricePoint[] = [
+      { priceCents: 20000, observedAt: '2026-01-01T12:00:00.000Z', source: 'market' },
+      { priceCents: 24000, observedAt: '2026-08-01T12:00:00.000Z', source: 'market' },
+      { priceCents: 26000, observedAt: '2026-08-20T12:00:00.000Z', source: 'flexsoar' },
+    ];
+    // Median of the two in-window points — sales and refs weigh equally.
+    expect(fairMarketPrice(pts, 90, now)).toBe(25000);
+    // Stale tape — latest point rather than nothing.
+    expect(fairMarketPrice([pts[0]], 90, now)).toBe(20000);
+    expect(fairMarketPrice([], 90, now)).toBeNull();
   });
 });
 

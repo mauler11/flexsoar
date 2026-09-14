@@ -108,7 +108,7 @@ export default async function ReviewSubmissionPage({
               : formatMyr(submission.asking_price_cents)}
           </p>
           <p className="font-mono text-[10px] tracking-tight text-muted">
-            paid as {submission.submitted_payout} · Fair price{" "}
+            paid as {submission.submitted_payout} · Fair Market Price{" "}
             {submission.sku.market_price_cents == null
               ? "—"
               : formatMyr(submission.sku.market_price_cents)}

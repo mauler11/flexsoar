@@ -20,10 +20,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 import {
+  getPriceHistory,
   listSkuModels,
   recordMarketRefsService,
+  updateFairMarketCache,
 } from '@/lib/api/contract';
-import { compForModel } from '@/lib/market/ebay';
+import { compForModel, medianSen } from '@/lib/market/ebay';
 
 export const dynamic = 'force-dynamic';
 // Hobby ceiling is 60s — models sync in chunks of 5 to stay under it.
@@ -34,6 +36,25 @@ function authorized(request: NextRequest): boolean {
   if (!secret) return false;
   const header = request.headers.get('authorization') ?? '';
   return header === `Bearer ${secret}`;
+}
+
+/**
+ * Recomputes one model's 054 display cache from its tape — median of the
+ * trailing 90d, latest point as fallback, null when the tape is empty.
+ * Same definition as fairMarketPrice() on the pages; the duplication is
+ * one median call, kept beside the cron so the route never imports a
+ * client component module.
+ */
+async function refreshCache(modelId: string): Promise<void> {
+  const history = await getPriceHistory(modelId);
+  const cutoff = Date.now() - 90 * 86400000;
+  const inWindow = history.filter(
+    (p) => new Date(p.observedAt).getTime() >= cutoff,
+  );
+  const pool = (inWindow.length > 0 ? inWindow : history.slice(-1)).map(
+    (p) => p.priceCents,
+  );
+  await updateFairMarketCache(modelId, medianSen(pool));
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -61,6 +82,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           try {
             const comp = await compForModel(m.brand, m.model, m.colorway);
             if (comp.medianSen == null) {
+              await refreshCache(m.id);
               return { status: 'skipped' as const, label: `${m.brand} ${m.model}` };
             }
             await recordMarketRefsService(m.id, [
@@ -70,6 +92,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
                 source: 'ebay',
               },
             ]);
+            await refreshCache(m.id);
             return { status: 'synced' as const, label: `${m.brand} ${m.model}` };
           } catch (thrown) {
             return {

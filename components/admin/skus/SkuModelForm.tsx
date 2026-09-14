@@ -235,7 +235,7 @@ export function SkuModelForm({ model }: { model: SkuModel | null }) {
           </>
         )}
         <Input
-          label="Fair price (cents)"
+          label="Fair Market Price (cents)"
           inputMode="numeric"
           hint="Drives tier for FUTURE mints of every size. Empty = unpriced, unmintable."
           {...field("base_price_cents")}
@@ -314,7 +314,7 @@ export function SkuModelForm({ model }: { model: SkuModel | null }) {
       >
         <p className="font-mono text-[11px] leading-snug tracking-tight">
           {model
-            ? "The fair price sets the tier of every future mint, of every size, of this model. Cards already minted keep the tier they were minted with — this cannot re-tier them."
+            ? "The Fair Market Price sets the tier of every future mint, of every size, of this model. Cards already minted keep the tier they were minted with — this cannot re-tier them."
             : "Creates the model. Add a size on its page next — a model with no size variant cannot mint and cannot carry art."}
         </p>
       </Modal>

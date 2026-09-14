@@ -93,7 +93,6 @@ export function DecisionControls({
   const [price, setPrice] = useState(
     askingPriceCents == null ? "" : String(askingPriceCents),
   );
-  const [fairPrice, setFairPrice] = useState("");
   const [reason, setReason] = useState("");
   const [result, setResult] = useState<ActionResult | null>(null);
   const [pending, startTransition] = useTransition();
@@ -108,13 +107,14 @@ export function DecisionControls({
 
   function confirmApprove() {
     if (!parsed.ok) return;
-    const fairParsed = fairPrice.trim() === "" ? { ok: true as const, cents: null } : parseCents(fairPrice);
-    if (!fairParsed.ok) return;
     startTransition(async () => {
+      // No fair price is passed: the Fair Market Price is derived from the
+      // trading tape (market refs + sales), never typed. The column stays
+      // for legacy rows; new approvals leave it null.
       const outcome = await approveSubmissionAction({
         itemId,
         priceCents: parsed.cents,
-        fairPriceCents: fairParsed.cents ?? undefined,
+        fairPriceCents: undefined,
       });
       setResult(outcome);
       if (outcome.ok) setConfirming(null);
@@ -213,7 +213,7 @@ export function DecisionControls({
             <Button
               size="sm"
               onClick={confirmApprove}
-              disabled={pending || !parsed.ok || (fairPrice.trim() !== "" && !parseCents(fairPrice).ok)}
+              disabled={pending || !parsed.ok}
             >
               {pending ? "Working…" : "Mint and publish"}
             </Button>
@@ -241,16 +241,6 @@ export function DecisionControls({
             disabled={pending}
             error={price.trim() === "" ? null : parsed.ok ? null : parsed.error}
             hint={oracleHint(marketPriceCents)}
-          />
-          <Input
-            label="Fair price (cents, optional)"
-            value={fairPrice}
-            onChange={(event) => setFairPrice(event.target.value)}
-            inputMode="numeric"
-            placeholder="Leave blank to omit"
-            disabled={pending}
-            error={fairPrice.trim() === "" ? null : parseCents(fairPrice).ok ? null : (parseCents(fairPrice) as { ok: false; error: string }).error}
-            hint="Admin-set fair price for this card's condition. Shown to buyers as 'Fair: $X'."
           />
           {askingNote(askingPriceCents) && (
             <p className="font-mono text-[10px] leading-snug tracking-tight text-muted">

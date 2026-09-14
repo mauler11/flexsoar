@@ -49,7 +49,31 @@ export function priceChange(points: readonly PricePoint[]): PriceChange {
 
 export type ChartRange = "1M" | "6M" | "1Y" | "ALL";
 
-const RANGE_DAYS: Record<ChartRange, number | null> = {
+/**
+ * The Fair Market Price: median of the model's tape inside a trailing
+ * window (FlexSoar sales AND market refs — a sale is market data), falling
+ * back to the latest point, then to null. Nobody sets this number: admins
+ * pin reference points, buyers close sales, and this reads the result.
+ * Exported so pages share one definition and tests pin it.
+ */
+export function fairMarketPrice(
+  points: readonly PricePoint[],
+  windowDays: number = 90,
+  nowMs: number = Date.now(),
+): number | null {
+  if (points.length === 0) return null;
+  const cutoff = nowMs - windowDays * 86400000;
+  const inWindow = points.filter(
+    (p) => new Date(p.observedAt).getTime() >= cutoff,
+  );
+  const pool = (inWindow.length > 0 ? inWindow : [points[points.length - 1]])
+    .map((p) => p.priceCents)
+    .sort((a, b) => a - b);
+  const mid = Math.floor(pool.length / 2);
+  return pool.length % 2 === 1
+    ? pool[mid]
+    : Math.round((pool[mid - 1] + pool[mid]) / 2);
+}const RANGE_DAYS: Record<ChartRange, number | null> = {
   "1M": 31,
   "6M": 183,
   "1Y": 365,
