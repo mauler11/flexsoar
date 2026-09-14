@@ -18,24 +18,8 @@ import { useState } from "react";
 import { Transaction } from "@solana/web3.js";
 import { Button } from "@/components/ui/Button";
 import { Banner } from "@/components/market/Banner";
-import { base58Encode } from "@/lib/solana/base58";
+import { LinkWalletButton, type InjectedSolana } from "@/components/market/LinkWalletButton";
 import type { Quote } from "@/lib/solana/quotes";
-
-interface InjectedSolana {
-  isPhantom?: boolean;
-  publicKey?: { toBase58(): string };
-  connect?: () => Promise<{ publicKey: { toBase58(): string } }>;
-  signMessage?: (message: Uint8Array) => Promise<{ signature: Uint8Array }>;
-  signAndSendTransaction?: (
-    tx: Transaction,
-  ) => Promise<{ signature: string } | string>;
-}
-
-declare global {
-  interface Window {
-    solana?: InjectedSolana;
-  }
-}
 
 interface BuildTxResponse {
   quote: Quote;
@@ -68,7 +52,7 @@ export function SolanaBuyPanel({
   priceCents: number;
 }) {
   const [phase, setPhase] = useState<
-    "idle" | "building" | "awaitingWallet" | "settling" | "linking" | "done"
+    "idle" | "building" | "awaitingWallet" | "settling" | "done"
   >("idle");
   const [error, setError] = useState<string | null>(null);
   const [needsLink, setNeedsLink] = useState(false);
@@ -78,67 +62,7 @@ export function SolanaBuyPanel({
     orderId: string | null;
   } | null>(null);
 
-  const busy = phase === "building" || phase === "awaitingWallet" || phase === "settling" || phase === "linking";
-
-  async function linkWallet(): Promise<boolean> {
-    const wallet = injectedWallet();
-    if (!wallet) {
-      setError("No Solana wallet found — install Phantom and switch it to devnet before linking.");
-      return false;
-    }
-    setPhase("linking");
-    setError(null);
-    try {
-      if (!wallet.publicKey && wallet.connect) await wallet.connect();
-      const msgRes = await fetch("/api/solana/link-wallet", { method: "GET" });
-      const msgBody = (await msgRes.json()) as {
-        message?: string;
-        issuedAt?: string;
-        error?: string;
-      };
-      if (!msgRes.ok || !msgBody.message || !msgBody.issuedAt) {
-        setError(msgBody.error ?? "could not start wallet link");
-        setPhase("idle");
-        return false;
-      }
-      if (!wallet.signMessage) {
-        setError("This wallet cannot sign messages — use Phantom or Solflare.");
-        setPhase("idle");
-        return false;
-      }
-      const { signature } = await wallet.signMessage(
-        new TextEncoder().encode(msgBody.message),
-      );
-      const address = wallet.publicKey?.toBase58() ?? null;
-      if (!address) {
-        setError("Wallet gave no address — connect it first, then retry.");
-        setPhase("idle");
-        return false;
-      }
-      const linkRes = await fetch("/api/solana/link-wallet", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          address,
-          signature: base58Encode(signature),
-          issuedAt: msgBody.issuedAt,
-        }),
-      });
-      const linkBody = (await linkRes.json()) as { error?: string };
-      if (!linkRes.ok) {
-        setError(linkBody.error ?? "wallet link failed");
-        setPhase("idle");
-        return false;
-      }
-      setNeedsLink(false);
-      setPhase("idle");
-      return true;
-    } catch (thrown) {
-      setError(thrown instanceof Error ? thrown.message : "wallet link failed");
-      setPhase("idle");
-      return false;
-    }
-  }
+  const busy = phase === "building" || phase === "awaitingWallet" || phase === "settling";
 
   async function buyWithUsdc() {
     setError(null);
@@ -230,20 +154,13 @@ export function SolanaBuyPanel({
         <span className="h-px flex-1 bg-line" />
       </div>
       {needsLink ? (
-        <Button
-          type="button"
-          variant="secondary"
-          size="lg"
-          disabled={busy}
-          onClick={() =>
-            linkWallet().then((ok) => {
-              if (ok) buyWithUsdc();
-            })
-          }
-          className="py-3 text-base"
-        >
-          {phase === "linking" ? "Linking wallet…" : "Link wallet, then buy"}
-        </Button>
+        <LinkWalletButton
+          cta="Link wallet, then buy"
+          onLinked={() => {
+            setNeedsLink(false);
+            buyWithUsdc();
+          }}
+        />
       ) : (
         <Button
           type="button"

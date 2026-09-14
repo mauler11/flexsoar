@@ -35,6 +35,7 @@ import { currentUserId, getHiddenCardIds, getMySubmittedItems } from "@/app/(mar
 import { createServerSupabase } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/Button";
 import { PayoutSetup } from "@/components/market/PayoutSetup";
+import { LinkWalletButton } from "@/components/market/LinkWalletButton";
 import { DashboardTabs } from "@/components/market/DashboardTabs";
 import { EmptyState } from "@/components/ui/EmptyState";
 
@@ -50,12 +51,13 @@ async function getConnectStatus(userId: string): Promise<{
   payoutsEnabled: boolean;
   isConsignor: boolean;
   countryCode: string | null;
+  solanaAddress: string | null;
 }> {
   const supabase = await createServerSupabase();
   const { data } = await supabase
     .from("users")
     .select(
-      "stripe_connect_account_id, stripe_connect_payouts_enabled, is_consignor, country_code",
+      "stripe_connect_account_id, stripe_connect_payouts_enabled, is_consignor, country_code, solana_address",
     )
     .eq("id", userId)
     .maybeSingle();
@@ -64,12 +66,14 @@ async function getConnectStatus(userId: string): Promise<{
     stripe_connect_payouts_enabled?: boolean | null;
     is_consignor?: boolean | null;
     country_code?: string | null;
+    solana_address?: string | null;
   };
   return {
     accountId: row.stripe_connect_account_id ?? null,
     payoutsEnabled: row.stripe_connect_payouts_enabled ?? false,
     isConsignor: row.is_consignor ?? false,
     countryCode: row.country_code ?? null,
+    solanaAddress: row.solana_address ?? null,
   };
 }
 
@@ -97,7 +101,7 @@ export default async function DashboardPage() {
 
   const connectStatus = me
     ? await getConnectStatus(me)
-    : { accountId: null, payoutsEnabled: false, isConsignor: false, countryCode: null };
+    : { accountId: null, payoutsEnabled: false, isConsignor: false, countryCode: null, solanaAddress: null };
 
   if (!me) {
     return (
@@ -162,6 +166,34 @@ export default async function DashboardPage() {
           isConsignor={connectStatus.isConsignor}
           countryCode={connectStatus.countryCode}
         />
+      </section>
+
+      {/* USDC payout wallet — the ONLY seller-side link path. Sellers never
+          see the buy panel on their own listings, so without this section a
+          seller whose listings the quote path rejects ("seller has no linked
+          payout wallet yet") has nowhere to fix it. */}
+      <section className="flex flex-col gap-2">
+        <h2 className="text-sm font-bold tracking-tight text-foreground">
+          USDC payout wallet
+        </h2>
+        {connectStatus.solanaAddress ? (
+          <div className="flex flex-col gap-2">
+            <p className="text-[11px] text-muted">
+              Linked {connectStatus.solanaAddress.slice(0, 8)}…
+              {connectStatus.solanaAddress.slice(-6)} — USDC sale proceeds go
+              here (95% seller / 5% FlexSoar, split on-chain).
+            </p>
+            <LinkWalletButton cta="Change payout wallet" />
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <p className="text-[11px] text-muted">
+              No wallet linked — your listings can&apos;t be bought with USDC
+              until you link one. One signature proves you own it.
+            </p>
+            <LinkWalletButton cta="Link payout wallet" />
+          </div>
+        )}
       </section>
 
       <DashboardTabs
