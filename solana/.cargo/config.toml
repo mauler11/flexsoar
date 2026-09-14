@@ -1,0 +1,8 @@
+# MSRV-aware resolution for the SBF build (anchor#4770): the platform-tools
+# cargo (1.79) predates edition2024, so resolution must fall back to the
+# newest dependency versions the pinned toolchain can actually parse —
+# steered by the program crate's rust-version below. Modern cargo honors
+# this when writing Cargo.lock; the old SBF cargo then just follows the
+# lockfile instead of greedily resolving unparseable 2025-era crates.
+[resolver]
+incompatible-rust-versions = "fallback"

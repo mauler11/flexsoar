@@ -2,6 +2,9 @@
 name = "flexsoar-settlement"
 version = "0.1.0"
 edition = "2021"
+# Must match the platform-tools rustc that compiles the program (1.79):
+# with the fallback resolver above, cargo steers off edition2024 crates.
+rust-version = "1.79"
 
 [lib]
 crate-type = ["cdylib", "lib"]
