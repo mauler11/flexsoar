@@ -85,7 +85,7 @@ export function InteractionsDemo() {
           <Button variant="secondary" onClick={() => toast.push("Card #04 listed for 115.00 FSC", "success")}>
             Success
           </Button>
-          <Button variant="secondary" onClick={() => toast.push("Price is 15% under oracle — check both sides", "warn")}>
+          <Button variant="secondary" onClick={() => toast.push("Price is 15% under fair price — check both sides", "warn")}>
             Warn
           </Button>
           <Button variant="secondary" onClick={() => toast.push("Vault unreachable — payout retry pending", "danger")}>

@@ -9,7 +9,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ensureSkuVariant, getSkuModel, getPayoutMethodForUser, getUser } from "@/lib/api/contract";
+import {
+  ContractError,
+  ensureSkuVariant,
+  getSkuModel,
+  getPayoutMethodForUser,
+  getUser,
+} from "@/lib/api/contract";
 import { currentUserId, getCashPayoutCountryCodes } from "@/app/(market)/queries";
 import { IntakeWizard } from "@/components/market/intake/IntakeWizard";
 import type { UUID } from "@/lib/db/types";
@@ -41,21 +47,40 @@ export default async function ListNewPage({
   const model = await getSkuModel(modelId as UUID).catch(() => null);
   if (!model) redirect("/list");
 
+  const me = await currentUserId();
+
   // Existing variant, or ensured on the spot (sellers may ensure variants —
   // the finder flow already does exactly this as the session user).
+  // fn_ensure_sku_variant is granted to `authenticated` only (027), so a
+  // signed-out visitor asking for a not-yet-catalogued size used to fall
+  // through to the product-page redirect with no explanation — the
+  // size→SELL "bounce-back". Route them to sign-in with the return path
+  // instead, so completing auth lands them back at Photos.
   let variant = model.variants.find((v) => v.size_us === sizeUs) ?? null;
   if (!variant) {
+    if (!me) {
+      redirect(
+        `/sign-in?next=${encodeURIComponent(`/list/new?modelId=${model.id}&sizeUs=${sizeUs}`)}`,
+      );
+    }
     try {
       const variantId = await ensureSkuVariant(model.id, sizeUs);
       const refreshed = await getSkuModel(model.id).catch(() => null);
       variant = refreshed?.variants.find((v) => v.id === variantId) ?? null;
-    } catch {
+    } catch (thrown) {
+      if (
+        thrown instanceof ContractError &&
+        (thrown.code === "UNAUTHENTICATED" || thrown.code === "FORBIDDEN")
+      ) {
+        redirect(
+          `/sign-in?next=${encodeURIComponent(`/list/new?modelId=${model.id}&sizeUs=${sizeUs}`)}`,
+        );
+      }
       variant = null;
     }
   }
   if (!variant) redirect(`/list/${model.id}`);
 
-  const me = await currentUserId();
   const [sellerPayoutMethod, existingCountryCode, cashPayoutCountryCodes] = await Promise.all([
     me ? getPayoutMethodForUser(me).catch(() => null) : Promise.resolve(null),
     me ? getUser({ id: me }).then((u) => u?.country_code ?? null) : Promise.resolve(null),

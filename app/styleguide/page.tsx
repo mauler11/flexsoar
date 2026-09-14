@@ -288,7 +288,7 @@ export default function StyleguidePage() {
         {/* ------------------------------------------------------------ */}
         <Section
           title="Card tiles"
-          subtitle="All 12 fixture cards in a grid. Live listings show the ask price and a LISTED chip; everything else shows its oracle value. 1 OF 1 red on card #12."
+          subtitle="All 12 fixture cards in a grid. Live listings show the ask price and a LISTED chip; everything else shows its fair price. 1 OF 1 red on card #12."
         >
           <div className="flex flex-wrap justify-center gap-6">
             {cards.map((card) => {
@@ -311,7 +311,7 @@ export default function StyleguidePage() {
         {/* ------------------------------------------------------------ */}
         <Section
           title="Card detail (hero)"
-          subtitle="Full-width frame, sprite at scale, condition badge, mint number, price in MYR. Oracle fair value is always shown beside an ask. The second card demos showNumericFloat=true — the numeric gradient bar + percentile, gated behind platform_config.show_numeric_float (live-verified false today)."
+          subtitle="Full-width frame, sprite at scale, condition badge, mint number, price in MYR. Fair price is always shown beside an ask. The second card demos showNumericFloat=true — the numeric gradient bar + percentile, gated behind platform_config.show_numeric_float (live-verified false today)."
         >
           <div className="flex flex-col gap-6">
             <CardDetail

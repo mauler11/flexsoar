@@ -103,7 +103,7 @@ export function MintTable({ items }: { items: ItemSummary[] }) {
             </Th>
             <Th>SKU</Th>
             <Th className="text-right">Float</Th>
-            <Th className="text-right">Oracle</Th>
+            <Th className="text-right">Fair price</Th>
             <Th>Result</Th>
           </Tr>
         </THead>
@@ -135,9 +135,9 @@ export function MintTable({ items }: { items: ItemSummary[] }) {
                 </Td>
                 <Td className="text-right tabular-nums text-muted">
                   {item.sku.market_price_cents == null ? (
-                    // fn_mint_card refuses a SKU with no oracle price; flag it
+                    // fn_mint_card refuses a SKU with no fair price; flag it
                     // here so the failure is expected rather than surprising.
-                    <span className="text-[#E8B33A]">no oracle price</span>
+                    <span className="text-[#E8B33A]">no fair price</span>
                   ) : (
                     formatMyr(item.sku.market_price_cents)
                   )}
@@ -188,7 +188,7 @@ export function MintTable({ items }: { items: ItemSummary[] }) {
       >
         <p className="font-mono text-[11px] leading-snug tracking-tight">
           Each item becomes a card owned by its consignor, with the float copied
-          across immutably and tier taken from the SKU&apos;s oracle price. A
+          across immutably and tier taken from the SKU&apos;s fair price. A
           mint writes the append-only ledger — there is no unmint.
         </p>
       </Modal>

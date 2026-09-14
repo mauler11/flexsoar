@@ -45,7 +45,7 @@ const SECTIONS: ReadonlyArray<{
   {
     href: "/admin/skus",
     title: "SKUs",
-    body: "Catalog models, variants, oracle prices and art.",
+    body: "Catalog models, variants, fair prices and art.",
   },
   {
     href: "/admin/requests",

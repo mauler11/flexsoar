@@ -37,7 +37,7 @@ export interface DecisionControlsProps {
   itemLabel: string;
   /** Seeds the price field. */
   askingPriceCents: Cents | null;
-  /** The SKU's oracle price, shown beside the field as a sanity check. */
+  /** The SKU's fair price, shown beside the field as a sanity check. */
   marketPriceCents: Cents | null;
   /** Blocks both actions with the reason shown (e.g. no longer pending). */
   blocked?: string | null;
@@ -64,11 +64,15 @@ function parseCents(raw: string): { ok: true; cents: number } | { ok: false; err
  * inside the approve confirm modal, which a static render never opens (no
  * jsdom in this suite to click "Approve and publish"), so the string has to
  * be testable on its own rather than through a DOM assertion.
+ *
+ * (Kept under its historic name: the SKU column itself is still
+ * `oracle_value_cents` in the database, so the identifier matches the
+ * schema even though the rendered copy says "fair price".)
  */
 export function oracleHint(marketPriceCents: Cents | null): string {
   return marketPriceCents == null
     ? "Integer MYR sen. 18999 = RM 189.99."
-    : `Integer MYR sen. SKU oracle price is ${formatMyr(marketPriceCents)}.`;
+    : `Integer MYR sen. SKU fair price is ${formatMyr(marketPriceCents)}.`;
 }
 
 /** Same reasoning as oracleHint above. */
@@ -183,7 +187,7 @@ export function DecisionControls({
             {result.code === "NO_ORACLE_PRICE" && (
               <p className="font-mono text-[10px] leading-snug tracking-tight text-muted">
                 Tier comes from the SKU&apos;s market price and this SKU has
-                none. Set an oracle price on the SKU first, then approve.
+                none. Set a fair price on the SKU first, then approve.
               </p>
             )}
             {result.code === "MINT_CAP_REACHED" && (

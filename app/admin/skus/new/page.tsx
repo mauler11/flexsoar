@@ -1,7 +1,7 @@
 /**
  * app/admin/skus/new/page.tsx
  *
- * Create a catalog MODEL (027) — brand + model + colourway + oracle price.
+ * Create a catalog MODEL (027) — brand + model + colourway + fair price.
  * Sizes are added on the model's own page, not here: fn_ensure_sku_variant
  * needs a model_id to attach to, so a size cannot be authored before the
  * model exists.

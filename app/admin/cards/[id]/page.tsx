@@ -80,7 +80,7 @@ export default async function CardDetailPage({
         <Field label="Float" value={Number(card.float_value).toFixed(3)} />
         <Field label="Condition" value={card.condition_grade?.replace(/_/g, " ") ?? "—"} />
         <Field label="Minted" value={formatTimestamp(card.minted_at)} />
-        <Field label="Oracle value" value={card.oracle_value_cents != null ? formatMyr(card.oracle_value_cents) : "—"} />
+        <Field label="Fair price" value={card.oracle_value_cents != null ? formatMyr(card.oracle_value_cents) : "—"} />
         <Field label="Owner" value={`${card.owner.handle} (L${card.owner.level})`} />
         {card.listing && (
           <Field label="Listing" value={`${card.listing.status} · ${formatMyr(card.listing.price_cents)}`} />

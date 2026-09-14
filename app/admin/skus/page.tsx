@@ -5,7 +5,7 @@
  * model rather than one per size. Rows open the model's detail page, where
  * its size variants live; creation is its own page.
  *
- * Tier is shown from the model's oracle base price via tierForPrice — the
+ * Tier is shown from the model's fair base price via tierForPrice — the
  * same derivation fn_tier_for_sku runs, never a stored value. An unpriced
  * model cannot mint (fn_mint_card refuses on a null tier), so it is the
  * operator's queue: badged, not hidden.
@@ -27,7 +27,7 @@ export const metadata: Metadata = {
   title: "Models — FlexSoar admin",
 };
 
-/** base_price_cents is the oracle price — MYR, never FSC. */
+/** base_price_cents is the fair price — MYR, never FSC. */
 function money(cents: number | null): string {
   return cents == null ? "—" : formatMyr(cents);
 }
@@ -52,7 +52,7 @@ export default async function SkuModelsPage() {
           <p className="font-mono text-[11px] leading-snug tracking-tight text-muted">
             {models.length} in the catalog
             {unpricedCount > 0 ? ` · ${unpricedCount} unpriced — unmintable until priced` : ""}.
-            One art asset and one oracle price per model; sizes live on its page.
+            One art asset and one fair price per model; sizes live on its page.
           </p>
         </div>
         <div className="flex gap-2">

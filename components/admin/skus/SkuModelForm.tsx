@@ -1,7 +1,7 @@
 /**
  * components/admin/skus/SkuModelForm.tsx
  *
- * Create / edit one MODEL (027): brand + model + colourway, the oracle
+ * Create / edit one MODEL (027): brand + model + colourway, the fair
  * base price, and the sprite base/palette every size variant inherits. This
  * replaces the old flat-SKU SkuForm.tsx — there is no per-size price or
  * palette any more, because there is no per-size art any more.
@@ -235,7 +235,7 @@ export function SkuModelForm({ model }: { model: SkuModel | null }) {
           </>
         )}
         <Input
-          label="Oracle price (cents)"
+          label="Fair price (cents)"
           inputMode="numeric"
           hint="Drives tier for FUTURE mints of every size. Empty = unpriced, unmintable."
           {...field("base_price_cents")}
@@ -244,7 +244,7 @@ export function SkuModelForm({ model }: { model: SkuModel | null }) {
           <Input
             label="Price confidence"
             inputMode="decimal"
-            hint="0.00–1.00, optional. The oracle's own certainty score — informational, used in no calculation."
+            hint="0.00–1.00, optional. The fair price's own certainty score — informational, used in no calculation."
             {...field("price_confidence")}
           />
         )}
@@ -314,7 +314,7 @@ export function SkuModelForm({ model }: { model: SkuModel | null }) {
       >
         <p className="font-mono text-[11px] leading-snug tracking-tight">
           {model
-            ? "The oracle price sets the tier of every future mint, of every size, of this model. Cards already minted keep the tier they were minted with — this cannot re-tier them."
+            ? "The fair price sets the tier of every future mint, of every size, of this model. Cards already minted keep the tier they were minted with — this cannot re-tier them."
             : "Creates the model. Add a size on its page next — a model with no size variant cannot mint and cannot carry art."}
         </p>
       </Modal>

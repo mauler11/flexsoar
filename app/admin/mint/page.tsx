@@ -38,7 +38,7 @@ export default async function MintPage() {
       <header className="flex flex-col gap-1">
         <h1 className="font-mono text-lg uppercase tracking-tight">Mint</h1>
         <p className="font-mono text-[11px] leading-snug tracking-tight text-muted">
-          Graded, authenticated, unminted. Tier comes from the SKU&apos;s oracle
+          Graded, authenticated, unminted. Tier comes from the SKU&apos;s fair
           price — the float never changes it.
         </p>
       </header>

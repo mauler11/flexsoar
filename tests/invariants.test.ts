@@ -2382,7 +2382,7 @@ describe('SkuModelForm — rendered output agrees with parseDraft', () => {
 
   it('edit mode with base_price_cents null: price renders blank and Save changes stays enabled', () => {
     const html = renderToStaticMarkup(createElement(SkuModelForm, { model: baseSkuModel }));
-    const priceInput = html.match(/id="input-Oracle price \(cents\)"[^>]*value="([^"]*)"/);
+    const priceInput = html.match(/id="input-Fair price \(cents\)"[^>]*value="([^"]*)"/);
     expect(priceInput?.[1] ?? '').toBe('');
 
     const button = html.match(/<button[^>]*>Save changes<\/button>/);
@@ -2392,7 +2392,7 @@ describe('SkuModelForm — rendered output agrees with parseDraft', () => {
 
 // ------------------------------------------------------------
 // VariantsTable — the Price column and the override's "model base" text are
-// the oracle price (MYR, integer cents), never FSC. FSC is earned-only store
+// the fair price (MYR, integer cents), never FSC. FSC is earned-only store
 // credit (AGENT_RULES.md section 5/6) and is never the price of anything.
 // components/card/format.ts already draws this line (formatMyr vs formatFsc,
 // both asserted above) — this pins that VariantsTable actually calls through
@@ -2469,7 +2469,7 @@ describe('VariantsTable — price column and override helper text render MYR, ne
 
 // ------------------------------------------------------------
 // docs/handoff/admin.md item 17 — every remaining "X.XX FSC" price outside
-// the SKU bench. Each of these had a real MYR amount (an oracle price, a
+// the SKU bench. Each of these had a real MYR amount (a fair price, a
 // seller's ask, an intake fee, a redemption handling fee) rendered through
 // either a local money()-shaped helper or an inline template literal that
 // happened to copy formatFsc's exact suffix. Fixed to call formatMyr; the
@@ -2478,7 +2478,7 @@ describe('VariantsTable — price column and override helper text render MYR, ne
 // formatMyr in the first place.
 // ------------------------------------------------------------
 
-describe('MintTable — oracle price column renders MYR, never FSC', () => {
+describe('MintTable — fair price column renders MYR, never FSC', () => {
   const baseItem: ItemSummary = {
     id: 'item-1',
     sku_id: 'sku-1',
@@ -2514,24 +2514,24 @@ describe('MintTable — oracle price column renders MYR, never FSC', () => {
     last_proof_at: null,
   };
 
-  it('a mintable item with an oracle price: the Oracle column shows a dollar amount, never FSC', () => {
+  it('a mintable item with a fair price: the Fair price column shows a dollar amount, never FSC', () => {
     const html = renderToStaticMarkup(createElement(MintTable, { items: [baseItem] }));
     expect(html).toContain(formatMyr(26000));
     expect(html).not.toContain('FSC');
   });
 
-  it('an unpriced item: shows the "no oracle price" flag instead of a figure, still no FSC', () => {
+  it('an unpriced item: shows the "no fair price" flag instead of a figure, still no FSC', () => {
     const unpriced: ItemSummary = {
       ...baseItem,
       sku: { ...baseItem.sku, market_price_cents: null },
     };
     const html = renderToStaticMarkup(createElement(MintTable, { items: [unpriced] }));
-    expect(html).toContain('no oracle price');
+    expect(html).toContain('no fair price');
     expect(html).not.toContain('FSC');
   });
 });
 
-describe('DecisionControls — oracle and asking price hint text render MYR, never FSC', () => {
+describe('DecisionControls — fair price and asking price hint text render MYR, never FSC', () => {
   // Both price texts render only inside the approve confirm modal
   // (open={confirming === "approve"}), which starts closed and a static
   // render has no way to click open (no jsdom in this suite) — so a plain
@@ -2553,8 +2553,8 @@ describe('DecisionControls — oracle and asking price hint text render MYR, nev
     expect(html).not.toContain('FSC');
   });
 
-  it('oracleHint renders the SKU oracle price in dollars, never FSC', () => {
-    expect(oracleHint(26000)).toBe(`Integer MYR sen. SKU oracle price is ${formatMyr(26000)}.`);
+  it('oracleHint renders the SKU fair price in dollars, never FSC', () => {
+    expect(oracleHint(26000)).toBe(`Integer MYR sen. SKU fair price is ${formatMyr(26000)}.`);
     expect(oracleHint(26000)).not.toContain('FSC');
     expect(oracleHint(null)).not.toContain('FSC');
   });
@@ -2574,14 +2574,14 @@ describe('app/admin/submissions/page.tsx — Asking column renders MYR, never FS
   });
 });
 
-describe('app/admin/submissions/[itemId]/page.tsx — asking/oracle price render MYR, never FSC', () => {
-  it('the header\'s Asking figure, the SKU oracle price, and the seller\'s earlier-submission Asked column are all dollar-formatted, never FSC', async () => {
+describe('app/admin/submissions/[itemId]/page.tsx — asking/fair price render MYR, never FSC', () => {
+  it('the header\'s Asking figure, the SKU fair price, and the seller\'s earlier-submission Asked column are all dollar-formatted, never FSC', async () => {
     const element = await ReviewSubmissionPage({
       params: Promise.resolve({ itemId: 'submission-1' }),
     });
     const html = renderToStaticMarkup(element);
     expect(html).toContain(formatMyr(21500)); // header Asking, and this submission's own ask
-    expect(html).toContain(formatMyr(26000)); // SKU oracle
+    expect(html).toContain(formatMyr(26000)); // SKU fair price
     expect(html).toContain(formatMyr(8000)); // seller's earlier-submission Asked column
     expect(html).not.toContain('FSC');
   });
