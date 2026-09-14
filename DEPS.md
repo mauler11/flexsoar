@@ -83,6 +83,8 @@ Environment variables (`.env.local` + Vercel; never commit):
   `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`.
 - `SOLANA_PROGRAM_ID` — devnet `CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF`
   (deployed 2026-09-14, upgrade authority = deployer keypair).
+  Config PDA `BA63u3E7ShsiqdDhDrgkKmXLhtXe6YjLYfPgZGuN6jKC`
+  (initialized 2026-09-14, admin = treasury = deployer wallet on devnet).
 - `SOLANA_TREASURY` — FlexSoar USDC fee sink (multisig on mainnet).
 - `SOLANA_QUOTE_SECRET` — random 32+ bytes; signs price quotes.
 - `SOLANA_MAX_TRADE_UNITS` — optional, defaults to 500000000 (500 USDC,
