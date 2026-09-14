@@ -35,7 +35,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 
-declare_id!("FSxSettle1111111111111111111111111111111111");
+declare_id!("CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF");
 
 /// 5% platform fee in basis points. Matches the off-chain flat fee.
 /// Undercuts card-rail marketplaces: sub-cent Solana fees make 5% viable.
