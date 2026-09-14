@@ -3,22 +3,28 @@
 //! Design authority lives off-chain: the Postgres ledger remains the record
 //! of WHO owns which card (Item != Card, append-only). This program moves
 //! MONEY only — buyer USDC splits to seller + FlexSoar treasury atomically
-//! inside `buy`. No escrow persists between instructions, so no balance of
-//! user funds is ever held: there is nothing to license as e-money.
+//! inside `buy`. No escrow persists between instructions, and NO listing
+//! state exists on-chain at all: there is deliberately no listing PDA, so
+//! sellers never sign anyone onto anything and pay no rent. Delisting,
+//! ownership, and eligibility live in the ledger; the backend quote +
+//! settle paths (which reject non-public listings) are what stop a stale
+//! buy from moving a card. An on-chain `buy` against a delisted card would
+//! move USDC to the seller and treasury while settling nothing —
+//! self-harming for the caller, never an exploit against anyone else.
 //!
 //! Roles:
 //!   - admin    — FlexSoar multisig. Initializes config, pauses/unpauses,
 //!                is the program upgrade authority (set at deploy).
 //!   - treasury — USDC account receiving the 5% fee. Set at initialize,
 //!                changeable only by admin.
-//!   - seller   — lists (owns a listing PDA), cancels, receives net.
-//!   - buyer    — pays the quoted total; receives nothing on-chain (the
-//!                card moves off-chain via /api/solana/settle after this
-//!                transaction verifies).
+//!   - seller   — receives net. Never signs, never pays rent.
+//!   - buyer    — the ONLY signer. Pays the quoted total; receives nothing
+//!                on-chain (the card moves off-chain via /api/solana/settle
+//!                after this transaction verifies).
 //!
 //! Money math (USDC = 6 decimals, all u64): fee = price * 500 / 10000
 //! (integer division, dust < 1 base unit favours the seller), seller gets
-//! price - fee. MAX_PRICE_USDC caps pre-audit launch volume per trade.
+//! price - fee. MAX_PRICE_BASE_UNITS caps pre-audit launch volume per trade.
 //!
 //! BUILD NOTE: no Rust/Solana toolchain exists on the Windows build box
 //! (checked 2026-09-14) and Anchor does not support native Windows builds.
@@ -50,7 +56,8 @@ pub mod flexsoar_settlement {
         Ok(())
     }
 
-    /// Freeze new buys (cancels still work). Admin only.
+    /// Freeze new buys. Admin only. The kill-switch: with no on-chain
+    /// listing state, pausing `buy` halts all money movement at once.
     pub fn set_paused(ctx: Context<AdminOnly>, paused: bool) -> Result<()> {
         ctx.accounts.config.paused = paused;
         Ok(())
@@ -62,33 +69,21 @@ pub mod flexsoar_settlement {
         Ok(())
     }
 
-    /// Open a listing PDA for one card. Seller-signed. The off-chain
-    /// backend gates the List button on ledger ownership first — this
-    /// instruction trusts the signer, the PLATFORM trusts the ledger.
-    pub fn list_card(ctx: Context<ListCard>, price: u64, vault_ref: [u8; 32]) -> Result<()> {
+    /// Atomic sale for a quoted total: buyer -> seller (net) + buyer ->
+    /// treasury (fee). The fee is recomputed HERE from the price argument
+    /// — a client cannot smuggle a different split past this instruction.
+    /// `vault_ref` is opaque linkage (sha256 of the off-chain card id,
+    /// computed by the TS SDK) so indexers can join chain events to vault
+    /// inventory without PII on-chain.
+    pub fn buy(ctx: Context<Buy>, price: u64, vault_ref: [u8; 32]) -> Result<()> {
+        let config = &ctx.accounts.config;
+        require!(!config.paused, SettleError::Paused);
+
         require!(price > 0, SettleError::InvalidPrice);
         require!(
             price <= MAX_PRICE_BASE_UNITS,
             SettleError::OverTradeCap
         );
-        let listing = &mut ctx.accounts.listing;
-        listing.seller = ctx.accounts.seller.key();
-        listing.price = price;
-        listing.vault_ref = vault_ref;
-        listing.bump = ctx.bumps.listing;
-        Ok(())
-    }
-
-    /// Atomic sale: buyer -> seller (net) + buyer -> treasury (fee), then
-    /// the listing PDA closes and its rent returns to the seller. The fee
-    /// is recomputed HERE from the listing price — a client cannot smuggle
-    /// a different split past this instruction.
-    pub fn buy(ctx: Context<Buy>) -> Result<()> {
-        let config = &ctx.accounts.config;
-        require!(!config.paused, SettleError::Paused);
-
-        let price = ctx.accounts.listing.price;
-        require!(price > 0, SettleError::InvalidPrice);
 
         let fee = price
             .checked_mul(FEE_BPS)
@@ -123,15 +118,6 @@ pub mod flexsoar_settlement {
             fee,
         )?;
         Ok(())
-        // `close = seller` on the listing account (see Buy struct) returns
-        // the rent automatically when this instruction succeeds.
-    }
-
-    /// Seller reclaims an unsold listing. Anyone may invoke; lamports go
-    /// to the seller recorded in the PDA, never the caller.
-    pub fn cancel(_ctx: Context<Cancel>) -> Result<()> {
-        Ok(())
-        // `close = seller` handles the reclaim.
     }
 }
 
@@ -144,16 +130,6 @@ pub struct Config {
     pub admin: Pubkey,
     pub treasury: Pubkey,
     pub paused: bool,
-}
-
-#[account]
-pub struct Listing {
-    pub seller: Pubkey,
-    pub price: u64,
-    /// Opaque link to the off-chain card/item (e.g. sha256 of the card id).
-    /// Lets indexers join chain events to vault inventory without PII.
-    pub vault_ref: [u8; 32],
-    pub bump: u8,
 }
 
 #[derive(Accounts)]
@@ -188,35 +164,12 @@ pub struct AdminOnly<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(price: u64, vault_ref: [u8; 32])]
-pub struct ListCard<'info> {
-    #[account(
-        init,
-        payer = seller,
-        space = 8 + 32 + 8 + 32 + 1,
-        seeds = [b"listing", vault_ref.as_ref()],
-        bump
-    )]
-    pub listing: Account<'info, Listing>,
-    #[account(mut)]
-    pub seller: Signer<'info>,
-    pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
 pub struct Buy<'info> {
-    #[account(
-        mut,
-        close = seller,
-        seeds = [b"listing", listing.vault_ref.as_ref()],
-        bump = listing.bump,
-        has_one = seller @ SettleError::WrongSeller
-    )]
-    pub listing: Account<'info, Listing>,
-    /// CHECK: receives rent + net; constrained by has_one on the listing.
-    #[account(mut)]
-    pub seller: UncheckedAccount<'info>,
     pub buyer: Signer<'info>,
+    /// CHECK: net recipient. Constrained below via seller_ata.owner, and
+    /// the backend quote binds the ONLY seller wallet the ledger will
+    /// settle for — a mismatched destination settles nothing off-chain.
+    pub seller: UncheckedAccount<'info>,
     #[account(
         mut,
         constraint = buyer_ata.owner == buyer.key() @ SettleError::WrongTokenOwner,
@@ -240,8 +193,7 @@ pub struct Buy<'info> {
     pub token_program: Program<'info, Token>,
 }
 
-/// USDC mint, passed as a constraint helper so the one address lives in a
-/// single place. Devnet default below; mainnet
+/// USDC mint, single place. Devnet default below; mainnet
 /// EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v is set at deploy via the
 /// USDC_MINT env consumed by the TS client + settle verifier — the program
 /// itself is redeployed per cluster with this constant updated.
@@ -259,21 +211,6 @@ pub fn config_mint() -> Pubkey {
         .unwrap()
 }
 
-#[derive(Accounts)]
-pub struct Cancel<'info> {
-    #[account(
-        mut,
-        close = seller,
-        seeds = [b"listing", listing.vault_ref.as_ref()],
-        bump = listing.bump,
-        has_one = seller @ SettleError::NotSeller
-    )]
-    pub listing: Account<'info, Listing>,
-    /// CHECK: rent destination; constrained by has_one on the listing.
-    #[account(mut)]
-    pub seller: UncheckedAccount<'info>,
-}
-
 #[error_code]
 pub enum SettleError {
     #[msg("price must be positive")]
@@ -284,10 +221,6 @@ pub enum SettleError {
     Paused,
     #[msg("caller is not the admin")]
     NotAdmin,
-    #[msg("caller is not the listing seller")]
-    NotSeller,
-    #[msg("seller account mismatch")]
-    WrongSeller,
     #[msg("token account owner mismatch")]
     WrongTokenOwner,
     #[msg("token account is not USDC")]

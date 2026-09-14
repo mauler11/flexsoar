@@ -15,6 +15,12 @@ import { base58Decode, decodeAddress } from '../lib/solana/base58';
 import { issueQuote, splitFee, verifyQuote } from '../lib/solana/quotes';
 import { verifyWalletLink, linkMessage } from '../lib/solana/wallet';
 import { verifyBuyTransaction } from '../lib/solana/verify';
+import {
+  buildBuyTx,
+  buyDiscriminator,
+  encodeU64,
+  vaultRefForCard,
+} from '../lib/solana/sdk';
 
 process.env.SOLANA_QUOTE_SECRET = 'test-secret-only';
 process.env.HELIUS_API_KEY = 'test-key-only';
@@ -140,6 +146,79 @@ function rpcResult(tx: unknown) {
       json: async () => ({ result: tx }),
     }) as Response;
 }
+
+describe('sdk — unsigned buy transaction layout', () => {
+  const BLOCKHASH = 'EETubP5AKHgjPAhzPAFcb8BAY1hN5He8JJxLyrs3Mw8';
+
+  it('one instruction, exact account order, sighash-prefixed 48-byte data', async () => {
+    const { Keypair, PublicKey, Transaction } = await import('@solana/web3.js');
+    const buyer = Keypair.generate().publicKey.toBase58();
+    const seller = Keypair.generate().publicKey.toBase58();
+    const buyerAta = Keypair.generate().publicKey.toBase58();
+    const sellerAta = Keypair.generate().publicKey.toBase58();
+    const treasuryAta = Keypair.generate().publicKey.toBase58();
+    const config = Keypair.generate().publicKey.toBase58();
+    const program = Keypair.generate().publicKey.toBase58();
+    const vaultRef = await vaultRefForCard('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+    expect(vaultRef.length).toBe(32);
+    const unsigned = await buildBuyTx({
+      programId: program,
+      buyer,
+      seller,
+      buyerAta,
+      sellerAta,
+      treasuryAta,
+      config,
+      priceUnits: 1_000_000,
+      vaultRef,
+      recentBlockhash: BLOCKHASH,
+    });
+    const tx = Transaction.from(Buffer.from(unsigned, 'base64'));
+    expect(tx.instructions.length).toBe(1);
+    const ix = tx.instructions[0];
+    expect(ix.programId.toBase58()).toBe(program);
+    expect(ix.keys.map((k) => k.pubkey.toBase58())).toEqual([
+      buyer,
+      seller,
+      buyerAta,
+      sellerAta,
+      treasuryAta,
+      config,
+      'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+    ]);
+    expect(ix.keys[0].isSigner).toBe(true);
+    expect(ix.keys.slice(1).every((k) => !k.isSigner)).toBe(true);
+    const sighash = await buyDiscriminator();
+    expect(ix.data.slice(0, 8)).toEqual(Buffer.from(sighash));
+    expect(ix.data.length).toBe(48);
+    // u64 LE price at offset 8, vault ref at offset 16.
+    expect(ix.data.readBigUInt64LE(8).toString()).toBe('1000000');
+    expect(ix.data.slice(16)).toEqual(Buffer.from(vaultRef));
+  });
+
+  it('encodeU64 is little-endian; bad vault refs never reach the chain', async () => {
+    const { Keypair } = await import('@solana/web3.js');
+    expect(encodeU64(1_000_000)).toEqual(
+      new Uint8Array([64, 66, 15, 0, 0, 0, 0, 0]),
+    );
+    const program = Keypair.generate().publicKey.toBase58();
+    const buyer = Keypair.generate().publicKey.toBase58();
+    await expect(
+      buildBuyTx({
+        programId: program,
+        buyer,
+        seller: buyer,
+        buyerAta: buyer,
+        sellerAta: buyer,
+        treasuryAta: buyer,
+        config: buyer,
+        priceUnits: 1_000_000,
+        vaultRef: new Uint8Array(31),
+        recentBlockhash: BLOCKHASH,
+      }),
+    ).rejects.toThrow(/32 bytes/);
+  });
+});
 
 function balances(
   buyer: number,
