@@ -43,6 +43,9 @@ export function NotificationBell({
 
   // Live bell (052): new rows refresh the server-rendered list in place —
   // no filter needed, RLS scopes delivery to the caller's own rows.
+  // Polling fallback: if the socket never delivers (blocked websocket,
+  // subscription authorised as anon, RLS hiccup), a 20s visible-tab refresh
+  // still picks the row up — the bell must never need a manual reload.
   useEffect(() => {
     const supabase = createBrowserClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -61,7 +64,11 @@ export function NotificationBell({
         () => router.refresh(),
       )
       .subscribe();
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") router.refresh();
+    }, 20000);
     return () => {
+      clearInterval(timer);
       void supabase.removeChannel(channel);
     };
   }, [router]);
