@@ -38,6 +38,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+# solana / anchor — never commit keypairs or build artifacts
+solana/target/
+solana/*-keypair.json
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
