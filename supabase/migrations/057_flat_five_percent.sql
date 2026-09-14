@@ -29,15 +29,10 @@ DO $$
 DECLARE
   v_leak text;
 BEGIN
-  SELECT string_agg(
-           'level ' || level || '=' || seller_fee_bps, ', '
-           ORDER BY level
-         )
-    INTO v_leak
-    FROM levels WHERE seller_fee_bps IS DISTINCT FROM 500;
-
+  SELECT string_agg(level::text, ', ') INTO v_leak
+  FROM levels WHERE seller_fee_bps IS DISTINCT FROM 500;
   IF v_leak IS NOT NULL THEN
-    RAISE EXCEPTION '057: levels not flat at 500bps: %', v_leak;
+    RAISE EXCEPTION '057: levels not flat at 500bps';
   END IF;
 
   RAISE NOTICE '057 ok: flat 5% fee live';
