@@ -60,3 +60,35 @@ Still needed for the R2 photo upload (see docs/handoff/admin.md):
   e.g. `https://media.flexsoar.com`. The `getItemPhotoUploadUrl()` signer
   refuses to run without it, since a photo with no public URL can never be
   displayed or saved.
+
+### Solana settlement (program + routes ship; install + keys before use)
+
+Requested packages (human installs — `package.json` untouched per AGENT_RULES.md):
+
+- `@solana/web3.js@^1.98` — frontend transaction construction for the
+  `buy` instruction (`solana/` program SDK, unwritten until this lands).
+  The settle VERIFY path (`lib/solana/verify.ts`) deliberately uses plain
+  `fetch` and needs nothing.
+- `@coral-xyz/anchor@^0.31` — IDL-typed program client, same SDK as above.
+
+Environment variables (`.env.local` + Vercel; never commit):
+
+- `HELIUS_API_KEY` — Helius project key. **Rotate immediately if ever
+  pasted anywhere but the dashboards** — a leaked key spends your
+  credits. Same key serves both clusters via different URLs.
+- `SOLANA_CLUSTER` — `devnet` for all build/test; `mainnet-beta` only
+  at launch.
+- `SOLANA_USDC_MINT` — devnet `4zMMC9srt5Ri5X14GAgXhaHii3L6VUHdfBMqBGE3ter`
+  (must match the test token actually deployed); mainnet
+  `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`.
+- `SOLANA_PROGRAM_ID` — set after `anchor deploy`; placeholder
+  `FSxSettle1111111111111111111111111111111111` until then.
+- `SOLANA_TREASURY` — FlexSoar USDC fee sink (multisig on mainnet).
+- `SOLANA_QUOTE_SECRET` — random 32+ bytes; signs price quotes.
+- `SOLANA_MAX_TRADE_UNITS` — optional, defaults to 500000000 (500 USDC,
+  mirrors the program cap).
+
+Toolchain (not installable from here — needs WSL2/Linux):
+
+- Rust stable + Solana CLI + Anchor 0.31.x, then from `solana/`:
+  `anchor build && anchor deploy --provider.cluster devnet`.
