@@ -81,8 +81,8 @@ Environment variables (`.env.local` + Vercel; never commit):
 - `SOLANA_USDC_MINT` — devnet `4zMMC9srt5Ri5X14GAgXhaHii3L6VUHdfBMqBGE3ter`
   (must match the test token actually deployed); mainnet
   `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`.
-- `SOLANA_PROGRAM_ID` — set after `anchor deploy`; placeholder
-  `FSxSettle1111111111111111111111111111111111` until then.
+- `SOLANA_PROGRAM_ID` — devnet `CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF`
+  (deployed 2026-09-14, upgrade authority = deployer keypair).
 - `SOLANA_TREASURY` — FlexSoar USDC fee sink (multisig on mainnet).
 - `SOLANA_QUOTE_SECRET` — random 32+ bytes; signs price quotes.
 - `SOLANA_MAX_TRADE_UNITS` — optional, defaults to 500000000 (500 USDC,
