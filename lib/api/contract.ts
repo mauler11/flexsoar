@@ -4692,23 +4692,26 @@ export async function markNotificationRead(notificationId: UUID): Promise<void> 
 //
 // The trading graph's data path. Two series, merged by observed time:
 //
-//   - 'flexsoar' — settled FlexSoar sales of this model, read from the
-//     sale_history_public definer view (053). A definer view and not a
-//     direct orders read on purpose: orders_own_read (004) only exposes
-//     rows where the caller is buyer or seller, which makes a public
-//     per-model tape impossible. The view projects exactly three columns
-//     (model_id, gross_cents, sold_at) — no counterparty, no refs — and
-//     053 grants it to anon/authenticated, so authorisation still lives in
-//     the SQL per AGENT_RULES.md section 3.
+//   - 'flexsoar' — settled FlexSoar sales of this model, read through the
+//     fn_sale_history_public definer function (053). A definer function and
+//     not a direct orders read on purpose: orders_own_read (004) only
+//     exposes rows where the caller is buyer or seller, which makes a
+//     public per-model tape impossible — and a plain VIEW would not fix
+//     it either, because RLS on the underlying tables is still enforced
+//     against the invoker through a view. The function projects exactly
+//     three columns (model_id, gross_cents, sold_at) for settled orders
+//     only — no counterparty, no refs — and 053 grants execute to
+//     anon/authenticated, so authorisation still lives in the SQL per
+//     AGENT_RULES.md section 3.
 //   - 'market' — admin-entered external reference points (eBay sold
 //     listings, observed market prices), stored in market_refs (053).
 //     Public read, admin-only insert. These are what give a model a
 //     fluctuation line before its first FlexSoar sale.
 //
 // Both reads degrade to [] when 053 has not been applied yet (missing
-// relation), so a deploy ahead of the migration renders the chart's empty
-// state instead of breaking the page. Any other database error surfaces
-// verbatim through fail(), as everywhere else in this file.
+// relation/function), so a deploy ahead of the migration renders the
+// chart's empty state instead of breaking the page. Any other database
+// error surfaces verbatim through fail(), as everywhere else in this file.
 // ============================================================
 
 /** One plotted point on a model's price graph. */
@@ -4719,17 +4722,21 @@ export interface PricePoint {
 }
 
 /**
- * True when the error is "that relation does not exist" — i.e. 053 has not
- * been applied yet — as opposed to a real failure. PostgREST reports a
- * missing table/view as PGRST205; a direct Postgres raise carries 42P01.
+ * True when the error is "that relation/function does not exist" — i.e. 053
+ * has not been applied yet — as opposed to a real failure. PostgREST reports
+ * a missing table/view as PGRST205 and a missing function as PGRST202; a
+ * direct Postgres raise carries 42P01.
  */
 function isMissingRelation(error: PostgresErrorLike): boolean {
   const code = (error.code ?? '').toUpperCase();
-  if (code === 'PGRST205' || code === '42P01') return true;
+  if (code === 'PGRST205' || code === 'PGRST202' || code === '42P01') {
+    return true;
+  }
   const message = (error.message ?? '').toLowerCase();
   return (
     message.includes('does not exist') ||
     message.includes('could not find the table') ||
+    message.includes('could not find the function') ||
     message.includes('schema cache')
   );
 }
@@ -4746,12 +4753,7 @@ export async function getPriceHistory(modelId: UUID): Promise<PricePoint[]> {
   const supabase = await createServerSupabase();
 
   const [salesResult, refsResult] = await Promise.all([
-    supabase
-      .from('sale_history_public')
-      .select('gross_cents, sold_at')
-      .eq('model_id', modelId)
-      .order('sold_at', { ascending: true })
-      .limit(200),
+    supabase.rpc('fn_sale_history_public', { p_model_id: modelId }),
     supabase
       .from('market_refs')
       .select('price_cents, observed_at')
@@ -4761,7 +4763,7 @@ export async function getPriceHistory(modelId: UUID): Promise<PricePoint[]> {
   ]);
 
   if (salesResult.error && !isMissingRelation(salesResult.error)) {
-    fail(salesResult.error, 'sale_history_public');
+    fail(salesResult.error, 'fn_sale_history_public');
   }
   if (refsResult.error && !isMissingRelation(refsResult.error)) {
     fail(refsResult.error, 'market_refs');
