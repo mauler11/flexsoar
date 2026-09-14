@@ -9,9 +9,10 @@
  * different suite with its own key management.
  */
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { base58Decode, base58Encode, decodeAddress } from '../lib/solana/base58';
+import { myrPerUsd } from '../lib/solana/fx';
 import { issueQuote, splitFee, verifyQuote } from '../lib/solana/quotes';
 import { verifyWalletLink, linkMessage } from '../lib/solana/wallet';
 import { verifyBuyTransaction } from '../lib/solana/verify';
@@ -339,5 +340,56 @@ describe('build-tx helpers — base58 round-trip, deterministic ATAs', () => {
     expect(ASSOCIATED_TOKEN_PROGRAM_ID).toBe(
       'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
     );
+  });
+});
+
+describe('myrPerUsd — provider chain with operator pin last', () => {
+  const pin = process.env.SOLANA_MYR_PER_USD;
+
+  function ratesFetch(myr: number) {
+    return (async (_url?: unknown) => ({
+      ok: true,
+      json: async () => ({ rates: { MYR: myr } }),
+    })) as unknown as typeof fetch;
+  }
+
+  const deadFetch = (async (_url?: unknown) => ({
+    ok: false,
+    json: async () => ({}),
+  })) as unknown as typeof fetch;
+
+  afterEach(() => {
+    if (pin === undefined) delete process.env.SOLANA_MYR_PER_USD;
+    else process.env.SOLANA_MYR_PER_USD = pin;
+  });
+
+  it('takes the primary provider and never touches the fallback', async () => {
+    delete process.env.SOLANA_MYR_PER_USD;
+    const failIfCalled = (async (url: string | URL | Request) => {
+      if (String(url).includes('frankfurter')) throw new Error('fallback must not run');
+      return { ok: true, json: async () => ({ rates: { MYR: 4.7 } }) };
+    }) as unknown as typeof fetch;
+    await expect(myrPerUsd(failIfCalled)).resolves.toBe(4.7);
+  });
+
+  it('falls to frankfurter when the primary is down', async () => {
+    delete process.env.SOLANA_MYR_PER_USD;
+    const mixed = (async (url: string | URL | Request) => {
+      if (String(url).includes('frankfurter')) return ratesFetch(4.8)('https://x');
+      return deadFetch('https://x');
+    }) as unknown as typeof fetch;
+    await expect(myrPerUsd(mixed)).resolves.toBe(4.8);
+  });
+
+  it('uses the operator pin only when both providers fail', async () => {
+    process.env.SOLANA_MYR_PER_USD = '4.65';
+    await expect(myrPerUsd(deadFetch)).resolves.toBe(4.65);
+  });
+
+  it('fails closed with no pin and rejects a garbage pin', async () => {
+    delete process.env.SOLANA_MYR_PER_USD;
+    await expect(myrPerUsd(deadFetch)).resolves.toBeNull();
+    process.env.SOLANA_MYR_PER_USD = 'not-a-number';
+    await expect(myrPerUsd(deadFetch)).resolves.toBeNull();
   });
 });

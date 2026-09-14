@@ -21,7 +21,7 @@ import { PublicKey } from '@solana/web3.js';
 
 import { createServerSupabase, createServiceSupabase } from '@/lib/supabase/server';
 import { getListing } from '@/lib/api/contract';
-import { usdBaseRates } from '@/lib/market/ebay';
+import { myrPerUsd } from '@/lib/solana/fx';
 import { issueQuote } from '@/lib/solana/quotes';
 import {
   associatedTokenAddress,
@@ -123,9 +123,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'link your wallet first' }, { status: 409 });
   }
 
-  const rates = await usdBaseRates();
-  const myr = rates?.MYR;
-  if (!myr || myr <= 0) {
+  const myr = await myrPerUsd();
+  if (!myr) {
     return NextResponse.json({ error: 'fx unavailable — try again shortly' }, { status: 502 });
   }
   const totalUnits = Math.round(((listing.price_cents / 100) / myr) * 1_000_000);

@@ -89,6 +89,10 @@ Environment variables (`.env.local` + Vercel; never commit):
 - `SOLANA_QUOTE_SECRET` — random 32+ bytes; signs price quotes.
 - `SOLANA_MAX_TRADE_UNITS` — optional, defaults to 500000000 (500 USDC,
   mirrors the program cap).
+- `SOLANA_MYR_PER_USD` — optional operator pin (e.g. `4.70`), used ONLY when
+  both free FX providers are unreachable. The used rate is auditable per
+  trade inside the quote (`fxMyr`). Set it if your network blocks the free
+  endpoints; otherwise leave unset and quotes ride live FX.
 
 Toolchain (not installable from here — needs WSL2/Linux):
 

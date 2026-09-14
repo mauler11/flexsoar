@@ -17,7 +17,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 import { createServerSupabase, createServiceSupabase } from '@/lib/supabase/server';
 import { getListing } from '@/lib/api/contract';
-import { usdBaseRates } from '@/lib/market/ebay';
+import { myrPerUsd } from '@/lib/solana/fx';
 import { issueQuote, splitFee } from '@/lib/solana/quotes';
 
 export const dynamic = 'force-dynamic';
@@ -73,9 +73,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const rates = await usdBaseRates();
-  const myr = rates?.MYR;
-  if (!myr || myr <= 0) {
+  const myr = await myrPerUsd();
+  if (!myr) {
     return NextResponse.json({ error: 'fx unavailable — try again shortly' }, { status: 502 });
   }
   const totalUnits = Math.round(((listing.price_cents / 100) / myr) * 1_000_000);
