@@ -21,81 +21,13 @@
 import { useMemo, useState } from "react";
 import { formatMyr } from "@/components/card/format";
 import type { PricePoint } from "@/lib/api/contract";
+import {
+  priceChange,
+  filterByRange,
+  type ChartRange,
+} from "@/lib/market/pricing";
 
-export interface PriceChange {
-  /** Null when fewer than two points exist. */
-  pct: number | null;
-  firstCents: number | null;
-  lastCents: number | null;
-}
-
-/** Exported so tests pin the arithmetic without rendering SVG. */
-export function priceChange(points: readonly PricePoint[]): PriceChange {
-  if (points.length < 2) {
-    const only = points.length === 1 ? points[0].priceCents : null;
-    return { pct: null, firstCents: only, lastCents: only };
-  }
-  const firstCents = points[0].priceCents;
-  const lastCents = points[points.length - 1].priceCents;
-  if (firstCents <= 0) {
-    return { pct: null, firstCents, lastCents };
-  }
-  return {
-    pct: ((lastCents - firstCents) / firstCents) * 100,
-    firstCents,
-    lastCents,
-  };
-}
-
-export type ChartRange = "1M" | "6M" | "1Y" | "ALL";
-
-/**
- * The Fair Market Price: median of the model's tape inside a trailing
- * window (FlexSoar sales AND market refs — a sale is market data), falling
- * back to the latest point, then to null. Nobody sets this number: admins
- * pin reference points, buyers close sales, and this reads the result.
- * Exported so pages share one definition and tests pin it.
- */
-export function fairMarketPrice(
-  points: readonly PricePoint[],
-  windowDays: number = 90,
-  nowMs: number = Date.now(),
-): number | null {
-  if (points.length === 0) return null;
-  const cutoff = nowMs - windowDays * 86400000;
-  const inWindow = points.filter(
-    (p) => new Date(p.observedAt).getTime() >= cutoff,
-  );
-  const pool = (inWindow.length > 0 ? inWindow : [points[points.length - 1]])
-    .map((p) => p.priceCents)
-    .sort((a, b) => a - b);
-  const mid = Math.floor(pool.length / 2);
-  return pool.length % 2 === 1
-    ? pool[mid]
-    : Math.round((pool[mid - 1] + pool[mid]) / 2);
-}const RANGE_DAYS: Record<ChartRange, number | null> = {
-  "1M": 31,
-  "6M": 183,
-  "1Y": 365,
-  ALL: null,
-};
-
-/** Exported so tests pin the windowing without rendering SVG. */
-export function filterByRange(
-  points: readonly PricePoint[],
-  range: ChartRange,
-  nowMs: number = Date.now(),
-): PricePoint[] {
-  const days = RANGE_DAYS[range];
-  if (days == null) return [...points];
-  const cutoff = nowMs - days * 86400000;
-  const inWindow = points.filter(
-    (p) => new Date(p.observedAt).getTime() >= cutoff,
-  );
-  // A range that chops the tape to one point or none tells nothing — fall
-  // back to the full tape rather than rendering an empty chart.
-  return inWindow.length >= 2 ? inWindow : [...points];
-}
+const RANGES: readonly ChartRange[] = ["1M", "6M", "1Y", "ALL"];
 
 const W = 560;
 const H = 240;
@@ -120,8 +52,6 @@ function pathFor(series: readonly { x: number; y: number }[]): string {
     .map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`)
     .join(" ");
 }
-
-const RANGES: readonly ChartRange[] = ["1M", "6M", "1Y", "ALL"];
 
 export function PriceChart({ points }: { points: readonly PricePoint[] }) {
   const [range, setRange] = useState<ChartRange>("ALL");

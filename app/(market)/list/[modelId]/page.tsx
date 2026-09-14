@@ -13,7 +13,8 @@ import { getSkuModel, getPriceHistory } from "@/lib/api/contract";
 import { SizeChartButton } from "@/components/market/SizeChartModal";
 import { SellerGuideButton } from "@/components/market/SellerGuideModal";
 import { SizeGrid } from "@/components/market/SizeGrid";
-import { PriceChart, fairMarketPrice } from "@/components/market/PriceChart";
+import { PriceChart } from "@/components/market/PriceChart";
+import { fairMarketPrice } from "@/lib/market/pricing";
 import { formatMyr } from "@/components/card/format";
 import type { UUID } from "@/lib/db/types";
 

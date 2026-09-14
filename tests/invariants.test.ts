@@ -83,7 +83,8 @@ import { SkuModelForm, parseDraft, type Draft } from '../components/admin/skus/S
 import { VariantsTable } from '../components/admin/skus/VariantsTable';
 import { MintTable } from '../components/admin/mint/MintTable';
 import { DecisionControls, oracleHint, askingNote } from '../components/admin/submissions/DecisionControls';
-import { PriceChart, priceChange, filterByRange, fairMarketPrice } from '../components/market/PriceChart';
+import { PriceChart } from '../components/market/PriceChart';
+import { priceChange, filterByRange, fairMarketPrice } from '../lib/market/pricing';
 import type { PricePoint } from '../lib/api/contract';
 import { medianSen, toMyrSen } from '../lib/market/ebay';
 import SubmissionsQueuePage from '../app/admin/submissions/page';
