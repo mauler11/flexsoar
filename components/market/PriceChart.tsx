@@ -22,7 +22,7 @@ import { useMemo, useState } from "react";
 import { formatMyr } from "@/components/card/format";
 import type { PricePoint } from "@/lib/api/contract";
 import {
-  priceChange,
+  trend,
   filterByRange,
   type ChartRange,
 } from "@/lib/market/pricing";
@@ -53,7 +53,7 @@ function pathFor(series: readonly { x: number; y: number }[]): string {
     .join(" ");
 }
 
-export function PriceChart({ points }: { points: readonly PricePoint[] }) {
+export function PriceChart({ points, retailCents = null }: { points: readonly PricePoint[]; retailCents?: number | null }) {
   const [range, setRange] = useState<ChartRange>("ALL");
   const [hover, setHover] = useState<number | null>(null);
 
@@ -61,7 +61,11 @@ export function PriceChart({ points }: { points: readonly PricePoint[] }) {
     () => filterByRange(points, range),
     [points, range],
   );
-  const change = priceChange(windowed);
+  // Momentum, not first-vs-last: trailing-14d median vs trailing-90d
+  // median, so one odd comp cannot flip the arrow.
+  const momentum = trend(windowed);
+  const lastCents =
+    windowed.length > 0 ? windowed[windowed.length - 1].priceCents : null;
 
   if (points.length === 0) {
     return (
@@ -101,7 +105,7 @@ export function PriceChart({ points }: { points: readonly PricePoint[] }) {
       ? `${pathFor(marketLine)} L${marketLine[marketLine.length - 1].x.toFixed(1)},${(H - PAD_B).toFixed(1)} L${marketLine[0].x.toFixed(1)},${(H - PAD_B).toFixed(1)} Z`
       : null;
   const hasFlex = flexIdx.length > 0;
-  const up = change.pct != null && change.pct >= 0;
+  const up = momentum.direction === "up";
   const hovered = hover != null && hover < windowed.length ? { p: windowed[hover], ...at(hover) } : null;
 
   function onMove(event: React.MouseEvent<SVGSVGElement>) {
@@ -146,27 +150,30 @@ export function PriceChart({ points }: { points: readonly PricePoint[] }) {
       </div>
 
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[12px]">
-        {change.lastCents != null && (
+        {lastCents != null && (
           <span className="text-lg font-extrabold tabular-nums">
-            {formatMyr(change.lastCents)}
+            {formatMyr(lastCents)}
           </span>
         )}
-        {change.pct != null ? (
+        {momentum.bps != null && momentum.direction !== "flat" ? (
           <span className={`font-bold tabular-nums ${up ? "text-accent" : "text-[#FF4444]"}`}>
-            {up ? "▲" : "▼"} {Math.abs(change.pct).toFixed(1)}%
+            {up ? "▲" : "▼"} {Math.abs(momentum.bps / 100).toFixed(1)}%
           </span>
         ) : (
-          <span className="font-semibold text-muted">first point</span>
+          <span className="font-semibold text-muted">steady</span>
         )}
         <span className="tabular-nums text-muted">High {formatMyr(max)}</span>
         <span className="tabular-nums text-muted">Low {formatMyr(min)}</span>
         <span className="tabular-nums text-muted">Avg {formatMyr(avg)}</span>
+        {retailCents != null && (
+          <span className="tabular-nums text-muted">Retail {formatMyr(retailCents)}</span>
+        )}
       </div>
 
       <svg
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label={`Price chart, last ${change.lastCents != null ? formatMyr(change.lastCents) : "no price"}`}
+        aria-label={`Price chart, last ${lastCents != null ? formatMyr(lastCents) : "no price"}`}
         className="w-full cursor-crosshair"
         onMouseMove={onMove}
         onMouseLeave={() => setHover(null)}
@@ -195,6 +202,30 @@ export function PriceChart({ points }: { points: readonly PricePoint[] }) {
         )}
         {marketLine.length === 1 && (
           <circle cx={marketLine[0].x} cy={marketLine[0].y} r={3} fill="currentColor" opacity={0.45} />
+        )}
+        {retailCents != null && retailCents >= lo && retailCents <= hi && (
+          <g>
+            <line
+              x1={PAD_L}
+              x2={W - PAD_R}
+              y1={yFor(retailCents, lo, hi)}
+              y2={yFor(retailCents, lo, hi)}
+              stroke="currentColor"
+              strokeOpacity={0.5}
+              strokeWidth={1}
+              strokeDasharray="2 3"
+            />
+            <text
+              x={W - PAD_R}
+              y={yFor(retailCents, lo, hi) - 4}
+              textAnchor="end"
+              fontSize={9}
+              fill="currentColor"
+              opacity={0.6}
+            >
+              Retail
+            </text>
+          </g>
         )}
         {flexLine.length >= 2 && (
           <path d={pathFor(flexLine)} fill="none" stroke="#4dff88" strokeWidth={2} />

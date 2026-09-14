@@ -944,6 +944,12 @@ export interface UpdateSkuModelInput {
   /** Char -> hex map. Validate against the 9 sprite glyphs before saving. */
   palette?: Json | null;
   demand_score?: number;
+  /**
+   * Official brand retail (055), admin-typed once. Display only — never
+   * feeds tier. Omitted (undefined) when the caller is not changing it;
+   * explicit null clears it.
+   */
+  retail_price_cents?: Cents | null;
 }
 
 /**
@@ -4791,6 +4797,30 @@ export async function getPriceHistory(modelId: UUID): Promise<PricePoint[]> {
       new Date(a.observedAt).getTime() - new Date(b.observedAt).getTime(),
   );
   return points;
+}
+
+/**
+ * getModelRetail(modelId) -> Cents | null
+ *
+ * Best-effort read of the 055 retail column (public via sku_models_read).
+ * Null when unset OR when 055 has not been applied yet — callers treat
+ * both as "no retail on file", never as an error.
+ */
+export async function getModelRetail(modelId: UUID): Promise<Cents | null> {
+  try {
+    const supabase = await createServerSupabase();
+    const { data, error } = await supabase
+      .from('sku_models')
+      .select('retail_price_cents')
+      .eq('id', modelId)
+      .maybeSingle();
+    if (error || !data) return null;
+    const value = (data as { retail_price_cents: Cents | null })
+      .retail_price_cents;
+    return typeof value === 'number' && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

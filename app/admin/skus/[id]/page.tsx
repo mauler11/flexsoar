@@ -21,7 +21,7 @@ import { VariantsTable } from "@/components/admin/skus/VariantsTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { formatMyr } from "@/components/card/format";
-import { getSkuModel, getPriceHistory } from "@/lib/api/contract";
+import { getSkuModel, getPriceHistory, getModelRetail } from "@/lib/api/contract";
 import { borderColorFor, tierForPrice, tierName } from "@/lib/domain/rarity";
 
 export const metadata: Metadata = {
@@ -47,6 +47,7 @@ export default async function EditSkuModelPage({
   const marketRefs = (await getPriceHistory(model.id).catch(() => [])).filter(
     (p) => p.source === "market",
   );
+  const retailCents = await getModelRetail(model.id).catch(() => null);
 
   const tier =
     model.base_price_cents == null ? null : tierForPrice(model.base_price_cents);
@@ -83,7 +84,7 @@ export default async function EditSkuModelPage({
         </p>
       </header>
 
-      <SkuModelForm model={model} />
+      <SkuModelForm model={model} retailCents={retailCents} />
 
       <MarketRefForm modelId={model.id} />
 

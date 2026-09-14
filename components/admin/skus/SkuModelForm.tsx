@@ -42,18 +42,21 @@ export interface Draft {
   model: string;
   colorway: string;
   base_price_cents: string;
+  retail_price_cents: string;
   price_confidence: string;
   sprite_key: string;
   palette: string;
 }
 
-function draftFrom(model: SkuModel | null): Draft {
+function draftFrom(model: SkuModel | null, retailCents?: number | null): Draft {
   return {
     brand: model?.brand ?? "",
     model: model?.model ?? "",
     colorway: model?.colorway ?? "",
     base_price_cents:
       model?.base_price_cents == null ? "" : String(model.base_price_cents),
+    retail_price_cents:
+      retailCents == null ? "" : String(retailCents),
     price_confidence:
       model?.price_confidence == null ? "" : String(model.price_confidence),
     sprite_key: model?.sprite_key ?? "",
@@ -63,6 +66,7 @@ function draftFrom(model: SkuModel | null): Draft {
 
 interface ParsedCommon {
   basePriceCents: number | null;
+  retailPriceCents: number | null;
   priceConfidence: number | null;
   spriteKey: string | null;
   palette: Record<string, string> | null;
@@ -95,6 +99,18 @@ export function parseDraft(draft: Draft, isCreate: boolean): Parsed {
       errors.base_price_cents = "integer cents only, > 0 — 18999, never 189.99";
     } else {
       basePriceCents = Number(priceText);
+    }
+  }
+
+  // Official box price (055): typed once, static forever. Same integer-cents
+  // discipline as the base price; blank means "no retail on file".
+  let retailPriceCents: number | null = null;
+  const retailText = draft.retail_price_cents.trim();
+  if (retailText !== "") {
+    if (!/^\d+$/.test(retailText) || Number(retailText) <= 0) {
+      errors.retail_price_cents = "integer cents only, > 0 — 25000, never 250.00";
+    } else {
+      retailPriceCents = Number(retailText);
     }
   }
 
@@ -149,6 +165,7 @@ export function parseDraft(draft: Draft, isCreate: boolean): Parsed {
     ok: true,
     common: {
       basePriceCents,
+      retailPriceCents,
       priceConfidence,
       spriteKey: draft.sprite_key.trim() === "" ? null : draft.sprite_key.trim(),
       palette,
@@ -160,9 +177,9 @@ export function parseDraft(draft: Draft, isCreate: boolean): Parsed {
   };
 }
 
-export function SkuModelForm({ model }: { model: SkuModel | null }) {
+export function SkuModelForm({ model, retailCents = null }: { model: SkuModel | null; retailCents?: number | null }) {
   const router = useRouter();
-  const [draft, setDraft] = useState<Draft>(() => draftFrom(model));
+  const [draft, setDraft] = useState<Draft>(() => draftFrom(model, retailCents));
   const [confirming, setConfirming] = useState(false);
   const [result, setResult] = useState<CreateSkuModelResult | UpdateSkuModelResult | null>(null);
   const [pending, startTransition] = useTransition();
@@ -184,6 +201,7 @@ export function SkuModelForm({ model }: { model: SkuModel | null }) {
         // the model's existing values pass straight through untouched.
         const outcome = await updateSkuModelAction(model.id, {
           base_price_cents: parsed.common.basePriceCents,
+          retail_price_cents: parsed.common.retailPriceCents,
           price_confidence: parsed.common.priceConfidence,
           sprite_key: model.sprite_key,
           palette: (model.palette ?? null) as Record<string, string> | null,
@@ -235,11 +253,19 @@ export function SkuModelForm({ model }: { model: SkuModel | null }) {
           </>
         )}
         <Input
-          label="Fair Market Price (cents)"
+          label="Base price (cents)"
           inputMode="numeric"
-          hint="Drives tier for FUTURE mints of every size. Empty = unpriced, unmintable."
+          hint="Drives tier for FUTURE mints of every size. Empty = unpriced, unmintable. The buyers' Fair Market Price derives from the trading tape, not from this field."
           {...field("base_price_cents")}
         />
+        {model !== null && (
+          <Input
+            label="Retail price (cents)"
+            inputMode="numeric"
+            hint="Official box price, typed once. Static reference for the tape — never follows the market, never feeds tier."
+            {...field("retail_price_cents")}
+          />
+        )}
         {model !== null && (
           <Input
             label="Price confidence"

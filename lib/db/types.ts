@@ -334,6 +334,13 @@ export interface SkuModel {
    * unpriced model physically cannot become a card. Admin-set only.
    */
   base_price_cents: Cents | null;
+  /**
+   * Official brand retail (055). Static reference for the tape and the Fair
+   * Market Price bootstrap fallback — never feeds tier. Optional on the
+   * type (same convention as Sku.model_id): the DB sends it once 055 is
+   * applied, older projections omit it.
+   */
+  retail_price_cents?: Cents | null;
   /** numeric(3,2), 0.00 .. 1.00. */
   price_confidence: number | null;
   priced_at: Timestamptz | null;

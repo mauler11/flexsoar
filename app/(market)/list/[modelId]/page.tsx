@@ -9,12 +9,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getSkuModel, getPriceHistory } from "@/lib/api/contract";
+import { getSkuModel, getPriceHistory, getModelRetail } from "@/lib/api/contract";
 import { SizeChartButton } from "@/components/market/SizeChartModal";
 import { SellerGuideButton } from "@/components/market/SellerGuideModal";
 import { SizeGrid } from "@/components/market/SizeGrid";
 import { PriceChart } from "@/components/market/PriceChart";
-import { fairMarketPrice } from "@/lib/market/pricing";
+import { marketRead } from "@/lib/market/pricing";
 import { formatMyr } from "@/components/card/format";
 import type { UUID } from "@/lib/db/types";
 
@@ -43,10 +43,13 @@ export default async function ListProductPage({
   // first. Empty until 053 lands or the first point is entered — the chart
   // renders its own empty state, never an error. The header's Fair Market
   // Price is derived from the same tape (median, trailing 90d) — nobody
-  // types it — falling back to the model's base only when the tape is
-  // empty.
+  // types it — opening at the retail you entered while the tape is empty
+  // (bootstrap: your ask stays yours regardless), then the base, then
+  // nothing.
   const history = await getPriceHistory(model.id).catch(() => []);
-  const marketPrice = fairMarketPrice(history) ?? model.base_price_cents;
+  const retailCents = await getModelRetail(model.id).catch(() => null);
+  const read = marketRead(history, retailCents);
+  const marketPrice = read.fairMarket ?? retailCents ?? model.base_price_cents;
 
   return (
     <div className="flex flex-col gap-4">
@@ -111,10 +114,37 @@ export default async function ListProductPage({
             modelId={model.id}
             existingSizes={[...existingSizes]}
           />
+
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-2xl border border-line bg-raised px-4 py-3 text-[12px]">
+            <span className="font-extrabold tracking-tight">Market read</span>
+            {read.trend.direction !== "flat" ? (
+              <span className={`font-bold tabular-nums ${read.trend.direction === "up" ? "text-accent" : "text-[#FF4444]"}`}>
+                {read.trend.direction === "up" ? "▲" : "▼"}{" "}
+                {Math.abs((read.trend.bps ?? 0) / 100).toFixed(1)}%
+              </span>
+            ) : (
+              <span className="font-semibold text-muted">steady</span>
+            )}
+            {read.volatility.band && (
+              <span className="tabular-nums text-muted">
+                {read.volatility.band} · {read.volatility.pct?.toFixed(0)}% range
+              </span>
+            )}
+            <span className="tabular-nums text-muted">
+              {read.sales30d === 1 ? "1 sale" : `${read.sales30d} sales`} / 30d
+            </span>
+            {read.vsRetailPct != null && (
+              <span className="tabular-nums text-muted">
+                {read.vsRetailPct >= 0 ? "+" : ""}
+                {read.vsRetailPct.toFixed(0)}% vs retail
+              </span>
+            )}
+          </div>
+          <p className="text-[12px] text-muted">{read.summary}</p>
         </div>
       </div>
 
-      <PriceChart points={history} />
+      <PriceChart points={history} retailCents={retailCents} />
     </div>
   );
 }

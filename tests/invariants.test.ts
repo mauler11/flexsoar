@@ -84,7 +84,7 @@ import { VariantsTable } from '../components/admin/skus/VariantsTable';
 import { MintTable } from '../components/admin/mint/MintTable';
 import { DecisionControls, oracleHint, askingNote } from '../components/admin/submissions/DecisionControls';
 import { PriceChart } from '../components/market/PriceChart';
-import { priceChange, filterByRange, fairMarketPrice } from '../lib/market/pricing';
+import { trend, volatility, salesLast30d, marketRead, filterByRange, fairMarketPrice } from '../lib/market/pricing';
 import type { PricePoint } from '../lib/api/contract';
 import { medianSen, toMyrSen } from '../lib/market/ebay';
 import SubmissionsQueuePage from '../app/admin/submissions/page';
@@ -2281,6 +2281,7 @@ describe('SkuModelForm.parseDraft — create mode (identity required)', () => {
     model: 'Air Jordan 1',
     colorway: 'Chicago',
     base_price_cents: '',
+    retail_price_cents: '',
     price_confidence: '',
     sprite_key: '',
     palette: '',
@@ -2332,6 +2333,7 @@ describe('SkuModelForm.parseDraft — edit mode never re-runs the identity check
     model: '',
     colorway: '',
     base_price_cents: '',
+    retail_price_cents: '',
     price_confidence: '',
     sprite_key: '',
     palette: '',
@@ -2386,7 +2388,7 @@ describe('SkuModelForm — rendered output agrees with parseDraft', () => {
 
   it('edit mode with base_price_cents null: price renders blank and Save changes stays enabled', () => {
     const html = renderToStaticMarkup(createElement(SkuModelForm, { model: baseSkuModel }));
-    const priceInput = html.match(/id="input-Fair Market Price \(cents\)"[^>]*value="([^"]*)"/);
+    const priceInput = html.match(/id="input-Base price \(cents\)"[^>]*value="([^"]*)"/);
     expect(priceInput?.[1] ?? '').toBe('');
 
     const button = html.match(/<button[^>]*>Save changes<\/button>/);
@@ -3182,7 +3184,7 @@ describe('Market page (/market) — signed out render', () => {
 });
 
 // ------------------------------------------------------------
-// PriceChart (053) — the trading tape. priceChange() pins the header
+// PriceChart (053) — the trading tape. trend() pins the header momentum
 // arithmetic; the render pins the two-series legend, the MYR formatting,
 // and the honest empty/reference-only states. Money here is MYR sen like
 // every other price surface, never FSC.
@@ -3199,17 +3201,38 @@ describe('PriceChart — trading tape renders MYR, never FSC', () => {
     source: 'flexsoar',
   };
 
-  it('priceChange: last-vs-first across the merged window', () => {
-    const change = priceChange([...refs, sale]);
-    expect(change.firstCents).toBe(24000);
-    expect(change.lastCents).toBe(25500);
-    expect(change.pct).toBeCloseTo(((25500 - 24000) / 24000) * 100, 5);
+  it('trend: short-window median vs long-window median, in bps', () => {
+    const now = new Date('2026-09-01T00:00:00.000Z').getTime();
+    const pts: PricePoint[] = [
+      { priceCents: 20000, observedAt: '2026-06-15T12:00:00.000Z', source: 'market' },
+      { priceCents: 21000, observedAt: '2026-07-01T12:00:00.000Z', source: 'market' },
+      { priceCents: 30000, observedAt: '2026-08-25T12:00:00.000Z', source: 'market' },
+      { priceCents: 31000, observedAt: '2026-08-28T12:00:00.000Z', source: 'flexsoar' },
+    ];
+    const t = trend(pts, now);
+    expect(t.direction).toBe('up');
+    expect(t.bps).toBeGreaterThan(200);
   });
 
-  it('priceChange: fewer than two points yields no pct', () => {
-    expect(priceChange([]).pct).toBeNull();
-    expect(priceChange([sale]).pct).toBeNull();
-    expect(priceChange([sale]).lastCents).toBe(25500);
+  it('trend: empty windows stay flat, never throw', () => {
+    expect(trend([]).direction).toBe('flat');
+    expect(trend([]).bps).toBeNull();
+  });
+
+  it('volatility bands and 30d sale count feed the market read', () => {
+    const now = new Date('2026-09-01T00:00:00.000Z').getTime();
+    const pts: PricePoint[] = [
+      { priceCents: 24000, observedAt: '2026-08-01T12:00:00.000Z', source: 'market' },
+      { priceCents: 26000, observedAt: '2026-08-20T12:00:00.000Z', source: 'flexsoar' },
+      { priceCents: 10000, observedAt: '2024-01-01T12:00:00.000Z', source: 'flexsoar' },
+    ];
+    const v = volatility(pts, now);
+    expect(v.band).toBe('calm');
+    expect(salesLast30d(pts, now)).toBe(1);
+    const read = marketRead(pts, 30000, now);
+    expect(read.fairMarket).toBe(25000);
+    expect(read.vsRetailPct).toBeCloseTo(((25000 - 30000) / 30000) * 100, 5);
+    expect(read.summary).toContain('1 sale in 30d');
   });
 
   it('empty tape: honest empty state, no chart', () => {

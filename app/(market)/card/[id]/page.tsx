@@ -8,7 +8,7 @@
  */
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getCard, getListing, getItem, getCreditAvailable, getPayoutMethodForUser, getUser, listSkuModels, getPriceHistory } from "@/lib/api/contract";
+import { getCard, getListing, getItem, getCreditAvailable, getPayoutMethodForUser, getUser, listSkuModels, getPriceHistory, getModelRetail } from "@/lib/api/contract";
 import type { CardStatus } from "@/lib/db/types";
 import {
   currentUserId,
@@ -25,7 +25,7 @@ import { ListForm } from "@/components/market/ListForm";
 import { RedeemForm } from "@/components/market/RedeemForm";
 import { ProvenanceChain } from "@/components/market/ProvenanceChain";
 import { PriceChart } from "@/components/market/PriceChart";
-import { fairMarketPrice } from "@/lib/market/pricing";
+import { marketRead } from "@/lib/market/pricing";
 import { Countdown } from "@/components/market/Countdown";
 import { ExpandableSection } from "@/components/ui/ExpandableSection";
 import { Button } from "@/components/ui/Button";
@@ -157,19 +157,23 @@ export default async function CardPage({
   // SkuRef), so resolve the model by exact identity match. Brand+model filter
   // server-side, colorway pinned client-side — miss means no chart, never an
   // error.
-  const history = await listSkuModels({
+  const modelMatch = await listSkuModels({
     brand: detail.sku.brand,
     model: detail.sku.model,
   })
     .then((models) => models.find((m) => m.colorway === detail.sku.colorway) ?? null)
-    .then((match) => (match ? getPriceHistory(match.id) : []))
-    .catch(() => []);
+    .catch(() => null);
+  const history = modelMatch ? await getPriceHistory(modelMatch.id).catch(() => []) : [];
+  const retailCents = modelMatch ? await getModelRetail(modelMatch.id).catch(() => null) : null;
+  const read = marketRead(history, retailCents);
 
   // The Fair Market Price is derived from the tape (median, trailing 90d),
-  // never typed: the market-derived value first, then the listing's stored
-  // fair (admin-set rows predating the tape), then the card value.
+  // never typed: the market-derived value first, then the retail you set
+  // (bootstrap), then the listing's stored fair (admin-set rows predating
+  // the tape), then the card value.
   const fairMarket =
-    fairMarketPrice(history) ??
+    read.fairMarket ??
+    retailCents ??
     listing?.fair_price_cents ??
     detail.oracle_value_cents;
   const conditionLabel = publishedConditionLabel(
@@ -228,6 +232,27 @@ export default async function CardPage({
                   <span className="text-foreground font-medium">{formatMyr(fairMarket)}</span>
                 </div>
               )}
+              {read.trend.direction !== "flat" && (
+                <div className="flex items-baseline justify-between text-sm text-muted">
+                  <span>Trend</span>
+                  <span className={`font-bold tabular-nums ${read.trend.direction === "up" ? "text-accent" : "text-[#FF4444]"}`}>
+                    {read.trend.direction === "up" ? "▲" : "▼"}{" "}
+                    {Math.abs((read.trend.bps ?? 0) / 100).toFixed(1)}%
+                  </span>
+                </div>
+              )}
+              <div className="flex items-baseline justify-between text-sm text-muted">
+                <span>Liquidity</span>
+                <span className="tabular-nums">
+                  {read.sales30d === 1 ? "1 sale" : `${read.sales30d} sales`} / 30d
+                </span>
+              </div>
+              {retailCents != null && (
+                <div className="flex items-baseline justify-between text-sm text-muted">
+                  <span>Retail</span>
+                  <span className="tabular-nums">{formatMyr(retailCents)}</span>
+                </div>
+              )}
               {item.grading_notes && (
                 <p className="leading-snug tracking-tight text-muted">{item.grading_notes}</p>
               )}
@@ -237,7 +262,7 @@ export default async function CardPage({
             </div>
           </ExpandableSection>
 
-          <PriceChart points={history} />
+          <PriceChart points={history} retailCents={retailCents} />
         </section>
 
         <section className="flex flex-col gap-6">
