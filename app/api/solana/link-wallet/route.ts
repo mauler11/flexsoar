@@ -14,9 +14,29 @@
 import { NextResponse } from 'next/server';
 
 import { createServerSupabase, createServiceSupabase } from '@/lib/supabase/server';
-import { verifyWalletLink } from '@/lib/solana/wallet';
+import { linkMessage, verifyWalletLink } from '@/lib/solana/wallet';
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * GET returns the fresh message the caller must sign: the wallet proves
+ * ownership by signing `linkMessage(ownUserId, issuedAt)` and POSTing the
+ * signature back. The client never invents the user id — it comes from
+ * the session here.
+ */
+export async function GET(): Promise<NextResponse> {
+  const supabase = await createServerSupabase();
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id ?? null;
+  if (!userId) {
+    return NextResponse.json({ error: 'sign in to link a wallet' }, { status: 401 });
+  }
+  const issuedAt = new Date().toISOString();
+  return NextResponse.json(
+    { userId, issuedAt, message: linkMessage(userId, issuedAt) },
+    { status: 200 },
+  );
+}
 
 export async function POST(request: Request): Promise<NextResponse> {
   const supabase = await createServerSupabase();

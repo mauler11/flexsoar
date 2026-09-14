@@ -21,6 +21,36 @@ import {
 
 export const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 
+/** Associated Token program — ATA derivation needs no @solana/spl-token. */
+export const ASSOCIATED_TOKEN_PROGRAM_ID =
+  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
+
+/**
+ * Deterministic USDC account for (owner, mint). Throws on malformed
+ * input — a bad ATA must fail here, never as a chain transaction that
+ * burns the buyer's fee.
+ */
+export function associatedTokenAddress(owner: string, mint: string): string {
+  const [ata] = PublicKey.findProgramAddressSync(
+    [
+      new PublicKey(owner).toBytes(),
+      new PublicKey(TOKEN_PROGRAM_ID).toBytes(),
+      new PublicKey(mint).toBytes(),
+    ],
+    new PublicKey(ASSOCIATED_TOKEN_PROGRAM_ID),
+  );
+  return ata.toBase58();
+}
+
+/** The program's singleton config PDA: seeds [b"config"]. */
+export function configPda(programId: string): string {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [new TextEncoder().encode('config')],
+    new PublicKey(programId),
+  );
+  return pda.toBase58();
+}
+
 /** sha256("global:buy")[0..8] — the Anchor discriminator, computed not pasted. */
 export async function buyDiscriminator(): Promise<Uint8Array> {
   const digest = await globalThis.crypto.subtle.digest(

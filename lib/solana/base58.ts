@@ -50,3 +50,28 @@ export function decodeAddress(input: string): Uint8Array {
   }
   return bytes;
 }
+
+/** Encode bytes to base58 (Bitcoin alphabet). Inverse of base58Decode. */
+export function base58Encode(bytes: Uint8Array): string {
+  let zeros = 0;
+  while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+  // All-zero input is just leading ones — the digit loop below would add
+  // one more spurious '1' for the zero value itself.
+  if (zeros === bytes.length) return '1'.repeat(bytes.length);
+  const digits: number[] = [0];
+  for (let i = zeros; i < bytes.length; i++) {
+    let carry = bytes[i];
+    for (let j = 0; j < digits.length; j++) {
+      carry += digits[j] << 8;
+      digits[j] = carry % 58;
+      carry = Math.floor(carry / 58);
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+  let out = '';
+  for (let i = digits.length - 1; i >= 0; i--) out += ALPHABET[digits[i]];
+  return '1'.repeat(zeros) + out;
+}

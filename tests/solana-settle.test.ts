@@ -11,7 +11,7 @@
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
-import { base58Decode, decodeAddress } from '../lib/solana/base58';
+import { base58Decode, base58Encode, decodeAddress } from '../lib/solana/base58';
 import { issueQuote, splitFee, verifyQuote } from '../lib/solana/quotes';
 import { verifyWalletLink, linkMessage } from '../lib/solana/wallet';
 import { verifyBuyTransaction } from '../lib/solana/verify';
@@ -20,6 +20,9 @@ import {
   buyDiscriminator,
   encodeU64,
   vaultRefForCard,
+  associatedTokenAddress,
+  configPda,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '../lib/solana/sdk';
 
 process.env.SOLANA_QUOTE_SECRET = 'test-secret-only';
@@ -294,5 +297,47 @@ describe('verifyBuyTransaction — balance deltas, mint-checked', () => {
 
     const malformed = await verifyBuyTransaction('zzz', EXPECTED);
     expect(malformed.ok).toBe(false);
+  });
+});
+
+describe('build-tx helpers — base58 round-trip, deterministic ATAs', () => {
+  it('base58Encode inverts base58Decode, leading zeros included', () => {
+    expect(base58Encode(new Uint8Array([0]))).toBe('1');
+    expect(base58Encode(base58Decode('11111111111111111111111111111111'))).toBe(
+      '11111111111111111111111111111111',
+    );
+    const raw = new Uint8Array([0, 0, 1, 2, 250, 255]);
+    expect(base58Decode(base58Encode(raw))).toEqual(raw);
+  });
+
+  it('associatedTokenAddress is deterministic and owner-specific', async () => {
+    const { Keypair } = await import('@solana/web3.js');
+    const ownerA = Keypair.generate().publicKey.toBase58();
+    const ownerB = Keypair.generate().publicKey.toBase58();
+    const mint = Keypair.generate().publicKey.toBase58();
+    expect(associatedTokenAddress(ownerA, mint)).toBe(
+      associatedTokenAddress(ownerA, mint),
+    );
+    expect(associatedTokenAddress(ownerA, mint)).not.toBe(
+      associatedTokenAddress(ownerB, mint),
+    );
+    expect(() => associatedTokenAddress('not-an-address', mint)).toThrow();
+  });
+
+  it('configPda derives from the config seed and rejects bad program ids', async () => {
+    const { Keypair, PublicKey } = await import('@solana/web3.js');
+    const program = Keypair.generate().publicKey.toBase58();
+    const [expected] = PublicKey.findProgramAddressSync(
+      [new TextEncoder().encode('config')],
+      new PublicKey(program),
+    );
+    expect(configPda(program)).toBe(expected.toBase58());
+    expect(() => configPda('FSxSettle1111111111111111111111111111111111')).toThrow();
+  });
+
+  it('associated token program id is the canonical one', () => {
+    expect(ASSOCIATED_TOKEN_PROGRAM_ID).toBe(
+      'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
+    );
   });
 });
