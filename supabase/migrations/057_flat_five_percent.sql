@@ -35,5 +35,5 @@ BEGIN
     RAISE EXCEPTION '057: levels not flat at 500bps';
   END IF;
 
-  RAISE NOTICE '057 ok: flat 5% fee live';
+  RAISE NOTICE '057 ok: flat 500bps fee live';
 END $$;
