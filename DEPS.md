@@ -78,9 +78,10 @@ Environment variables (`.env.local` + Vercel; never commit):
   credits. Same key serves both clusters via different URLs.
 - `SOLANA_CLUSTER` — `devnet` for all build/test; `mainnet-beta` only
   at launch.
-- `SOLANA_USDC_MINT` — devnet `4zMMC9srt5Ri5X14GAgXhaHii3L6VUHdfBMqBGE3ter`
-  (must match the test token actually deployed); mainnet
-  `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`.
+- `SOLANA_USDC_MINT` — devnet `3KQDvM6cvu4pPqmvmaWEmcRhNeSd293ETeSDBX1GrcqL`
+  (own test mint, created 2026-09-15 via `solana/scripts/mint-test-usdc.mjs`;
+  mint authority = deployer keypair; buyer funded with 1000 test-USDC);
+  mainnet `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`.
 - `SOLANA_PROGRAM_ID` — devnet `CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF`
   (deployed 2026-09-14, upgrade authority = deployer keypair).
   Config PDA `BA63u3E7ShsiqdDhDrgkKmXLhtXe6YjLYfPgZGuN6jKC`

@@ -193,10 +193,13 @@ pub struct Buy<'info> {
     pub token_program: Program<'info, Token>,
 }
 
-/// USDC mint, single place. Devnet default below; mainnet
-/// EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v is set at deploy via the
-/// USDC_MINT env consumed by the TS client + settle verifier — the program
-/// itself is redeployed per cluster with this constant updated.
+/// USDC mint, single place. Devnet default below is the project's own test
+/// mint (scripts/mint-test-usdc.mjs, mint authority = deployer keypair);
+/// mainnet EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v is set at deploy
+/// via the USDC_MINT env consumed by the TS client + settle verifier — the
+/// program itself is redeployed per cluster with this constant updated.
+/// A mismatch between this constant and SOLANA_USDC_MINT fails every buy
+/// on-chain with WrongMint, so the two must move together.
 #[cfg(feature = "mainnet")]
 pub fn config_mint() -> Pubkey {
     "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
@@ -206,7 +209,7 @@ pub fn config_mint() -> Pubkey {
 
 #[cfg(not(feature = "mainnet"))]
 pub fn config_mint() -> Pubkey {
-    "4zMMC9srt5Ri5X14GAgXhaHii3L6VUHdfBMqBGE3ter"
+    "3KQDvM6cvu4pPqmvmaWEmcRhNeSd293ETeSDBX1GrcqL"
         .parse()
         .unwrap()
 }
