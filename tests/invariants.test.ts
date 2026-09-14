@@ -83,8 +83,9 @@ import { SkuModelForm, parseDraft, type Draft } from '../components/admin/skus/S
 import { VariantsTable } from '../components/admin/skus/VariantsTable';
 import { MintTable } from '../components/admin/mint/MintTable';
 import { DecisionControls, oracleHint, askingNote } from '../components/admin/submissions/DecisionControls';
-import { PriceChart, priceChange } from '../components/market/PriceChart';
+import { PriceChart, priceChange, filterByRange } from '../components/market/PriceChart';
 import type { PricePoint } from '../lib/api/contract';
+import { medianSen, toMyrSen } from '../lib/market/ebay';
 import SubmissionsQueuePage from '../app/admin/submissions/page';
 import ReviewSubmissionPage from '../app/admin/submissions/[itemId]/page';
 import ConsignmentDetailPage from '../app/admin/consignments/[id]/page';
@@ -3235,5 +3236,55 @@ describe('PriceChart — trading tape renders MYR, never FSC', () => {
     expect(html).toContain('Market reference');
     expect(html).toContain('<svg');
     expect(html).not.toContain('FSC');
+  });
+
+  it('stats row: high, low, avg plus range pills', () => {
+    const html = renderToStaticMarkup(
+      createElement(PriceChart, { points: [...refs, sale] }),
+    );
+    expect(html).toContain(`High ${formatMyr(26000)}`);
+    expect(html).toContain(`Low ${formatMyr(24000)}`);
+    expect(html).toContain(`Avg ${formatMyr(25167)}`);
+    for (const pill of ['1M', '6M', '1Y', 'ALL']) {
+      expect(html).toContain(pill);
+    }
+  });
+
+  it('filterByRange: windows by age, falls back to full tape under two points', () => {
+    const now = new Date('2026-09-01T00:00:00.000Z').getTime();
+    const old: PricePoint = { priceCents: 20000, observedAt: '2026-01-01T12:00:00.000Z', source: 'market' };
+    const mid: PricePoint = { priceCents: 24000, observedAt: '2026-08-01T12:00:00.000Z', source: 'market' };
+    const recent: PricePoint = { priceCents: 26000, observedAt: '2026-08-20T12:00:00.000Z', source: 'flexsoar' };
+    expect(filterByRange([old, mid, recent], '1M', now)).toEqual([mid, recent]);
+    expect(filterByRange([old, mid, recent], 'ALL', now)).toEqual([old, mid, recent]);
+    // Only one point in window — falls back to the full tape, never empty.
+    expect(filterByRange([old, recent], '1M', now)).toEqual([old, recent]);
+  });
+});
+
+// ------------------------------------------------------------
+// lib/market/ebay.ts — the comps math. Median trims outliers at volume;
+// conversion goes through the USD-base table so non-USD solds convert
+// correctly (dividing a GBP price by the MYR rate would silently 4x it).
+// ------------------------------------------------------------
+
+describe('eBay comps math — median and currency conversion', () => {
+  it('medianSen: odd, even, empty', () => {
+    expect(medianSen([26000, 24000, 25000])).toBe(25000);
+    expect(medianSen([24000, 26000])).toBe(25000);
+    expect(medianSen([])).toBeNull();
+  });
+
+  it('medianSen: trims top/bottom 10% at 10+ samples', () => {
+    const prices = [1, ...Array(10).fill(25000), 100000];
+    expect(medianSen(prices)).toBe(25000);
+  });
+
+  it('toMyrSen: USD direct, GBP through the USD base, garbage null', () => {
+    const rates = { MYR: 4.7, USD: 1, GBP: 0.79 };
+    expect(toMyrSen(100, 'USD', rates)).toBe(47000);
+    expect(toMyrSen(100, 'GBP', rates)).toBe(Math.round(((100 / 0.79) * 4.7) * 100));
+    expect(toMyrSen(-5, 'USD', rates)).toBeNull();
+    expect(toMyrSen(100, 'JPY', rates)).toBeNull();
   });
 });

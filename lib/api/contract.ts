@@ -4794,14 +4794,15 @@ export async function getPriceHistory(modelId: UUID): Promise<PricePoint[]> {
 }
 
 /**
- * addMarketRef(modelId, priceCents, observedAt?) -> void
+ * addMarketRef(modelId, priceCents, observedAt?, source?) -> void
  *
  * Records one external reference point for a model (an eBay sold price, an
  * observed market price). Direct table write guarded by RLS
  * (market_refs_admin_write, 053) — a non-admin session writes zero rows
  * silently, which surfaces here as FORBIDDEN, mirroring updateSkuModel().
  * observedAt defaults to now; backfill older comps by passing explicit
- * dates so the line has real shape from day one.
+ * dates so the line has real shape from day one. source is 'manual' unless
+ * the caller says otherwise ('ebay' for the sync cron).
  *
  * @throws FORBIDDEN, NOT_FOUND (no such model).
  */
@@ -4809,6 +4810,7 @@ export async function addMarketRef(
   modelId: UUID,
   priceCents: Cents,
   observedAt?: Timestamptz,
+  source: 'manual' | 'ebay' = 'manual',
 ): Promise<void> {
   if (!Number.isInteger(priceCents) || priceCents <= 0) {
     throw new ContractError(
@@ -4824,6 +4826,7 @@ export async function addMarketRef(
     .insert({
       model_id: modelId,
       price_cents: priceCents,
+      source,
       ...(observedAt ? { observed_at: observedAt } : {}),
     })
     .select('id');
@@ -4846,6 +4849,38 @@ export async function addMarketRef(
       modelId,
     });
   }
+}
+
+/**
+ * recordMarketRefsService(modelId, refs) -> number
+ *
+ * The sync cron's write path (053 market_refs). Service-role, like the
+ * Stripe webhook settlement and refreshLevels: a cron invocation has no
+ * session by definition, so a session write would hit RLS as anon and
+ * record nothing. Writes each ref with its source ('ebay') and returns
+ * the count written. No validation beyond positive-integer cents — the
+ * cron medianed real solds, and perfection here is the enemy of a daily
+ * tape that must never abort the batch.
+ */
+export async function recordMarketRefsService(
+  modelId: UUID,
+  refs: readonly { priceCents: Cents; observedAt: Timestamptz; source: string }[],
+): Promise<number> {
+  const clean = refs.filter(
+    (r) => Number.isInteger(r.priceCents) && r.priceCents > 0,
+  );
+  if (clean.length === 0) return 0;
+  const supabase = await createServiceSupabase();
+
+  const rows = clean.map((r) => ({
+    model_id: modelId,
+    price_cents: r.priceCents,
+    source: r.source,
+    observed_at: r.observedAt,
+  }));
+  const result = await supabase.from('market_refs').insert(rows).select('id');
+  if (result.error) fail(result.error, 'market_refs');
+  return result.data?.length ?? 0;
 }
 
 // Re-exported so consumers import row types and the contract from one place.
