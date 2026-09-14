@@ -1146,3 +1146,18 @@ only (not dashboard/admin/receipts). FX reuses the `myrPerUsd` chain in
 `lib/solana/fx.ts` (extend to a full table for EUR). Tension noted:
 §6 says "prices display in MYR only" — this bends the letter while keeping
 the spirit (MYR default, estimates labelled, settlement untouched).
+
+## 2026-09-15 — Devnet USDC end-to-end: PROVEN ✅
+
+First live trade settled on devnet. Chain: quote (`build-tx`) → Phantom
+sign+send → Helius balance-delta verify (`settle`) → `purchaseCardSplit`
+ledger. Receipt: signature `2HkgqWEoeYgGzvFA…`, slot 498356599, RM200 ask
+≈ 49.067713 test-USDC. Program `CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF`,
+mint `3KQDvM6cvu4pPqmvmaWEmcRhNeSd293ETeSDBX1GrcqL`, config
+`BA63u3E7ShsiqdDhDrgkKmXLhtXe6YjLYfPgZGuN6jKC`. Distinct buyer/seller
+wallets required (same-wallet trades fail verification by design — hit
+during testing). FX chain (er-api → frankfurter → `SOLANA_MYR_PER_USD`
+pin) added after a provider outage blocked quotes. Seller link gap found
+and fixed: sellers never see BuyPanel on their own listings, so wallet
+linking now lives on the dashboard (`LinkWalletButton`, shared with the
+buyer flow).
