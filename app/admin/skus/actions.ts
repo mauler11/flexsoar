@@ -29,6 +29,7 @@ import {
   setFloatCurve,
   updateSkuModel,
   updateSkuVariant,
+  addMarketRef,
   type ContractErrorCode,
   type FloatCurveBand,
   type Sku,
@@ -343,6 +344,47 @@ export async function replaceSkuArtAction(
 
     revalidateArtPaths(sku.model_id ?? skuId);
     return { ok: true, artUrl: sku.art_url ?? null };
+  } catch (thrown) {
+    const f = failure(thrown);
+    return f.ok ? { ok: false, message: "unknown failure" } : { ok: false, message: f.message, code: f.code };
+  }
+}
+
+// ============================================================
+// MARKET REFERENCE (053)
+// ============================================================
+
+export type AddMarketRefResult =
+  | { ok: true }
+  | { ok: false; message: string; code?: ContractErrorCode };
+
+/**
+ * Records one external reference point on a model's trading tape (an eBay
+ * sold price, an observed market price). Price is integer MYR sen, exactly
+ * like every other price input on this bench; date is YYYY-MM-DD and
+ * defaults to today, so backfilling older comps is just picking older
+ * dates. Revalidates the model page so the new point renders immediately.
+ */
+export async function addMarketRefAction(input: {
+  modelId: UUID;
+  priceCents: number;
+  observedAt: string | null;
+}): Promise<AddMarketRefResult> {
+  try {
+    await requireAdminAction();
+
+    let observed: string | undefined;
+    if (input.observedAt) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(input.observedAt)) {
+        return { ok: false, message: "date must be YYYY-MM-DD" };
+      }
+      observed = `${input.observedAt}T12:00:00.000Z`;
+    }
+
+    await addMarketRef(input.modelId, input.priceCents, observed);
+
+    revalidateModel(input.modelId);
+    return { ok: true };
   } catch (thrown) {
     const f = failure(thrown);
     return f.ok ? { ok: false, message: "unknown failure" } : { ok: false, message: f.message, code: f.code };

@@ -9,10 +9,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getSkuModel } from "@/lib/api/contract";
+import { getSkuModel, getPriceHistory } from "@/lib/api/contract";
 import { SizeChartButton } from "@/components/market/SizeChartModal";
 import { SellerGuideButton } from "@/components/market/SellerGuideModal";
 import { SizeGrid } from "@/components/market/SizeGrid";
+import { PriceChart } from "@/components/market/PriceChart";
 import { formatMyr } from "@/components/card/format";
 import type { UUID } from "@/lib/db/types";
 
@@ -36,6 +37,11 @@ export default async function ListProductPage({
   const art =
     model.art_url ?? model.variants.find((v) => v.art_url)?.art_url ?? null;
   const existingSizes = new Set(model.variants.map((v) => v.size_us));
+
+  // Trading tape: settled FlexSoar sales plus admin market refs, oldest
+  // first. Empty until 053 lands or the first point is entered — the chart
+  // renders its own empty state, never an error.
+  const history = await getPriceHistory(model.id).catch(() => []);
 
   return (
     <div className="flex flex-col gap-4">
@@ -102,6 +108,8 @@ export default async function ListProductPage({
           />
         </div>
       </div>
+
+      <PriceChart points={history} />
     </div>
   );
 }

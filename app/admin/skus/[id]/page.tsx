@@ -16,11 +16,12 @@ import { getVariantCardCounts } from "@/components/admin/db-reads";
 import { ArtUploader } from "@/components/admin/skus/ArtUploader";
 import { ArchiveModelForm } from "./ArchiveModelForm";
 import { SkuModelForm } from "@/components/admin/skus/SkuModelForm";
+import { MarketRefForm } from "@/components/admin/skus/MarketRefForm";
 import { VariantsTable } from "@/components/admin/skus/VariantsTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { formatMyr } from "@/components/card/format";
-import { getSkuModel } from "@/lib/api/contract";
+import { getSkuModel, getPriceHistory } from "@/lib/api/contract";
 import { borderColorFor, tierForPrice, tierName } from "@/lib/domain/rarity";
 
 export const metadata: Metadata = {
@@ -40,6 +41,12 @@ export default async function EditSkuModelPage({
 
   const cardCounts = await getVariantCardCounts(model.variants.map((v) => v.id));
   const totalCards = [...cardCounts.values()].reduce((sum, n) => sum + n, 0);
+
+  // Already-pinned market refs, so the bench shows what the buyers' chart
+  // is drawing. Empty until 053 lands — same graceful empty as the chart.
+  const marketRefs = (await getPriceHistory(model.id).catch(() => [])).filter(
+    (p) => p.source === "market",
+  );
 
   const tier =
     model.base_price_cents == null ? null : tierForPrice(model.base_price_cents);
@@ -77,6 +84,23 @@ export default async function EditSkuModelPage({
       </header>
 
       <SkuModelForm model={model} />
+
+      <MarketRefForm modelId={model.id} />
+
+      {marketRefs.length > 0 && (
+        <div className="flex flex-col gap-1 border border-line bg-raised p-3">
+          <h2 className="font-mono text-[13px] uppercase tracking-tight">
+            Pinned references ({marketRefs.length})
+          </h2>
+          <ul className="flex flex-col gap-0.5 font-mono text-[11px] tabular-nums tracking-tight text-muted">
+            {marketRefs.map((ref, i) => (
+              <li key={`${ref.observedAt}-${i}`}>
+                {ref.observedAt.slice(0, 10)} · {formatMyr(ref.priceCents)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <ArtUploader
         skuId={firstVariantId}

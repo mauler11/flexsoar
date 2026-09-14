@@ -4687,6 +4687,165 @@ export async function markNotificationRead(notificationId: UUID): Promise<void> 
   if (error) fail(error, 'notifications');
 }
 
+// ============================================================
+// PRICE HISTORY (053)
+//
+// The trading graph's data path. Two series, merged by observed time:
+//
+//   - 'flexsoar' — settled FlexSoar sales of this model, read from the
+//     sale_history_public definer view (053). A definer view and not a
+//     direct orders read on purpose: orders_own_read (004) only exposes
+//     rows where the caller is buyer or seller, which makes a public
+//     per-model tape impossible. The view projects exactly three columns
+//     (model_id, gross_cents, sold_at) — no counterparty, no refs — and
+//     053 grants it to anon/authenticated, so authorisation still lives in
+//     the SQL per AGENT_RULES.md section 3.
+//   - 'market' — admin-entered external reference points (eBay sold
+//     listings, observed market prices), stored in market_refs (053).
+//     Public read, admin-only insert. These are what give a model a
+//     fluctuation line before its first FlexSoar sale.
+//
+// Both reads degrade to [] when 053 has not been applied yet (missing
+// relation), so a deploy ahead of the migration renders the chart's empty
+// state instead of breaking the page. Any other database error surfaces
+// verbatim through fail(), as everywhere else in this file.
+// ============================================================
+
+/** One plotted point on a model's price graph. */
+export interface PricePoint {
+  priceCents: Cents;
+  observedAt: Timestamptz;
+  source: 'flexsoar' | 'market';
+}
+
+/**
+ * True when the error is "that relation does not exist" — i.e. 053 has not
+ * been applied yet — as opposed to a real failure. PostgREST reports a
+ * missing table/view as PGRST205; a direct Postgres raise carries 42P01.
+ */
+function isMissingRelation(error: PostgresErrorLike): boolean {
+  const code = (error.code ?? '').toUpperCase();
+  if (code === 'PGRST205' || code === '42P01') return true;
+  const message = (error.message ?? '').toLowerCase();
+  return (
+    message.includes('does not exist') ||
+    message.includes('could not find the table') ||
+    message.includes('schema cache')
+  );
+}
+
+/**
+ * getPriceHistory(modelId) -> PricePoint[]
+ *
+ * Both series for one model, oldest first, capped at 200 points per series.
+ * Empty array when the model has no tape yet OR when 053 has not been
+ * applied (see the section note above) — the chart renders its empty state
+ * for both, and the first real point appears without a deploy.
+ */
+export async function getPriceHistory(modelId: UUID): Promise<PricePoint[]> {
+  const supabase = await createServerSupabase();
+
+  const [salesResult, refsResult] = await Promise.all([
+    supabase
+      .from('sale_history_public')
+      .select('gross_cents, sold_at')
+      .eq('model_id', modelId)
+      .order('sold_at', { ascending: true })
+      .limit(200),
+    supabase
+      .from('market_refs')
+      .select('price_cents, observed_at')
+      .eq('model_id', modelId)
+      .order('observed_at', { ascending: true })
+      .limit(200),
+  ]);
+
+  if (salesResult.error && !isMissingRelation(salesResult.error)) {
+    fail(salesResult.error, 'sale_history_public');
+  }
+  if (refsResult.error && !isMissingRelation(refsResult.error)) {
+    fail(refsResult.error, 'market_refs');
+  }
+
+  const points: PricePoint[] = [];
+  for (const row of (salesResult.data ??
+    []) as { gross_cents: Cents; sold_at: Timestamptz }[]) {
+    points.push({
+      priceCents: row.gross_cents,
+      observedAt: row.sold_at,
+      source: 'flexsoar',
+    });
+  }
+  for (const row of (refsResult.data ??
+    []) as { price_cents: Cents; observed_at: Timestamptz }[]) {
+    points.push({
+      priceCents: row.price_cents,
+      observedAt: row.observed_at,
+      source: 'market',
+    });
+  }
+  points.sort(
+    (a, b) =>
+      new Date(a.observedAt).getTime() - new Date(b.observedAt).getTime(),
+  );
+  return points;
+}
+
+/**
+ * addMarketRef(modelId, priceCents, observedAt?) -> void
+ *
+ * Records one external reference point for a model (an eBay sold price, an
+ * observed market price). Direct table write guarded by RLS
+ * (market_refs_admin_write, 053) — a non-admin session writes zero rows
+ * silently, which surfaces here as FORBIDDEN, mirroring updateSkuModel().
+ * observedAt defaults to now; backfill older comps by passing explicit
+ * dates so the line has real shape from day one.
+ *
+ * @throws FORBIDDEN, NOT_FOUND (no such model).
+ */
+export async function addMarketRef(
+  modelId: UUID,
+  priceCents: Cents,
+  observedAt?: Timestamptz,
+): Promise<void> {
+  if (!Number.isInteger(priceCents) || priceCents <= 0) {
+    throw new ContractError(
+      'INVALID_AMOUNT',
+      `market ref must be a positive integer cents, got ${priceCents}`,
+      { modelId, priceCents },
+    );
+  }
+  const supabase = await createServerSupabase();
+
+  const result = await supabase
+    .from('market_refs')
+    .insert({
+      model_id: modelId,
+      price_cents: priceCents,
+      ...(observedAt ? { observed_at: observedAt } : {}),
+    })
+    .select('id');
+
+  if (result.error) fail(result.error, 'market_refs');
+  if (!result.data || result.data.length === 0) {
+    const model = await supabase
+      .from('sku_models')
+      .select('id')
+      .eq('id', modelId)
+      .maybeSingle();
+    if ((model.data as { id: UUID } | null)?.id) {
+      throw new ContractError(
+        'FORBIDDEN',
+        `model ${modelId} exists but the ref wrote nothing — the session is not an admin`,
+        { modelId },
+      );
+    }
+    throw new ContractError('NOT_FOUND', `model ${modelId} not found`, {
+      modelId,
+    });
+  }
+}
+
 // Re-exported so consumers import row types and the contract from one place.
 export type {
   Card,

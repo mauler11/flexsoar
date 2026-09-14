@@ -83,6 +83,8 @@ import { SkuModelForm, parseDraft, type Draft } from '../components/admin/skus/S
 import { VariantsTable } from '../components/admin/skus/VariantsTable';
 import { MintTable } from '../components/admin/mint/MintTable';
 import { DecisionControls, oracleHint, askingNote } from '../components/admin/submissions/DecisionControls';
+import { PriceChart, priceChange } from '../components/market/PriceChart';
+import type { PricePoint } from '../lib/api/contract';
 import SubmissionsQueuePage from '../app/admin/submissions/page';
 import ReviewSubmissionPage from '../app/admin/submissions/[itemId]/page';
 import ConsignmentDetailPage from '../app/admin/consignments/[id]/page';
@@ -3174,5 +3176,64 @@ describe('Market page (/market) — signed out render', () => {
     const element = await MarketPage({ searchParams: Promise.resolve({}) });
     const html = renderToStaticMarkup(element);
     expect(html).toContain('Nothing listed yet');
+  });
+});
+
+// ------------------------------------------------------------
+// PriceChart (053) — the trading tape. priceChange() pins the header
+// arithmetic; the render pins the two-series legend, the MYR formatting,
+// and the honest empty/reference-only states. Money here is MYR sen like
+// every other price surface, never FSC.
+// ------------------------------------------------------------
+
+describe('PriceChart — trading tape renders MYR, never FSC', () => {
+  const refs: PricePoint[] = [
+    { priceCents: 24000, observedAt: '2026-05-01T12:00:00.000Z', source: 'market' },
+    { priceCents: 26000, observedAt: '2026-06-01T12:00:00.000Z', source: 'market' },
+  ];
+  const sale: PricePoint = {
+    priceCents: 25500,
+    observedAt: '2026-07-01T12:00:00.000Z',
+    source: 'flexsoar',
+  };
+
+  it('priceChange: last-vs-first across the merged window', () => {
+    const change = priceChange([...refs, sale]);
+    expect(change.firstCents).toBe(24000);
+    expect(change.lastCents).toBe(25500);
+    expect(change.pct).toBeCloseTo(((25500 - 24000) / 24000) * 100, 5);
+  });
+
+  it('priceChange: fewer than two points yields no pct', () => {
+    expect(priceChange([]).pct).toBeNull();
+    expect(priceChange([sale]).pct).toBeNull();
+    expect(priceChange([sale]).lastCents).toBe(25500);
+  });
+
+  it('empty tape: honest empty state, no chart', () => {
+    const html = renderToStaticMarkup(createElement(PriceChart, { points: [] }));
+    expect(html).toContain('No sales yet');
+    expect(html).not.toContain('<svg');
+    expect(html).not.toContain('FSC');
+  });
+
+  it('reference-only tape: says so explicitly, still no FSC', () => {
+    const html = renderToStaticMarkup(createElement(PriceChart, { points: refs }));
+    expect(html).toContain('Reference only');
+    expect(html).toContain('Market reference');
+    expect(html).toContain(formatMyr(26000));
+    expect(html).not.toContain('FSC');
+  });
+
+  it('mixed tape: last price, change %, both legend entries, MYR only', () => {
+    const html = renderToStaticMarkup(
+      createElement(PriceChart, { points: [...refs, sale] }),
+    );
+    expect(html).toContain('Price history');
+    expect(html).toContain(formatMyr(25500));
+    expect(html).toContain('FlexSoar sales (1)');
+    expect(html).toContain('Market reference');
+    expect(html).toContain('<svg');
+    expect(html).not.toContain('FSC');
   });
 });

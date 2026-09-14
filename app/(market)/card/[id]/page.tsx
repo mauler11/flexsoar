@@ -8,7 +8,7 @@
  */
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getCard, getListing, getItem, getCreditAvailable, getPayoutMethodForUser, getUser } from "@/lib/api/contract";
+import { getCard, getListing, getItem, getCreditAvailable, getPayoutMethodForUser, getUser, listSkuModels, getPriceHistory } from "@/lib/api/contract";
 import type { CardStatus } from "@/lib/db/types";
 import {
   currentUserId,
@@ -24,6 +24,7 @@ import { BuyPanel } from "@/components/market/BuyPanel";
 import { ListForm } from "@/components/market/ListForm";
 import { RedeemForm } from "@/components/market/RedeemForm";
 import { ProvenanceChain } from "@/components/market/ProvenanceChain";
+import { PriceChart } from "@/components/market/PriceChart";
 import { Countdown } from "@/components/market/Countdown";
 import { ExpandableSection } from "@/components/ui/ExpandableSection";
 import { Button } from "@/components/ui/Button";
@@ -150,6 +151,18 @@ export default async function CardPage({
   const oracleCents = detail.oracle_value_cents;
   const item = detail.item;
   const photos = parsePhotos(item.photos);
+
+  // Model tape for the chart: the card carries a variant (no model_id on the
+  // SkuRef), so resolve the model by exact identity match. Brand+model filter
+  // server-side, colorway pinned client-side — miss means no chart, never an
+  // error.
+  const history = await listSkuModels({
+    brand: detail.sku.brand,
+    model: detail.sku.model,
+  })
+    .then((models) => models.find((m) => m.colorway === detail.sku.colorway) ?? null)
+    .then((match) => (match ? getPriceHistory(match.id) : []))
+    .catch(() => []);
   const conditionLabel = publishedConditionLabel(
     detail.float_value,
     detail.condition_grade,
@@ -214,6 +227,8 @@ export default async function CardPage({
               </p>
             </div>
           </ExpandableSection>
+
+          <PriceChart points={history} />
         </section>
 
         <section className="flex flex-col gap-6">
