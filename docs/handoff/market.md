@@ -1128,3 +1128,21 @@ The price step shows "estimated value at your self-declared condition" using
 the **linear fallback** of `lib/db/valuation.ts floatMultiplier([], skuId,
 float)` because nothing reads a SKU's curve back (admin.md item 4: no
 `getFloatCurve`). Once a curve read exists the estimate should use it.
+
+---
+
+## 2026-09-15 — Display currency decision (recorded, not yet built)
+
+Human proposed switching everything to USD; agent refused the full switch
+(AGENT_RULES §6 MYR-only + the documented ~4% conversion bleed + FSC=RM1
+peg + human-only schema blast radius) and the human narrowed it to
+**display-only**: live conversion readout with a USD/EUR/MYR selector.
+
+Agreed scope (build AFTER the devnet USDC buy proves end-to-end):
+ledger, Stripe, FSC, and all `*_cents` stay MYR; the selector converts at
+render time only, labelled as an estimate, MYR default; checkout still
+charges MYR and USDC settles at quote FX. Surfaces: market + card pages
+only (not dashboard/admin/receipts). FX reuses the `myrPerUsd` chain in
+`lib/solana/fx.ts` (extend to a full table for EUR). Tension noted:
+§6 says "prices display in MYR only" — this bends the letter while keeping
+the spirit (MYR default, estimates labelled, settlement untouched).
