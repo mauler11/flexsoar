@@ -206,12 +206,7 @@ export default async function CardPage({
 
       <div className="grid gap-8 lg:grid-cols-2">
         <section className="flex flex-col gap-6">
-          <div>
-            <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
-              Provenance
-            </h2>
-            <ProvenanceChain provenance={detail.provenance} endsOnly />
-          </div>
+          <PriceChart points={history} retailCents={retailCents} />
 
           <ExpandableSection title="Details">
             <div className="flex flex-col gap-3 text-sm">
@@ -262,7 +257,12 @@ export default async function CardPage({
             </div>
           </ExpandableSection>
 
-          <PriceChart points={history} retailCents={retailCents} />
+          <div>
+            <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
+              Provenance
+            </h2>
+            <ProvenanceChain provenance={detail.provenance} endsOnly />
+          </div>
         </section>
 
         <section className="flex flex-col gap-6">
@@ -403,11 +403,6 @@ function OwnerListingPanel({
           {formatMyr(listing.price_cents)}
         </span>
       </div>
-      {listing.oracle_value_cents != null && (
-        <p className="text-[11px] text-muted">
-          Fair Market Price {formatMyr(listing.oracle_value_cents)}
-        </p>
-      )}
       {(fairMarket ?? listing.fair_price_cents) != null && (
         <p className="text-[11px] text-muted">
           Fair Market Price {formatMyr((fairMarket ?? listing.fair_price_cents)!)}

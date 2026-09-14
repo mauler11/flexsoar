@@ -91,14 +91,9 @@ export function BuyPanel({
         </div>
       </div>
 
-      {listing.oracleValueCents != null && (
-        <p className="text-[11px] text-muted">
-          Fair Market Price {formatMyr(listing.oracleValueCents)}
-        </p>
-      )}
       {listing.fairPriceCents != null && (
         <p className="text-[11px] text-muted">
-          Fair Market Price (this condition) {formatMyr(listing.fairPriceCents)}
+          Fair Market Price {formatMyr(listing.fairPriceCents)}
         </p>
       )}
 
