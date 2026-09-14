@@ -613,7 +613,8 @@ export const listings: Listing[] = [
 
 // ------------------------------------------------------------
 // ORDERS — one per sold listing
-// fee_bps is flat 800 for every seller: levels are display-only since 048,
+// fee_bps is flat 500 for every seller: levels are display-only since 048,
+// lowered 800 -> 500 in 057 (sub-cent Solana settlement makes 5% viable),
 // so the old level ladder (Capo 500, Underboss 350) no longer prices fees.
 // ------------------------------------------------------------
 
@@ -625,10 +626,10 @@ export const orders: Order[] = [
     buyer_id: USER_IDS.ravi,
     seller_id: USER_IDS.wenxin,
     gross_cents: 4300,
-    // Flat 800bps since 048 (levels display-only).
-    fee_bps: 800,
-    fee_cents: 344, // floor(4300 * 800 / 10000)
-    net_cents: 3956,
+    // Flat 500bps since 057 (levels display-only).
+    fee_bps: 500,
+    fee_cents: 215, // floor(4300 * 500 / 10000)
+    net_cents: 4085,
     settlement_ref: 'pi_3PfLq2AaBbCcDdEe0001',
     status: 'settled',
     txn_id: txnId(1),
@@ -641,10 +642,10 @@ export const orders: Order[] = [
     buyer_id: USER_IDS.aiman,
     seller_id: USER_IDS.ravi,
     gross_cents: 4900,
-    // Flat 800bps since 048 (levels display-only).
-    fee_bps: 800,
-    fee_cents: 392, // floor(4900 * 800 / 10000)
-    net_cents: 4508,
+    // Flat 500bps since 057 (levels display-only).
+    fee_bps: 500,
+    fee_cents: 245, // floor(4900 * 500 / 10000)
+    net_cents: 4655,
     settlement_ref: 'pi_3PfLq2AaBbCcDdEe0002',
     status: 'settled',
     txn_id: txnId(2),

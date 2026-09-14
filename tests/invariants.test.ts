@@ -319,18 +319,18 @@ const percentRank = (population: number[], value: number): number => {
 };
 
 /**
- * The `levels` rows as 048 leaves them: flat 800bps on every level while
+ * The `levels` rows as 057 leaves them: flat 500bps on every level while
  * levels stay display-only. rankScoreRequired still gates the cosmetic rank.
  */
 const LEVELS: { level: number; rankScoreRequired: number; sellerFeeBps: number }[] = [
-  { level: 1, rankScoreRequired: 0, sellerFeeBps: 800 },
-  { level: 2, rankScoreRequired: 10000, sellerFeeBps: 800 },
-  { level: 3, rankScoreRequired: 50000, sellerFeeBps: 800 },
-  { level: 4, rankScoreRequired: 200000, sellerFeeBps: 800 },
-  { level: 5, rankScoreRequired: 750000, sellerFeeBps: 800 },
-  { level: 6, rankScoreRequired: 2500000, sellerFeeBps: 800 },
-  { level: 7, rankScoreRequired: 7500000, sellerFeeBps: 800 },
-  { level: 8, rankScoreRequired: 20000000, sellerFeeBps: 800 },
+  { level: 1, rankScoreRequired: 0, sellerFeeBps: 500 },
+  { level: 2, rankScoreRequired: 10000, sellerFeeBps: 500 },
+  { level: 3, rankScoreRequired: 50000, sellerFeeBps: 500 },
+  { level: 4, rankScoreRequired: 200000, sellerFeeBps: 500 },
+  { level: 5, rankScoreRequired: 750000, sellerFeeBps: 500 },
+  { level: 6, rankScoreRequired: 2500000, sellerFeeBps: 500 },
+  { level: 7, rankScoreRequired: 7500000, sellerFeeBps: 500 },
+  { level: 8, rankScoreRequired: 20000000, sellerFeeBps: 500 },
 ];
 
 const sellerFeeBps = (level: number): number =>

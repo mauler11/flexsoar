@@ -2,7 +2,7 @@
  * app/api/solana/quote/route.ts — GET /api/solana/quote?listingId=
  *
  * Issues the HMAC-signed price quote a buy settles against: the listing's
- * MYR ask converted to USDC base units at live FX, split 8% exactly the
+ * MYR ask converted to USDC base units at live FX, split 5% exactly the
  * way the program splits it. Fails LOUDLY (not silently) when:
  *   - the listing is not live, or the caller owns it / is signed out,
  *   - the seller never linked a payout wallet (056),

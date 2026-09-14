@@ -10,11 +10,11 @@
  * EXACTLY. A tampered quote fails closed; an expired quote fails closed.
  *
  * WebCrypto (subtle) only — no node:crypto import, so this runs in any
- * route runtime. Amounts are integers throughout; the 8% split mirrors
- * the program's fee math (price * 800 / 10000, floor, dust to seller).
+ * route runtime. Amounts are integers throughout; the 5% split mirrors
+ * the program's fee math (price * 500 / 10000, floor, dust to seller).
  */
 
-export const FEE_BPS = 800;
+export const FEE_BPS = 500;
 
 export interface Quote {
   listingId: string;

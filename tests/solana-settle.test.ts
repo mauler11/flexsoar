@@ -38,9 +38,9 @@ describe('base58 — decode vectors', () => {
   });
 });
 
-describe('quotes — 8% split, HMAC round-trip, tamper and expiry', () => {
-  it('splitFee mirrors the program: floor(price * 800 / 10000), dust to seller', () => {
-    expect(splitFee(1_000_000)).toEqual({ sellerUnits: 920_000, feeUnits: 80_000 });
+describe('quotes — 5% split, HMAC round-trip, tamper and expiry', () => {
+  it('splitFee mirrors the program: floor(price * 500 / 10000), dust to seller', () => {
+    expect(splitFee(1_000_000)).toEqual({ sellerUnits: 950_000, feeUnits: 50_000 });
     expect(splitFee(3)).toEqual({ sellerUnits: 3, feeUnits: 0 });
     expect(() => splitFee(0)).toThrow();
   });
@@ -166,8 +166,8 @@ const EXPECTED = {
   treasuryWallet: TREASURY,
   usdcMint: MINT,
   totalUnits: 1_000_000,
-  sellerUnits: 920_000,
-  feeUnits: 80_000,
+  sellerUnits: 950_000,
+  feeUnits: 50_000,
 };
 
 const SIG = '5'.repeat(88);
@@ -179,7 +179,7 @@ describe('verifyBuyTransaction — balance deltas, mint-checked', () => {
     const out = await verifyBuyTransaction(
       SIG,
       EXPECTED,
-      rpcResult({ slot: 42, err: null, meta: { err: null, ...balances(-1_000_000, 920_000, 80_000) } }) as unknown as typeof fetch,
+      rpcResult({ slot: 42, err: null, meta: { err: null, ...balances(-1_000_000, 950_000, 50_000) } }) as unknown as typeof fetch,
     );
     expect(out).toEqual({ ok: true, slot: 42 });
   });
@@ -188,7 +188,7 @@ describe('verifyBuyTransaction — balance deltas, mint-checked', () => {
     const shortFee = await verifyBuyTransaction(
       SIG,
       EXPECTED,
-      rpcResult({ slot: 1, err: null, meta: { err: null, ...balances(-1_000_000, 950_000, 50_000) } }) as unknown as typeof fetch,
+      rpcResult({ slot: 1, err: null, meta: { err: null, ...balances(-1_000_000, 965_000, 35_000) } }) as unknown as typeof fetch,
     );
     expect(shortFee.ok).toBe(false);
 

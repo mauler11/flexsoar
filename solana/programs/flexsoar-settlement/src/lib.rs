@@ -9,14 +9,14 @@
 //! Roles:
 //!   - admin    — FlexSoar multisig. Initializes config, pauses/unpauses,
 //!                is the program upgrade authority (set at deploy).
-//!   - treasury — USDC account receiving the 8% fee. Set at initialize,
+//!   - treasury — USDC account receiving the 5% fee. Set at initialize,
 //!                changeable only by admin.
 //!   - seller   — lists (owns a listing PDA), cancels, receives net.
 //!   - buyer    — pays the quoted total; receives nothing on-chain (the
 //!                card moves off-chain via /api/solana/settle after this
 //!                transaction verifies).
 //!
-//! Money math (USDC = 6 decimals, all u64): fee = price * 800 / 10000
+//! Money math (USDC = 6 decimals, all u64): fee = price * 500 / 10000
 //! (integer division, dust < 1 base unit favours the seller), seller gets
 //! price - fee. MAX_PRICE_USDC caps pre-audit launch volume per trade.
 //!
@@ -31,8 +31,9 @@ use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 
 declare_id!("FSxSettle1111111111111111111111111111111111");
 
-/// 8% platform fee in basis points. Matches the off-chain flat fee.
-pub const FEE_BPS: u64 = 800;
+/// 5% platform fee in basis points. Matches the off-chain flat fee.
+/// Undercuts card-rail marketplaces: sub-cent Solana fees make 5% viable.
+pub const FEE_BPS: u64 = 500;
 /// Pre-audit per-trade cap: 500 USDC, in base units.
 pub const MAX_PRICE_BASE_UNITS: u64 = 500_000_000;
 
