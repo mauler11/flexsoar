@@ -1,0 +1,12 @@
+# Workspace root for the Solana program(s). Without this, each program
+# crate builds into its own target/ dir while `anchor build`/`anchor deploy`
+# read and write solana/target/ — the .so silently lands in the wrong place
+# and deploy fails with "Unable to open program file".
+[workspace]
+members = ["programs/*"]
+resolver = "2"
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
