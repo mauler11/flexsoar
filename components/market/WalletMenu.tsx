@@ -17,12 +17,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Banner } from "@/components/market/Banner";
 import { FIAT_CURRENCIES, formatFiatFromUsd, formatSol, formatUsdc } from "@/lib/solana/balances";
 import { EmbeddedLinkButton } from "@/components/market/EmbeddedWalletSection";
 import { FundingOptions } from "@/components/market/FundingOptions";
 import { SendDialog } from "@/components/market/SendDialog";
 import { Modal } from "@/components/market/Modal";
 import { useFiat } from "@/components/market/Fiat";
+import { isPrivyCheckoutEnabled } from "@/lib/solana/privy";
 
 interface BalancesResponse {
   wallet: string;
@@ -31,10 +33,6 @@ interface BalancesResponse {
   usdcMint: string;
   fx: Record<string, number> | null;
   error?: string;
-}
-
-function short(address: string): string {
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
 type View = "deposit" | "withdraw" | "settings";
@@ -125,11 +123,81 @@ function FiatBalance({
   );
 }
 
+/**
+ * Deposit tab: balance figure plus one blue Add Funds button. Tapping it
+ * reveals the funding rails — the Privy card/crypto flow when enabled,
+ * otherwise the plain Transfer Crypto address (same address, zero new
+ * machinery). Nothing renders twice; details stay one tap away.
+ */
+function DepositTab({
+  wallet,
+  usdcUnits,
+  solLamports,
+  fx,
+}: {
+  wallet: string;
+  usdcUnits: number;
+  solLamports: number;
+  fx: Record<string, number> | null;
+}) {
+  const [showFunding, setShowFunding] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(wallet);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard unavailable — address stays visible for manual copy.
+    }
+  }
+
+  return (
+    <>
+      <FiatBalance
+        usdcUnits={usdcUnits}
+        solLamports={solLamports}
+        fx={fx}
+        controls={false}
+      />
+      <button
+        type="button"
+        onClick={() => setShowFunding((v) => !v)}
+        className="rounded-md bg-[#3B82F6] px-5 py-3 text-base font-semibold text-white transition hover:brightness-110"
+      >
+        Add Funds
+      </button>
+      {showFunding &&
+        (isPrivyCheckoutEnabled() ? (
+          <FundingOptions address={wallet} />
+        ) : (
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] text-muted">
+              Send USDC on Solana to this address from any wallet or exchange.
+            </span>
+            <div className="flex items-stretch gap-2">
+              <span className="min-w-0 flex-1 break-all rounded-xl border border-line-strong bg-background px-3 py-2 font-mono text-xs">
+                {wallet}
+              </span>
+              <button
+                type="button"
+                onClick={copy}
+                className="shrink-0 rounded-xl border border-line-strong bg-background px-3 text-xs font-semibold transition hover:border-muted"
+              >
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+          </div>
+        ))}
+    </>
+  );
+}
+
 export function WalletMenu() {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<View>("deposit");
   const [balance, setBalance] = useState<BalancesResponse | null>(null);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -149,17 +217,6 @@ export function WalletMenu() {
   function close() {
     setOpen(false);
     setTab("deposit");
-  }
-
-  async function copy() {
-    if (!balance) return;
-    try {
-      await navigator.clipboard.writeText(balance.wallet);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard unavailable — address stays visible for manual copy.
-    }
   }
 
   return (
@@ -204,46 +261,12 @@ export function WalletMenu() {
 
             {tab === "deposit" && (
               balance ? (
-                <>
-                  <FiatBalance
-                    usdcUnits={balance.usdcUnits}
-                    solLamports={balance.solLamports}
-                    fx={balance.fx}
-                    controls={false}
-                  />
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-                      Transfer Crypto
-                    </span>
-                    <span className="text-[11px] text-muted">
-                      Send USDC on Solana to this address from any wallet or exchange.
-                    </span>
-                    <div className="flex items-stretch gap-2">
-                      <span className="min-w-0 flex-1 break-all rounded-xl border border-line-strong bg-background px-3 py-2 font-mono text-xs">
-                        {balance.wallet}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={copy}
-                        className="shrink-0 rounded-xl border border-line-strong bg-background px-3 text-xs font-semibold transition hover:border-muted"
-                      >
-                        {copied ? "Copied" : "Copy"}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-                      Connect Wallet
-                    </span>
-                    <EmbeddedLinkButton cta="Link wallet" />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-                      Deposit with Card
-                    </span>
-                    <FundingOptions address={balance.wallet} />
-                  </div>
-                </>
+                <DepositTab
+                  wallet={balance.wallet}
+                  usdcUnits={balance.usdcUnits}
+                  solLamports={balance.solLamports}
+                  fx={balance.fx}
+                />
               ) : (
                 <div className="flex flex-col gap-3">
                   <p className="text-[11px] leading-snug text-muted">
@@ -257,12 +280,18 @@ export function WalletMenu() {
 
             {tab === "withdraw" && (
               balance?.usdcMint ? (
-                <SendDialog
-                  walletAddress={balance.wallet}
-                  usdcMint={balance.usdcMint}
-                  usdcUnits={balance.usdcUnits}
-                  onClose={() => setTab("deposit")}
-                />
+                <>
+                  <Banner tone="success" title="Withdrawals settle in seconds">
+                    Wallet-to-wallet USDC — no fees beyond the network&apos;s
+                    fraction of a cent.
+                  </Banner>
+                  <SendDialog
+                    walletAddress={balance.wallet}
+                    usdcMint={balance.usdcMint}
+                    usdcUnits={balance.usdcUnits}
+                    onClose={() => setTab("deposit")}
+                  />
+                </>
               ) : (
                 <div className="flex flex-col gap-3">
                   <p className="text-[11px] leading-snug text-muted">
@@ -304,15 +333,7 @@ function WalletSettings({
   const balanceFiatOn = balanceCode !== "MYR" && balanceCode !== "USDC";
   return (
     <div className="flex flex-col gap-3">
-      {wallet ? (
-        <>
-          <div className="flex flex-col gap-1">
-            <span className="text-[11px] text-muted">Linked address</span>
-            <span className="font-mono text-xs">{short(wallet)}</span>
-          </div>
-          <EmbeddedLinkButton cta="Change payout wallet" />
-        </>
-      ) : (
+      {!wallet && (
         <div className="flex flex-col gap-2">
           <p className="text-[11px] leading-snug text-muted">
             Link a wallet first — display settings apply once there is a

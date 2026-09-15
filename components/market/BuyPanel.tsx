@@ -16,7 +16,7 @@
 import { Badge } from "@/components/ui/Badge";
 import { Banner } from "@/components/market/Banner";
 import { OrderPoll } from "@/components/market/OrderPoll";
-import { BuyModal } from "@/components/market/BuyModal";
+import { CheckoutButton } from "@/components/market/CheckoutModal";
 import { FiatAmount } from "@/components/market/Fiat";
 
 export interface BuyPanelListing {
@@ -102,7 +102,7 @@ export function BuyPanel({
         </Banner>
       )}
 
-      <BuyModal listing={listing} />
+      <CheckoutButton listing={listing} />
       <p className="text-[11px] text-muted">
         Sale is recorded when payment settles — never by this page.
       </p>
