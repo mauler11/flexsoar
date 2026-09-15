@@ -4,7 +4,7 @@
  * PARKED Privy funding rails: card + crypto deposit methods in one
  * `useAddFunds` flow, Courtyard-arranged. Renders NOTHING unless
  * NEXT_PUBLIC_ENABLE_PRIVY_CHECKOUT === '1' — the live deposit view
- * (address display, Phantom link) stays exactly as-is until funding
+ * (address display, embedded link) stays exactly as-is until funding
  * proves in sandbox. Deliberately narrower than the reference screenshot:
  * no Exchange / Cash App rows (provider- and region-specific; Cash App is
  * US-only), no promo rows. What renders is what can actually run.

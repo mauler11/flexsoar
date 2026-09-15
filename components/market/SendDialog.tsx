@@ -2,9 +2,8 @@
  * components/market/SendDialog.tsx
  *
  * Crypto withdrawal for the linked wallet (the "withdraw" half of the
- * FlexSoar wallet): send USDC to any Solana address. Works with embedded
- * (Privy) and injected (Phantom) wallets — whichever key matches the
- * linked address signs, same rule as the buy panel. No backend involved:
+ * FlexSoar wallet): send USDC to any Solana address. The linked embedded
+ * key signs — same rule as the buy panel. No backend involved:
  * a plain wallet-to-wallet SPL transfer, verified by the chain itself.
  *
  * Honest limits, stated in-UI, not buried: USDC only (SOL stays put for
@@ -25,7 +24,6 @@ import { associatedTokenAddress } from "@/lib/solana/sdk";
 import { SOLANA_CHAIN, extractSignatureBytes, walletForAddress } from "@/lib/solana/privy";
 import { buildUsdcTransferIx } from "@/lib/solana/transfers";
 import { formatUsdc } from "@/lib/solana/balances";
-import type { InjectedSolana } from "@/components/market/LinkWalletButton";
 
 /** Public RPC for preflight reads only — sends go out over each wallet's own connection. */
 const DEVNET_RPC = "https://api.devnet.solana.com";
@@ -139,29 +137,17 @@ function SendDialogInner({
       );
 
       const embedded = walletForAddress(privyWallets, walletAddress);
-      let sigB58: string;
-      if (embedded) {
-        const raw = await embedded.signAndSendTransaction({
-          chain: SOLANA_CHAIN,
-          transaction: tx.serialize({ requireAllSignatures: false, verifySignatures: false }),
-          address: embedded.address,
-        });
-        const sigBytes = extractSignatureBytes(raw);
-        if (!sigBytes) throw new Error("wallet returned no usable signature");
-        sigB58 = base58Encode(sigBytes);
-      } else {
-        const injected: InjectedSolana | null =
-          typeof window === "undefined" ? null : (window.solana ?? null);
-        const active = injected?.publicKey?.toBase58() ?? null;
-        if (!injected?.signAndSendTransaction || active !== walletAddress) {
-          throw new Error("Switch Phantom to the linked account, then retry.");
-        }
-        const raw = await injected.signAndSendTransaction(tx);
-        const sigBytes = extractSignatureBytes(raw);
-        if (!sigBytes) throw new Error("wallet returned no usable signature");
-        sigB58 = base58Encode(sigBytes);
+      if (!embedded) {
+        throw new Error("Sign in to your FlexSoar wallet first, then retry.");
       }
-      setSignature(sigB58);
+      const raw = await embedded.signAndSendTransaction({
+        chain: SOLANA_CHAIN,
+        transaction: tx.serialize({ requireAllSignatures: false, verifySignatures: false }),
+        address: embedded.address,
+      });
+      const sigBytes = extractSignatureBytes(raw);
+      if (!sigBytes) throw new Error("wallet returned no usable signature");
+      setSignature(base58Encode(sigBytes));
       setBusy(false);
     } catch (thrown) {
       setError(thrown instanceof Error ? thrown.message : "Send failed.");

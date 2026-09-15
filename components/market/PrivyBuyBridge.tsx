@@ -4,8 +4,8 @@
  * Hook-rule bridge: useWallets() throws outside a configured provider, so
  * this wrapper only mounts the hook-aware panel when NEXT_PUBLIC_PRIVY_APP_ID
  * is set (exactly the condition PrivyProviders uses to install the
- * provider). Otherwise the plain Phantom-only panel renders — same props,
- * no behavior change.
+ * provider). Otherwise the panel renders with no wallets and explains the
+ * embedded login — same props, no crash path.
  */
 "use client";
 

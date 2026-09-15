@@ -1,16 +1,15 @@
 /**
  * components/market/SolanaBuyPanel.tsx
  *
- * Devnet USDC buy path: no new packages. The server builds the unsigned
- * `buy` transaction (GET /api/solana/build-tx — quote + ATAs + blockhash),
- * the buyer's injected wallet (Phantom / Solflare in devnet mode) signs
- * AND broadcasts it, then POST /api/solana/settle verifies balance deltas
- * via Helius and records the ledger transfer.
+ * Devnet USDC buy path: the server builds the unsigned `buy` transaction
+ * (GET /api/solana/build-tx — quote + ATAs + blockhash), the buyer's
+ * embedded FlexSoar wallet signs AND broadcasts it, then POST
+ * /api/solana/settle verifies balance deltas via Helius and records the
+ * ledger transfer.
  *
  * The Helius key never leaves the server: blockhash fetching happens in
  * build-tx, and broadcasting happens inside the wallet's own
- * signAndSendTransaction (its RPC, not ours). Wallets exposing only
- * signTransaction (no broadcast) fail loudly with an honest message.
+ * signAndSendTransaction (its RPC, not ours).
  */
 "use client";
 
@@ -18,7 +17,7 @@ import { useState } from "react";
 import { Transaction } from "@solana/web3.js";
 import { Button } from "@/components/ui/Button";
 import { Banner } from "@/components/market/Banner";
-import { LinkWalletButton, type InjectedSolana } from "@/components/market/LinkWalletButton";
+import { EmbeddedLinkButton } from "@/components/market/EmbeddedWalletSection";
 import { WalletBalance } from "@/components/market/WalletBalance";
 import type { Quote } from "@/lib/solana/quotes";
 import { base58Encode } from "@/lib/solana/base58";
@@ -39,17 +38,6 @@ interface SettleResponse {
   orderId?: string;
   slot?: number;
   error?: string;
-}
-
-function injectedWallet(): InjectedSolana | null {
-  if (typeof window === "undefined") return null;
-  return window.solana ?? null;
-}
-
-function extractSignature(
-  result: { signature: string } | string,
-): string {
-  return typeof result === "string" ? result : result.signature;
 }
 
 export function SolanaBuyPanel({
@@ -96,46 +84,32 @@ export function SolanaBuyPanel({
         setPhase("idle");
         return;
       }
-      // The linked wallet pays, so the linked key must sign: an embedded
-      // wallet at that address first, otherwise the injected one (Phantom).
+      // The linked wallet pays, so the linked embedded key must sign.
       const embedded =
         buildBody.buyerWallet != null
           ? walletForAddress(privyWallets, buildBody.buyerWallet)
           : null;
-      const phantom = embedded == null ? injectedWallet() : null;
-      setPhase("awaitingWallet");
-      const tx = Transaction.from(Buffer.from(buildBody.unsignedTx, "base64"));
-      let signature: string;
-      if (embedded) {
-        const raw = await embedded.signAndSendTransaction({
-          chain: SOLANA_CHAIN,
-          transaction: tx.serialize({ requireAllSignatures: false, verifySignatures: false }),
-          address: embedded.address,
-        });
-        const sigBytes = extractSignatureBytes(raw);
-        if (!sigBytes) {
-          setError("embedded wallet returned no usable signature — nothing was sent");
-          setPhase("idle");
-          return;
-        }
-        signature = base58Encode(sigBytes);
-      } else if (phantom?.signAndSendTransaction) {
-        const sendResult = await phantom.signAndSendTransaction(tx);
-        signature = extractSignature(sendResult);
-        if (!signature) {
-          setError("wallet returned no signature — nothing was sent");
-          setPhase("idle");
-          return;
-        }
-      } else {
+      if (!embedded) {
         setError(
-          embedded == null && phantom == null
-            ? "No Solana wallet found — install Phantom, switch it to devnet, then retry."
-            : "This wallet cannot broadcast — use Phantom or Solflare (signAndSendTransaction).",
+          "Sign in to your FlexSoar wallet first — open Wallet and continue with email, then retry.",
         );
         setPhase("idle");
         return;
       }
+      setPhase("awaitingWallet");
+      const tx = Transaction.from(Buffer.from(buildBody.unsignedTx, "base64"));
+      const raw = await embedded.signAndSendTransaction({
+        chain: SOLANA_CHAIN,
+        transaction: tx.serialize({ requireAllSignatures: false, verifySignatures: false }),
+        address: embedded.address,
+      });
+      const sigBytes = extractSignatureBytes(raw);
+      if (!sigBytes) {
+        setError("embedded wallet returned no usable signature — nothing was sent");
+        setPhase("idle");
+        return;
+      }
+      const signature = base58Encode(sigBytes);
       setPhase("settling");
       const settleRes = await fetch("/api/solana/settle", {
         method: "POST",
@@ -190,7 +164,7 @@ export function SolanaBuyPanel({
         className="rounded-xl border border-line-strong bg-[#262626] px-3 py-1.5 text-sm font-bold tabular-nums text-foreground"
       />
       {needsLink ? (
-        <LinkWalletButton
+        <EmbeddedLinkButton
           cta="Link wallet, then buy"
           onLinked={() => {
             setNeedsLink(false);
@@ -222,7 +196,7 @@ export function SolanaBuyPanel({
       )}
       <p className="text-[11px] text-muted">
         Non-custodial: 95% to the seller, 5% to FlexSoar, split atomically
-        on-chain. Needs Phantom in devnet mode until mainnet launch.
+        on-chain. Sign with your FlexSoar wallet.
       </p>
     </div>
   );

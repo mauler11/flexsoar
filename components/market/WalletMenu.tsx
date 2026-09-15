@@ -18,8 +18,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { FIAT_CURRENCIES, formatFiatFromUsd, formatSol, formatUsdc } from "@/lib/solana/balances";
-import { LinkWalletButton } from "@/components/market/LinkWalletButton";
-import { EmbeddedWalletSection } from "@/components/market/EmbeddedWalletSection";
+import { EmbeddedLinkButton } from "@/components/market/EmbeddedWalletSection";
 import { FundingOptions } from "@/components/market/FundingOptions";
 import { SendDialog } from "@/components/market/SendDialog";
 import { Modal } from "@/components/market/Modal";
@@ -236,8 +235,7 @@ export function WalletMenu() {
                     <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
                       Connect Wallet
                     </span>
-                    <LinkWalletButton cta="Link wallet" />
-                    <EmbeddedWalletSection />
+                    <EmbeddedLinkButton cta="Link wallet" />
                   </div>
                   <div className="flex flex-col gap-1">
                     <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
@@ -249,11 +247,10 @@ export function WalletMenu() {
               ) : (
                 <div className="flex flex-col gap-3">
                   <p className="text-[11px] leading-snug text-muted">
-                    Link a Solana wallet to deposit, see your balance, and buy
-                    with USDC.
+                    Link your FlexSoar wallet to deposit, see your balance,
+                    and buy with USDC.
                   </p>
-                  <LinkWalletButton cta="Link wallet" />
-                  <EmbeddedWalletSection />
+                  <EmbeddedLinkButton cta="Link wallet" />
                 </div>
               )
             )}
@@ -269,11 +266,10 @@ export function WalletMenu() {
               ) : (
                 <div className="flex flex-col gap-3">
                   <p className="text-[11px] leading-snug text-muted">
-                    Link a Solana wallet first — withdrawals send from the
-                    linked address.
+                    Link your FlexSoar wallet first — withdrawals send from
+                    the linked address.
                   </p>
-                  <LinkWalletButton cta="Link wallet" />
-                  <EmbeddedWalletSection />
+                  <EmbeddedLinkButton cta="Link wallet" />
                 </div>
               )
             )}
@@ -314,7 +310,7 @@ function WalletSettings({
             <span className="text-[11px] text-muted">Linked address</span>
             <span className="font-mono text-xs">{short(wallet)}</span>
           </div>
-          <LinkWalletButton cta="Change payout wallet" />
+          <EmbeddedLinkButton cta="Change payout wallet" />
         </>
       ) : (
         <div className="flex flex-col gap-2">
@@ -322,8 +318,7 @@ function WalletSettings({
             Link a wallet first — display settings apply once there is a
             balance to show.
           </p>
-          <LinkWalletButton cta="Link wallet" />
-          <EmbeddedWalletSection />
+          <EmbeddedLinkButton cta="Link wallet" />
         </div>
       )}
       <div className="flex flex-col gap-1">

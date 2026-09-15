@@ -35,7 +35,7 @@ import { currentUserId, getHiddenCardIds, getMySubmittedItems } from "@/app/(mar
 import { createServerSupabase } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/Button";
 import { PayoutSetup } from "@/components/market/PayoutSetup";
-import { LinkWalletButton } from "@/components/market/LinkWalletButton";
+import { EmbeddedLinkButton } from "@/components/market/EmbeddedWalletSection";
 import { DashboardTabs } from "@/components/market/DashboardTabs";
 import { EmptyState } from "@/components/ui/EmptyState";
 
@@ -183,7 +183,7 @@ export default async function DashboardPage() {
               {connectStatus.solanaAddress.slice(-6)} — USDC sale proceeds go
               here (95% seller / 5% FlexSoar, split on-chain).
             </p>
-            <LinkWalletButton cta="Change payout wallet" />
+            <EmbeddedLinkButton cta="Change payout wallet" />
           </div>
         ) : (
           <div className="flex flex-col gap-2">
@@ -191,7 +191,7 @@ export default async function DashboardPage() {
               No wallet linked — your listings can&apos;t be bought with USDC
               until you link one. One signature proves you own it.
             </p>
-            <LinkWalletButton cta="Link payout wallet" />
+            <EmbeddedLinkButton cta="Link payout wallet" />
           </div>
         )}
       </section>
