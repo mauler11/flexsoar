@@ -41,11 +41,22 @@ declare global {
 export function LinkWalletButton({
   cta,
   onLinked,
+  externalSigner = null,
 }: {
   /** Button label, e.g. "Link wallet" or "Link wallet, then buy". */
   cta: string;
   /** Fired after the address stores. Defaults to a router refresh. */
   onLinked?: () => void;
+  /**
+   * Embedded-wallet signer (Privy). When provided, the injected wallet is
+   * never consulted: the address comes from the prop and the message is
+   * signed through it. The POST still verifies Ed25519 server-side, so a
+   * mismatched signer fails closed exactly like a bad Phantom signature.
+   */
+  externalSigner?: {
+    address: string;
+    signMessage: (message: Uint8Array) => Promise<Uint8Array>;
+  } | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -54,14 +65,17 @@ export function LinkWalletButton({
 
   async function link() {
     setError(null);
-    const wallet = typeof window === "undefined" ? null : (window.solana ?? null);
-    if (!wallet) {
+    const wallet =
+      externalSigner == null && typeof window !== "undefined"
+        ? (window.solana ?? null)
+        : null;
+    if (!externalSigner && !wallet) {
       setError("No Solana wallet found — install Phantom and switch it to devnet first.");
       return;
     }
     setBusy(true);
     try {
-      if (!wallet.publicKey && wallet.connect) await wallet.connect();
+      if (!externalSigner && !wallet!.publicKey && wallet!.connect) await wallet!.connect();
       const msgRes = await fetch("/api/solana/link-wallet", { method: "GET" });
       const msgBody = (await msgRes.json()) as {
         message?: string;
@@ -73,15 +87,22 @@ export function LinkWalletButton({
         setBusy(false);
         return;
       }
-      if (!wallet.signMessage) {
+      const messageBytes = new TextEncoder().encode(msgBody.message);
+      let address: string | null;
+      let signature: Uint8Array;
+      if (externalSigner) {
+        address = externalSigner.address;
+        signature = await externalSigner.signMessage(messageBytes);
+      } else if (wallet?.signMessage) {
+        if (!wallet.publicKey && wallet.connect) await wallet.connect();
+        const signed = await wallet.signMessage(messageBytes);
+        signature = signed.signature;
+        address = wallet.publicKey?.toBase58() ?? null;
+      } else {
         setError("This wallet cannot sign messages — use Phantom or Solflare.");
         setBusy(false);
         return;
       }
-      const { signature } = await wallet.signMessage(
-        new TextEncoder().encode(msgBody.message),
-      );
-      const address = wallet.publicKey?.toBase58() ?? null;
       if (!address) {
         setError("Wallet gave no address — connect it first, then retry.");
         setBusy(false);

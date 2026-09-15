@@ -21,10 +21,17 @@ import { Banner } from "@/components/market/Banner";
 import { LinkWalletButton, type InjectedSolana } from "@/components/market/LinkWalletButton";
 import { WalletBalance } from "@/components/market/WalletBalance";
 import type { Quote } from "@/lib/solana/quotes";
+import { base58Encode } from "@/lib/solana/base58";
+import {
+  SOLANA_CHAIN,
+  extractSignatureBytes,
+  walletForAddress,
+} from "@/lib/solana/privy";
 
 interface BuildTxResponse {
   quote: Quote;
   unsignedTx: string;
+  buyerWallet: string;
 }
 
 interface SettleResponse {
@@ -48,9 +55,12 @@ function extractSignature(
 export function SolanaBuyPanel({
   listingId,
   priceCents,
+  privyWallets = [],
 }: {
   listingId: string;
   priceCents: number;
+  /** useWallets() output from the bridge — [] when Privy is unconfigured. */
+  privyWallets?: readonly unknown[];
 }) {
   const [phase, setPhase] = useState<
     "idle" | "building" | "awaitingWallet" | "settling" | "done"
@@ -68,11 +78,6 @@ export function SolanaBuyPanel({
   async function buyWithUsdc() {
     setError(null);
     setReceipt(null);
-    const wallet = injectedWallet();
-    if (!wallet) {
-      setError("No Solana wallet found — install Phantom, switch it to devnet, then retry.");
-      return;
-    }
     setPhase("building");
     try {
       const buildRes = await fetch(
@@ -91,17 +96,43 @@ export function SolanaBuyPanel({
         setPhase("idle");
         return;
       }
-      if (!wallet.signAndSendTransaction) {
-        setError("This wallet cannot broadcast — use Phantom or Solflare (signAndSendTransaction).");
-        setPhase("idle");
-        return;
-      }
+      // The linked wallet pays, so the linked key must sign: an embedded
+      // wallet at that address first, otherwise the injected one (Phantom).
+      const embedded =
+        buildBody.buyerWallet != null
+          ? walletForAddress(privyWallets, buildBody.buyerWallet)
+          : null;
+      const phantom = embedded == null ? injectedWallet() : null;
       setPhase("awaitingWallet");
       const tx = Transaction.from(Buffer.from(buildBody.unsignedTx, "base64"));
-      const sendResult = await wallet.signAndSendTransaction(tx);
-      const signature = extractSignature(sendResult);
-      if (!signature) {
-        setError("wallet returned no signature — nothing was sent");
+      let signature: string;
+      if (embedded) {
+        const raw = await embedded.signAndSendTransaction({
+          chain: SOLANA_CHAIN,
+          transaction: tx.serialize({ requireAllSignatures: false, verifySignatures: false }),
+          address: embedded.address,
+        });
+        const sigBytes = extractSignatureBytes(raw);
+        if (!sigBytes) {
+          setError("embedded wallet returned no usable signature — nothing was sent");
+          setPhase("idle");
+          return;
+        }
+        signature = base58Encode(sigBytes);
+      } else if (phantom?.signAndSendTransaction) {
+        const sendResult = await phantom.signAndSendTransaction(tx);
+        signature = extractSignature(sendResult);
+        if (!signature) {
+          setError("wallet returned no signature — nothing was sent");
+          setPhase("idle");
+          return;
+        }
+      } else {
+        setError(
+          embedded == null && phantom == null
+            ? "No Solana wallet found — install Phantom, switch it to devnet, then retry."
+            : "This wallet cannot broadcast — use Phantom or Solflare (signAndSendTransaction).",
+        );
         setPhase("idle");
         return;
       }

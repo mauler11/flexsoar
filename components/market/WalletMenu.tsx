@@ -19,6 +19,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { FIAT_CURRENCIES, formatFiatFromUsd, formatSol, formatUsdc } from "@/lib/solana/balances";
 import { LinkWalletButton } from "@/components/market/LinkWalletButton";
+import { EmbeddedWalletSection } from "@/components/market/EmbeddedWalletSection";
 import { Modal } from "@/components/market/Modal";
 import { useFiat } from "@/components/market/Fiat";
 
@@ -306,6 +307,12 @@ export function WalletMenu() {
                 <LinkWalletButton cta="Link wallet" />
               </div>
             )}
+            <div className="flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted">
+              <span className="h-px flex-1 bg-line" />
+              <span>or</span>
+              <span className="h-px flex-1 bg-line" />
+            </div>
+            <EmbeddedWalletSection />
           </div>
         </Modal>
       )}

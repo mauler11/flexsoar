@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Banner } from "@/components/market/Banner";
 import { OrderPoll } from "@/components/market/OrderPoll";
-import { SolanaBuyPanel } from "@/components/market/SolanaBuyPanel";
+import { SolanaBuyPanelRoot } from "@/components/market/PrivyBuyBridge";
 import { FiatAmount } from "@/components/market/Fiat";
 
 export interface BuyPanelListing {
@@ -123,7 +123,7 @@ export function BuyPanel({
       >
         {pending ? "Redirecting…" : buyable ? "Buy Now" : "Sign in"}
       </Button>
-      <SolanaBuyPanel listingId={listing.id} priceCents={listing.priceCents} />
+      <SolanaBuyPanelRoot listingId={listing.id} priceCents={listing.priceCents} />
       <p className="text-[11px] text-muted">
         Sale is recorded when payment settles — never by this page.
       </p>

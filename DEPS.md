@@ -66,15 +66,27 @@ Still needed for the R2 photo upload (see docs/handoff/admin.md):
 Requested package (human installs — `package.json` untouched per AGENT_RULES.md):
 
 - `@privy-io/react-auth` — PrivyProvider (`embeddedWallets.solana.createOnLogin:
-  'users-without-wallets'`, devnet RPC via public `createSolanaRpc` endpoints
-  — never the Helius key client-side) + `toSolanaWalletConnectors()` to keep
-  Phantom/external alongside embedded. `useWallets()` gives the embedded
-  wallet; it speaks our unsigned-tx flow natively
-  (`signAndSendTransaction({ chain: 'solana:devnet', transaction })`,
-  `signMessage` for the link-wallet proof). Supabase sessions stay
-  authoritative for the ledger — Privy is a key manager, not an identity
-  replacement; the embedded address links through the existing link-wallet
-  proof into `users.solana_address`.
+  'users-without-wallets'`). No `solana.rpcs` override and no
+  `toSolanaWalletConnectors()`: broadcasts go out over each wallet's own
+  connection (same as Phantom), and Phantom/external stays working through
+  the pre-existing `window.solana` path, untouched. `useWallets()` gives the
+  embedded wallet; it speaks our unsigned-tx flow natively
+  (`signAndSendTransaction({ chain: 'solana:devnet', transaction, address })`,
+  `signMessage({ message, address })` for the link-wallet proof — shapes
+  verified against the installed `.d.ts`, signatures arrive as bytes).
+  Supabase sessions stay authoritative for the ledger — Privy is a key
+  manager, not an identity replacement; the embedded address links through
+  the existing link-wallet proof into `users.solana_address`, and the buy
+  panel signs with whichever key matches the quoted buyer wallet.
+
+Installed 2026-09-15: `@privy-io/react-auth@3.42.0` (human `npm install`;
+shapes verified against its bundled `.d.ts`). The `@solana/kit` peer family
+is deliberately NOT installed: it only feeds Privy's own embedded-wallet UI
+flows, which we don't use — we call the wallet-standard methods directly
+with our web3.js v1 transactions. If a future Privy UI is adopted, install
+`@solana/kit @solana-program/memo @solana-program/system
+@solana-program/token` and add the webpack externals from their install
+guide (we build with `--webpack`, so the externals apply).
 
 Environment variable (`.env.local` + Vercel; public, not secret):
 

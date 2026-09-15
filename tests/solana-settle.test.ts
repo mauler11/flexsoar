@@ -14,6 +14,12 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { base58Decode, base58Encode, decodeAddress } from '../lib/solana/base58';
 import { formatSol, formatUsdc, sumUsdcUnits, usdcToFiat, formatFiatAmount, formatFiatFromUsd } from '../lib/solana/balances';
 import { myrPerUsd, fxTable } from '../lib/solana/fx';
+import {
+  asSolanaSigningWallet,
+  extractSignatureBytes,
+  firstSolanaWallet,
+  walletForAddress,
+} from '../lib/solana/privy';
 import { issueQuote, splitFee, verifyQuote } from '../lib/solana/quotes';
 import { verifyWalletLink, linkMessage } from '../lib/solana/wallet';
 import { verifyBuyTransaction } from '../lib/solana/verify';
@@ -465,5 +471,45 @@ describe('balances — mint-filtered sums and display formatting', () => {
     expect(formatFiatFromUsd(42.55, 'USD', null)).toEqual({ text: '$42.55', estimated: true });
     expect(formatFiatFromUsd(1, 'USDC', null)).toEqual({ text: '1 USDC', estimated: false });
     expect(formatFiatFromUsd(-1, 'USD', null)).toBeNull();
+  });
+});
+
+describe('privy adapters — structural narrowing, signature shapes', () => {
+  const sendAndSend = async () => ({ signature: new Uint8Array(64).fill(7) });
+  const signMsg = async () => ({ signature: new Uint8Array(64).fill(9) });
+  const solanaWallet = {
+    chainType: 'solana',
+    address: 'Buyer11111111111111111111111111111111111111',
+    signAndSendTransaction: sendAndSend,
+    signMessage: signMsg,
+  };
+  const ethWallet = {
+    chainType: 'ethereum',
+    address: '0xabc',
+    signAndSendTransaction: sendAndSend,
+    signMessage: signMsg,
+  };
+
+  it('narrows solana wallets, rejects ethereum and junk', () => {
+    expect(asSolanaSigningWallet(solanaWallet)?.address).toBe(solanaWallet.address);
+    expect(asSolanaSigningWallet(ethWallet)).toBeNull();
+    expect(asSolanaSigningWallet(null)).toBeNull();
+    expect(asSolanaSigningWallet({ chainType: 'solana' })).toBeNull();
+    expect(firstSolanaWallet([ethWallet, solanaWallet])?.address).toBe(solanaWallet.address);
+    expect(walletForAddress([solanaWallet], solanaWallet.address)?.address).toBe(
+      solanaWallet.address,
+    );
+    expect(walletForAddress([solanaWallet], 'Nobody11111111111111111111111111111111111')).toBeNull();
+  });
+
+  it('extracts signature bytes from every wallet shape, null on garbage', () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    expect(extractSignatureBytes(bytes)).toEqual(bytes);
+    expect(extractSignatureBytes({ signature: bytes })).toEqual(bytes);
+    expect(extractSignatureBytes(base58Encode(bytes))).toEqual(bytes);
+    expect(extractSignatureBytes({ signature: base58Encode(bytes) })).toEqual(bytes);
+    expect(extractSignatureBytes('!!!not-base58!!!\n')).toBeNull();
+    expect(extractSignatureBytes({ nope: 1 })).toBeNull();
+    expect(extractSignatureBytes(null)).toBeNull();
   });
 });
