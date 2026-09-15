@@ -61,6 +61,25 @@ Still needed for the R2 photo upload (see docs/handoff/admin.md):
   refuses to run without it, since a photo with no public URL can never be
   displayed or saved.
 
+### Privy embedded wallets (Phase B — Courtyard play, human installs)
+
+Requested package (human installs — `package.json` untouched per AGENT_RULES.md):
+
+- `@privy-io/react-auth` — PrivyProvider (`embeddedWallets.solana.createOnLogin:
+  'users-without-wallets'`, devnet RPC via public `createSolanaRpc` endpoints
+  — never the Helius key client-side) + `toSolanaWalletConnectors()` to keep
+  Phantom/external alongside embedded. `useWallets()` gives the embedded
+  wallet; it speaks our unsigned-tx flow natively
+  (`signAndSendTransaction({ chain: 'solana:devnet', transaction })`,
+  `signMessage` for the link-wallet proof). Supabase sessions stay
+  authoritative for the ledger — Privy is a key manager, not an identity
+  replacement; the embedded address links through the existing link-wallet
+  proof into `users.solana_address`.
+
+Environment variable (`.env.local` + Vercel; public, not secret):
+
+- `NEXT_PUBLIC_PRIVY_APP_ID` — from the Privy dashboard (paste back here).
+
 ### Solana settlement (program + routes ship; install + keys before use)
 
 Requested packages (human installs — `package.json` untouched per AGENT_RULES.md):
