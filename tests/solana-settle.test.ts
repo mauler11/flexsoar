@@ -12,7 +12,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { base58Decode, base58Encode, decodeAddress } from '../lib/solana/base58';
-import { formatSol, formatUsdc, sumUsdcUnits, usdcToFiat } from '../lib/solana/balances';
+import { formatSol, formatUsdc, sumUsdcUnits, usdcToFiat, formatFiatAmount, formatFiatFromUsd } from '../lib/solana/balances';
 import { myrPerUsd, fxTable } from '../lib/solana/fx';
 import { issueQuote, splitFee, verifyQuote } from '../lib/solana/quotes';
 import { verifyWalletLink, linkMessage } from '../lib/solana/wallet';
@@ -448,5 +448,22 @@ describe('balances — mint-filtered sums and display formatting', () => {
     expect(usdcToFiat(1_000_000, null)).toBeNull();
     expect(usdcToFiat(1_000_000, 0)).toBeNull();
     expect(usdcToFiat(-1, 4.7)).toBeNull();
+  });
+
+  it('formatFiatAmount: MYR exact, USD/USDC through the table, null without rates', () => {
+    const rates = { MYR: 4.7, EUR: 0.92 };
+    expect(formatFiatAmount(20000, 'MYR', null)).toEqual({ text: 'RM 200.00', estimated: false });
+    expect(formatFiatAmount(20000, 'USD', rates)).toEqual({ text: '$42.55', estimated: true });
+    expect(formatFiatAmount(20000, 'EUR', rates)).toEqual({ text: '€39.15', estimated: true });
+    expect(formatFiatAmount(20000, 'USDC', rates)).toEqual({ text: '42.553191 USDC', estimated: false });
+    expect(formatFiatAmount(20000, 'JPY', rates)).toBeNull();
+    expect(formatFiatAmount(20000, 'USD', null)).toBeNull();
+    expect(formatFiatAmount(-5, 'MYR', null)).toBeNull();
+  });
+
+  it('formatFiatFromUsd: symbols, not codes', () => {
+    expect(formatFiatFromUsd(42.55, 'USD', null)).toEqual({ text: '$42.55', estimated: true });
+    expect(formatFiatFromUsd(1, 'USDC', null)).toEqual({ text: '1 USDC', estimated: false });
+    expect(formatFiatFromUsd(-1, 'USD', null)).toBeNull();
   });
 });

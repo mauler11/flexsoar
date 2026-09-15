@@ -20,7 +20,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Banner } from "@/components/market/Banner";
 import { OrderPoll } from "@/components/market/OrderPoll";
 import { SolanaBuyPanel } from "@/components/market/SolanaBuyPanel";
-import { formatMyr } from "@/components/card/format";
+import { FiatAmount } from "@/components/market/Fiat";
 
 export interface BuyPanelListing {
   id: string;
@@ -88,13 +88,13 @@ export function BuyPanel({
 
       <div>
         <div className="text-2xl font-bold tracking-tight">
-          {formatMyr(listing.priceCents)}
+          <FiatAmount cents={listing.priceCents} />
         </div>
       </div>
 
       {listing.fairPriceCents != null && (
         <p className="text-[11px] text-muted">
-          Fair Market Price {formatMyr(listing.fairPriceCents)}
+          Fair Market Price <FiatAmount cents={listing.fairPriceCents} />
         </p>
       )}
 

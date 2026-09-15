@@ -20,6 +20,7 @@ import { ConditionBadge } from "@/components/card/ConditionBadge";
 import { FloatBar } from "@/components/card/FloatBar";
 import { TierBadge } from "@/components/card/TierBadge";
 import { formatMyr } from "@/components/card/format";
+import { FiatAmount } from "@/components/market/Fiat";
 import {
   conditionGradeBand,
   floatBand,
@@ -121,7 +122,7 @@ export function ListingCard({
 
         <div className="mt-0.5 flex items-baseline gap-2">
           <span className="text-base font-extrabold tracking-tight">
-            {formatMyr(listing.price_cents)}
+            <FiatAmount cents={listing.price_cents} />
           </span>
         </div>
         {fair != null && (

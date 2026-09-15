@@ -17,9 +17,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { FIAT_CURRENCIES, formatSol, formatUsdc, usdcToFiat } from "@/lib/solana/balances";
+import { FIAT_CURRENCIES, formatFiatFromUsd, formatSol, formatUsdc } from "@/lib/solana/balances";
 import { LinkWalletButton } from "@/components/market/LinkWalletButton";
 import { Modal } from "@/components/market/Modal";
+import { useFiat } from "@/components/market/Fiat";
 
 interface BalancesResponse {
   wallet: string;
@@ -36,28 +37,24 @@ function short(address: string): string {
 type View = "overview" | "deposit" | "settings";
 
 /**
- * Balance block with the fiat toggle. Fiat figures are ESTIMATES
- * (USDC≈USD at live FX) — rendered with ≈ and falling back to the exact
- * USDC figure whenever the selected rate is missing.
+ * Balance block with the site-wide fiat controls. Reads the shared display
+ * currency (same state as the header selector) — picking a fiat here
+ * converts the whole site, not just this modal. Figures stay estimates
+ * (USDC≈USD at live FX) with the exact USDC underneath.
  */
 function FiatBalance({
   usdcUnits,
   solLamports,
   fx,
-  fiatOn,
-  fiatCode,
-  onToggleFiat,
-  onPickFiat,
 }: {
   usdcUnits: number;
   solLamports: number;
   fx: Record<string, number> | null;
-  fiatOn: boolean;
-  fiatCode: string;
-  onToggleFiat: () => void;
-  onPickFiat: (code: string) => void;
 }) {
-  const fiat = fiatOn ? usdcToFiat(usdcUnits, fx?.[fiatCode]) : null;
+  const { code, setCode, toggleFiat } = useFiat();
+  // Estimates on for any fiat; MYR and USDC are both exact modes.
+  const fiatOn = code !== "MYR" && code !== "USDC";
+  const fiat = fiatOn ? formatFiatFromUsd(usdcUnits / 1_000_000, code, fx) : null;
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
@@ -69,7 +66,7 @@ function FiatBalance({
             role="switch"
             aria-checked={fiatOn}
             aria-label="Display in Fiat"
-            onClick={onToggleFiat}
+            onClick={toggleFiat}
             className={`relative h-5 w-9 rounded-full transition-colors ${
               fiatOn ? "bg-accent" : "bg-line-strong"
             }`}
@@ -85,11 +82,12 @@ function FiatBalance({
       </div>
       {fiatOn && (
         <select
-          value={fiatCode}
-          onChange={(e) => onPickFiat(e.target.value)}
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
           aria-label="Fiat currency"
           className="w-full rounded-xl border border-line-strong bg-background px-3 py-2 text-sm text-foreground focus:outline-none"
         >
+          <option value="USDC">USDC — Exact</option>
           {FIAT_CURRENCIES.map((c) => (
             <option key={c.code} value={c.code}>
               {c.code} — {c.name}
@@ -98,10 +96,8 @@ function FiatBalance({
         </select>
       )}
       <span className="text-2xl font-bold tabular-nums tracking-tight">
-        {fiat != null ? (
-          <>
-            ≈ {fiat} <span className="text-sm font-semibold text-muted">{fiatCode}</span>
-          </>
+        {fiat ? (
+          <>≈ {fiat.text}</>
         ) : (
           <>
             {formatUsdc(usdcUnits)}{" "}
@@ -109,7 +105,7 @@ function FiatBalance({
           </>
         )}
       </span>
-      {fiat != null && (
+      {fiat && (
         <span className="text-[11px] text-muted">
           {formatUsdc(usdcUnits)} USDC exact
         </span>
@@ -127,17 +123,6 @@ export function WalletMenu() {
   const [tab, setTab] = useState<"overview" | "settings">("overview");
   const [balance, setBalance] = useState<BalancesResponse | null>(null);
   const [copied, setCopied] = useState(false);
-  const [fiatOn, setFiatOn] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      window.localStorage.getItem("flexsoar-fiat") === "1",
-  );
-  const [fiatCode, setFiatCode] = useState(
-    () =>
-      (typeof window !== "undefined" &&
-        window.localStorage.getItem("flexsoar-fiat-code")) ||
-      "MYR",
-  );
 
   useEffect(() => {
     let live = true;
@@ -173,26 +158,6 @@ export function WalletMenu() {
   function switchTab(next: "overview" | "settings") {
     setTab(next);
     setView(next);
-  }
-
-  function toggleFiat() {
-    setFiatOn((v) => {
-      try {
-        window.localStorage.setItem("flexsoar-fiat", v ? "0" : "1");
-      } catch {
-        // Private mode — preference just won't persist.
-      }
-      return !v;
-    });
-  }
-
-  function pickFiat(code: string) {
-    setFiatCode(code);
-    try {
-      window.localStorage.setItem("flexsoar-fiat-code", code);
-    } catch {
-      // Private mode — preference just won't persist.
-    }
   }
 
   return (
@@ -256,10 +221,6 @@ export function WalletMenu() {
                     usdcUnits={balance.usdcUnits}
                     solLamports={balance.solLamports}
                     fx={balance.fx}
-                    fiatOn={fiatOn}
-                    fiatCode={fiatCode}
-                    onToggleFiat={toggleFiat}
-                    onPickFiat={pickFiat}
                   />
                 )}
                 {view === "overview" && tab === "overview" && (

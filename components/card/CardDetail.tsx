@@ -2,8 +2,9 @@
  * components/card/CardDetail.tsx
  *
  * Hero card: full-width rarity frame with the photo carousel at scale, condition,
- * mint number, ownership status, and the price in MYR — the marketplace's
- * unit of account (AGENT_RULES.md §6). No ringgit conversion. Oracle value
+ * mint number, ownership status, and the price in the site display currency
+ * (FiatAmount — MYR exact by default, fiat estimates opt-in; the ledger's
+ * unit of account stays MYR sen per AGENT_RULES.md §6). Oracle value
  * is always shown beside an ask — never hidden.
  *
  * Pure props only. No fetching, no state.
@@ -20,7 +21,7 @@ import { FloatBar } from "./FloatBar";
 import { TierBadge } from "./TierBadge";
 import { PhotoCarousel } from "./PhotoCarousel";
 import { ImageZoom } from "./ImageZoom";
-import { formatMyr } from "./format";
+import { FiatAmount } from "@/components/market/Fiat";
 import { displayPriceCents } from "./value";
 import { conditionGradeBand, floatBand, publishedConditionLabel } from "@/lib/domain/rarity";
 
@@ -182,12 +183,12 @@ export function CardDetail({
           <div className="mt-auto border-t border-line pt-4">
             {value != null && (
               <div className="text-3xl font-extrabold tracking-tight text-foreground">
-                {formatMyr(value)}
+                <FiatAmount cents={value} />
               </div>
             )}
             {listing && listing.oracle_value_cents != null && (
               <div className="mt-1 text-sm text-muted">
-                Fair Market Price {formatMyr(listing.oracle_value_cents)}
+                Fair Market Price <FiatAmount cents={listing.oracle_value_cents} />
               </div>
             )}
           </div>

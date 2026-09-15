@@ -23,6 +23,7 @@ import { OnboardingTour } from "@/components/market/OnboardingTour";
 import { NotificationBell } from "@/components/market/NotificationBell";
 import { WalletBalance } from "@/components/market/WalletBalance";
 import { WalletMenu } from "@/components/market/WalletMenu";
+import { FiatProvider, FiatSelect } from "@/components/market/Fiat";
 import { UserMenu } from "@/components/market/UserMenu";
 
 interface NotificationPayload {
@@ -180,6 +181,7 @@ export default async function MarketLayout({
     <div className="flex min-h-screen flex-col">
       <ToastProvider>
         <OnboardingTour accountAgreed={accountAgreed} />
+        <FiatProvider>
         <header className="sticky top-0 z-40 border-b border-line bg-background/80 backdrop-blur">
           <div className="flex w-full items-center gap-3 px-4 py-3">
             <Link
@@ -204,6 +206,7 @@ export default async function MarketLayout({
                   {me ? (
                     <>
                       <WalletBalance />
+                      <FiatSelect />
                       <WalletMenu />
                       <NotificationBell
                         notifications={notifications}
@@ -215,7 +218,10 @@ export default async function MarketLayout({
                       <UserMenu handle={me.handle} />
                     </>
                   ) : (
-                    <AuthButtons />
+                    <>
+                      <FiatSelect />
+                      <AuthButtons />
+                    </>
                   )}
                 </div>
           </div>
@@ -231,6 +237,7 @@ export default async function MarketLayout({
             <SiteFooter />
           </div>
         </div>
+        </FiatProvider>
       </ToastProvider>
     </div>
   );

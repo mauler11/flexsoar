@@ -83,6 +83,30 @@ export const FIAT_CURRENCIES: readonly { code: string; name: string }[] = [
   { code: 'SEK', name: 'Swedish Krona' },
 ];
 
+/** Display symbols. USDC keeps its code suffix (it is the asset, not $). */
+export const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$',
+  MYR: 'RM',
+  EUR: '€',
+  JPY: '¥',
+  GBP: '£',
+  CAD: 'CA$',
+  AUD: 'A$',
+  SGD: 'S$',
+  CNY: '¥',
+  HKD: 'HK$',
+  TWD: 'NT$',
+  THB: '฿',
+  IDR: 'Rp',
+  PHP: '₱',
+  VND: '₫',
+  KRW: '₩',
+  INR: '₹',
+  NZD: 'NZ$',
+  CHF: 'CHF ',
+  SEK: 'kr ',
+};
+
 /**
  * USDC≈USD converted to a fiat estimate, 2 decimals. Returns null when the
  * rate is missing or junk — callers fall back to the exact USDC figure
@@ -98,4 +122,42 @@ export function usdcToFiat(
     return null;
   }
   return ((units / 1_000_000) * ratePerUsd).toFixed(2);
+}
+
+/**
+ * Any display amount from a USD value and a display code. USDC and MYR are
+ * exact (the asset itself / the ledger unit); every fiat is an estimate.
+ * Unknown codes and missing rates return null — never a guess.
+ */
+export function formatFiatFromUsd(
+  usd: number,
+  code: string,
+  rates: Record<string, number> | null,
+): { text: string; estimated: boolean } | null {
+  if (!Number.isFinite(usd) || usd < 0) return null;
+  if (code === 'USDC') {
+    return { text: `${formatUsdc(Math.round(usd * 1_000_000))} USDC`, estimated: false };
+  }
+  const rate = code === 'USD' ? 1 : rates?.[code];
+  if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0) return null;
+  const symbol = CURRENCY_SYMBOLS[code] ?? `${code} `;
+  return { text: `${symbol}${(usd * rate).toFixed(2)}`, estimated: true };
+}
+
+/**
+ * Any display amount from integer MYR sen (the ledger unit). MYR needs no
+ * rate; USDC and fiat convert through the USD-base table (USDC≈USD).
+ */
+export function formatFiatAmount(
+  myrCents: number,
+  code: string,
+  rates: Record<string, number> | null,
+): { text: string; estimated: boolean } | null {
+  if (!Number.isInteger(myrCents) || myrCents < 0) return null;
+  if (code === 'MYR') {
+    return { text: `RM ${(myrCents / 100).toFixed(2)}`, estimated: false };
+  }
+  const myr = rates?.['MYR'];
+  if (typeof myr !== 'number' || !Number.isFinite(myr) || myr <= 0) return null;
+  return formatFiatFromUsd(myrCents / 100 / myr, code, rates);
 }
