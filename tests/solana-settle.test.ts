@@ -12,8 +12,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { base58Decode, base58Encode, decodeAddress } from '../lib/solana/base58';
-import { formatSol, formatUsdc, sumUsdcUnits } from '../lib/solana/balances';
-import { myrPerUsd } from '../lib/solana/fx';
+import { formatSol, formatUsdc, sumUsdcUnits, usdcToFiat } from '../lib/solana/balances';
+import { myrPerUsd, fxTable } from '../lib/solana/fx';
 import { issueQuote, splitFee, verifyQuote } from '../lib/solana/quotes';
 import { verifyWalletLink, linkMessage } from '../lib/solana/wallet';
 import { verifyBuyTransaction } from '../lib/solana/verify';
@@ -393,6 +393,25 @@ describe('myrPerUsd — provider chain with operator pin last', () => {
     process.env.SOLANA_MYR_PER_USD = 'not-a-number';
     await expect(myrPerUsd(deadFetch)).resolves.toBeNull();
   });
+
+  it('fxTable returns the full table from either provider', async () => {
+    const primary = (async (_url?: unknown) => ({
+      ok: true,
+      json: async () => ({ rates: { MYR: 4.7, EUR: 0.92 } }),
+    })) as unknown as typeof fetch;
+    await expect(fxTable(primary)).resolves.toMatchObject({ MYR: 4.7, EUR: 0.92 });
+    const mixed = (async (url: string | URL | Request) => {
+      if (String(url).includes('frankfurter')) {
+        return {
+          ok: true,
+          json: async () => ({ rates: { MYR: 4.8, JPY: 150.2 } }),
+        };
+      }
+      return deadFetch('https://x');
+    }) as unknown as typeof fetch;
+    await expect(fxTable(mixed)).resolves.toMatchObject({ MYR: 4.8, JPY: 150.2 });
+    await expect(fxTable(deadFetch)).resolves.toBeNull();
+  });
 });
 
 describe('balances — mint-filtered sums and display formatting', () => {
@@ -421,5 +440,13 @@ describe('balances — mint-filtered sums and display formatting', () => {
     expect(formatUsdc(-5)).toBe('0');
     expect(formatSol(8_000)).toBe('0.000008');
     expect(formatSol(2_500_000_000)).toBe('2.5');
+  });
+
+  it('usdcToFiat estimates at 2 decimals, null on junk', () => {
+    expect(usdcToFiat(1_000_000, 4.7)).toBe('4.70');
+    expect(usdcToFiat(49_067_713, 4.077)).toBe('200.05');
+    expect(usdcToFiat(1_000_000, null)).toBeNull();
+    expect(usdcToFiat(1_000_000, 0)).toBeNull();
+    expect(usdcToFiat(-1, 4.7)).toBeNull();
   });
 });

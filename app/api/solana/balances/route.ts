@@ -12,6 +12,7 @@ import { NextResponse } from 'next/server';
 
 import { createServerSupabase } from '@/lib/supabase/server';
 import { rpcUrl, usdcMint } from '@/lib/solana/config';
+import { fxTable } from '@/lib/solana/fx';
 import { sumUsdcUnits } from '@/lib/solana/balances';
 
 export const dynamic = 'force-dynamic';
@@ -47,7 +48,7 @@ export async function GET(): Promise<NextResponse> {
   }
 
   try {
-    const [solRes, tokenRes] = await Promise.all([
+    const [solRes, tokenRes, fx] = await Promise.all([
       fetch(rpc, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -72,6 +73,7 @@ export async function GET(): Promise<NextResponse> {
           ],
         }),
       }),
+      fxTable().catch(() => null),
     ]);
     if (!solRes.ok || !tokenRes.ok) {
       return NextResponse.json(
@@ -89,7 +91,7 @@ export async function GET(): Promise<NextResponse> {
       mint,
     );
     return NextResponse.json(
-      { wallet, solLamports, usdcUnits: units, usdcDecimals: decimals, usdcMint: mint },
+      { wallet, solLamports, usdcUnits: units, usdcDecimals: decimals, usdcMint: mint, fx: fx ?? null },
       { status: 200 },
     );
   } catch (thrown) {

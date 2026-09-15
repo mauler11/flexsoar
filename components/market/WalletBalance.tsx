@@ -58,7 +58,7 @@ export function WalletBalance({
       title={`USDC for buys · ${formatSol(balance.solLamports)} SOL for fees`}
       className={
         className ??
-        "hidden rounded-lg border border-line-strong px-2.5 py-1 text-xs font-semibold tabular-nums text-foreground sm:inline-block"
+        "hidden rounded-xl border border-line-strong bg-[#262626] px-3 py-1.5 text-sm font-bold tabular-nums text-foreground sm:inline-block"
       }
     >
       {formatUsdc(balance.usdcUnits)} USDC

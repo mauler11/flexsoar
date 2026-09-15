@@ -156,7 +156,7 @@ export function SolanaBuyPanel({
       </div>
       <WalletBalance
         label="Wallet balance"
-        className="rounded-lg border border-line-strong px-2.5 py-1 text-xs font-semibold tabular-nums text-foreground"
+        className="rounded-xl border border-line-strong bg-[#262626] px-3 py-1.5 text-sm font-bold tabular-nums text-foreground"
       />
       {needsLink ? (
         <LinkWalletButton

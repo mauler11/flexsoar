@@ -17,18 +17,37 @@
 
 import { usdBaseRates } from '@/lib/market/ebay';
 
-async function fromFrankfurter(
+async function frankfurterTable(
   fetchImpl: typeof fetch = fetch,
-): Promise<number | null> {
+): Promise<Record<string, number> | null> {
   try {
     const res = await fetchImpl('https://api.frankfurter.app/latest?from=USD');
     if (!res.ok) return null;
     const body = (await res.json()) as { rates?: Record<string, unknown> };
-    const myr = body.rates?.['MYR'];
-    return typeof myr === 'number' && myr > 0 ? myr : null;
+    if (!body.rates) return null;
+    const out: Record<string, number> = {};
+    for (const [code, rate] of Object.entries(body.rates)) {
+      if (typeof rate === 'number' && rate > 0) out[code] = rate;
+    }
+    return out;
   } catch {
     return null;
   }
+}
+
+/** Full USD-base FX table (target-per-USD), or null when both fail. */
+export async function fxTable(
+  fetchImpl: typeof fetch = fetch,
+): Promise<Record<string, number> | null> {
+  try {
+    const rates = await usdBaseRates(fetchImpl);
+    if (rates && typeof rates['MYR'] === 'number' && (rates['MYR'] as number) > 0) {
+      return rates as Record<string, number>;
+    }
+  } catch {
+    // Fall through to the second provider.
+  }
+  return frankfurterTable(fetchImpl);
 }
 
 function pinnedRate(): number | null {
@@ -40,10 +59,8 @@ function pinnedRate(): number | null {
 export async function myrPerUsd(
   fetchImpl: typeof fetch = fetch,
 ): Promise<number | null> {
-  const rates = await usdBaseRates(fetchImpl);
-  const primary = rates?.['MYR'];
-  if (typeof primary === 'number' && primary > 0) return primary;
-  const secondary = await fromFrankfurter(fetchImpl);
-  if (secondary != null) return secondary;
+  const table = await fxTable(fetchImpl);
+  const live = table?.['MYR'];
+  if (typeof live === 'number' && live > 0) return live;
   return pinnedRate();
 }

@@ -17,7 +17,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { formatSol, formatUsdc } from "@/lib/solana/balances";
+import { FIAT_CURRENCIES, formatSol, formatUsdc, usdcToFiat } from "@/lib/solana/balances";
 import { LinkWalletButton } from "@/components/market/LinkWalletButton";
 import { Modal } from "@/components/market/Modal";
 
@@ -25,6 +25,7 @@ interface BalancesResponse {
   wallet: string;
   solLamports: number;
   usdcUnits: number;
+  fx: Record<string, number> | null;
   error?: string;
 }
 
@@ -34,12 +35,109 @@ function short(address: string): string {
 
 type View = "overview" | "deposit" | "settings";
 
+/**
+ * Balance block with the fiat toggle. Fiat figures are ESTIMATES
+ * (USDC≈USD at live FX) — rendered with ≈ and falling back to the exact
+ * USDC figure whenever the selected rate is missing.
+ */
+function FiatBalance({
+  usdcUnits,
+  solLamports,
+  fx,
+  fiatOn,
+  fiatCode,
+  onToggleFiat,
+  onPickFiat,
+}: {
+  usdcUnits: number;
+  solLamports: number;
+  fx: Record<string, number> | null;
+  fiatOn: boolean;
+  fiatCode: string;
+  onToggleFiat: () => void;
+  onPickFiat: (code: string) => void;
+}) {
+  const fiat = fiatOn ? usdcToFiat(usdcUnits, fx?.[fiatCode]) : null;
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] text-muted">Balance</span>
+        <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted">
+          Display in Fiat
+          <button
+            type="button"
+            role="switch"
+            aria-checked={fiatOn}
+            aria-label="Display in Fiat"
+            onClick={onToggleFiat}
+            className={`relative h-5 w-9 rounded-full transition-colors ${
+              fiatOn ? "bg-accent" : "bg-line-strong"
+            }`}
+          >
+            <span
+              aria-hidden
+              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
+                fiatOn ? "left-[18px]" : "left-0.5"
+              }`}
+            />
+          </button>
+        </label>
+      </div>
+      {fiatOn && (
+        <select
+          value={fiatCode}
+          onChange={(e) => onPickFiat(e.target.value)}
+          aria-label="Fiat currency"
+          className="w-full rounded-xl border border-line-strong bg-background px-3 py-2 text-sm text-foreground focus:outline-none"
+        >
+          {FIAT_CURRENCIES.map((c) => (
+            <option key={c.code} value={c.code}>
+              {c.code} — {c.name}
+            </option>
+          ))}
+        </select>
+      )}
+      <span className="text-2xl font-bold tabular-nums tracking-tight">
+        {fiat != null ? (
+          <>
+            ≈ {fiat} <span className="text-sm font-semibold text-muted">{fiatCode}</span>
+          </>
+        ) : (
+          <>
+            {formatUsdc(usdcUnits)}{" "}
+            <span className="text-sm font-semibold text-muted">USDC</span>
+          </>
+        )}
+      </span>
+      {fiat != null && (
+        <span className="text-[11px] text-muted">
+          {formatUsdc(usdcUnits)} USDC exact
+        </span>
+      )}
+      <span className="text-[11px] text-muted">
+        {formatSol(solLamports)} SOL for fees
+      </span>
+    </div>
+  );
+}
+
 export function WalletMenu() {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<View>("overview");
   const [tab, setTab] = useState<"overview" | "settings">("overview");
   const [balance, setBalance] = useState<BalancesResponse | null>(null);
   const [copied, setCopied] = useState(false);
+  const [fiatOn, setFiatOn] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.localStorage.getItem("flexsoar-fiat") === "1",
+  );
+  const [fiatCode, setFiatCode] = useState(
+    () =>
+      (typeof window !== "undefined" &&
+        window.localStorage.getItem("flexsoar-fiat-code")) ||
+      "MYR",
+  );
 
   useEffect(() => {
     let live = true;
@@ -75,6 +173,26 @@ export function WalletMenu() {
   function switchTab(next: "overview" | "settings") {
     setTab(next);
     setView(next);
+  }
+
+  function toggleFiat() {
+    setFiatOn((v) => {
+      try {
+        window.localStorage.setItem("flexsoar-fiat", v ? "0" : "1");
+      } catch {
+        // Private mode — preference just won't persist.
+      }
+      return !v;
+    });
+  }
+
+  function pickFiat(code: string) {
+    setFiatCode(code);
+    try {
+      window.localStorage.setItem("flexsoar-fiat-code", code);
+    } catch {
+      // Private mode — preference just won't persist.
+    }
   }
 
   return (
@@ -133,18 +251,19 @@ export function WalletMenu() {
 
             {balance ? (
               <>
+                {view === "overview" && tab === "overview" && balance && (
+                  <FiatBalance
+                    usdcUnits={balance.usdcUnits}
+                    solLamports={balance.solLamports}
+                    fx={balance.fx}
+                    fiatOn={fiatOn}
+                    fiatCode={fiatCode}
+                    onToggleFiat={toggleFiat}
+                    onPickFiat={pickFiat}
+                  />
+                )}
                 {view === "overview" && tab === "overview" && (
                   <>
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[11px] text-muted">Balance</span>
-                      <span className="text-2xl font-bold tabular-nums tracking-tight">
-                        {formatUsdc(balance.usdcUnits)}{" "}
-                        <span className="text-sm font-semibold text-muted">USDC</span>
-                      </span>
-                      <span className="text-[11px] text-muted">
-                        {formatSol(balance.solLamports)} SOL for fees
-                      </span>
-                    </div>
                     <button
                       type="button"
                       onClick={() => setView("deposit")}
