@@ -10,7 +10,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Suspense } from "react";
 import { ToastProvider } from "@/components/ui/Toast";
-import { Button } from "@/components/ui/Button";
+import { AuthButtons } from "@/components/market/AuthButtons";
 import type { Notification as ContractNotification } from "@/lib/api/contract";
 import type { Json } from "@/lib/db/types";
 import { getUser, listNotifications } from "@/lib/api/contract";
@@ -195,7 +195,7 @@ export default async function MarketLayout({
                     priority
                   />
                 </Link>
-                <div className="mx-auto min-w-0 w-full max-w-sm flex-1">
+                <div className="mx-auto min-w-0 w-full max-w-xl flex-1">
                   <Suspense>
                     <SearchInput />
                   </Suspense>
@@ -215,9 +215,7 @@ export default async function MarketLayout({
                       <UserMenu handle={me.handle} />
                     </>
                   ) : (
-                    <Button href="/sign-in" size="sm" variant="secondary" className="rounded-lg">
-                      Sign in
-                    </Button>
+                    <AuthButtons />
                   )}
                 </div>
           </div>

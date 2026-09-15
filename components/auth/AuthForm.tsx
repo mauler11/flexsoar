@@ -17,6 +17,7 @@ export function AuthForm({ mode, next = "/" }: AuthFormProps) {
   const [activeTab, setActiveTab] = useState<"sign-in" | "sign-up">(mode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [handle, setHandle] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -29,6 +30,12 @@ export function AuthForm({ mode, next = "/" }: AuthFormProps) {
 
   const isValidEmail = (email: string) =>
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+  // Username seed for sign-up: sent as user_metadata.handle, normalised and
+  // uniqued server-side by lib/db/provision.ts (collisions get a suffix,
+  // never rejected). Google OAuth can't carry it (no metadata channel), so
+  // Google sign-ups keep the provisioned default from the email local part.
+  const isValidHandle = (value: string) => /^[a-zA-Z0-9_]{3,24}$/.test(value);
 
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
@@ -67,6 +74,9 @@ export function AuthForm({ mode, next = "/" }: AuthFormProps) {
     formData.set("mode", activeTab);
     formData.set("email", email);
     formData.set("next", next);
+    if (activeTab === "sign-up" && isValidHandle(handle)) {
+      formData.set("handle", handle);
+    }
 
     try {
       const response = await fetch(`/${activeTab}`, {
@@ -230,7 +240,37 @@ export function AuthForm({ mode, next = "/" }: AuthFormProps) {
           error={error || undefined}
         />
 
-        {(passwordAuthEnabled || activeTab === "sign-up") && (
+        {isSignUp && (
+          <div className="flex flex-col gap-1">
+            <label
+              htmlFor="auth-handle"
+              className="text-[11px] font-semibold uppercase tracking-wide text-muted"
+            >
+              Username
+            </label>
+            <div className="flex items-center rounded-xl border border-line-strong bg-raised px-3 transition-colors focus-within:border-muted hover:border-muted">
+              <span aria-hidden className="text-[13px] font-semibold text-muted">
+                @
+              </span>
+              <input
+                id="auth-handle"
+                type="text"
+                value={handle}
+                onChange={(e) => setHandle(e.target.value.replace(/[^a-zA-Z0-9_]/g, ""))}
+                placeholder="username"
+                autoComplete="username"
+                maxLength={24}
+                aria-describedby="auth-handle-hint"
+                className="w-full bg-transparent px-1 py-2 text-[13px] text-foreground placeholder:text-muted/50 focus:outline-none"
+              />
+            </div>
+            <p id="auth-handle-hint" className="text-[11px] text-muted">
+              3–24 letters, numbers, underscores. Taken names get a suffix.
+            </p>
+          </div>
+        )}
+
+        {passwordAuthEnabled && (
           <div className="relative">
             <Input
               label="Password"

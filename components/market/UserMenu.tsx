@@ -54,7 +54,7 @@ export function UserMenu({ handle }: { handle: string }) {
                 type="submit"
                 className="w-full rounded-lg px-3 py-2 text-left text-sm text-muted transition hover:bg-background hover:text-foreground"
               >
-                Sign out
+                Logout
               </button>
             </form>
           </div>

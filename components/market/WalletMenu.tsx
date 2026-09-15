@@ -81,9 +81,9 @@ export function WalletMenu() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1.5 rounded-xl border border-line-strong bg-raised px-2.5 py-1 text-xs font-semibold text-foreground transition hover:border-muted"
+        className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-[#0B0B0B] transition hover:brightness-110"
       >
-        <span aria-hidden>⤓</span> Deposit
+        Wallet
       </button>
 
       {open && (
