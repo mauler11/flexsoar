@@ -22,6 +22,7 @@ import { PublicKey } from '@solana/web3.js';
 import { createServerSupabase, createServiceSupabase } from '@/lib/supabase/server';
 import { getListing } from '@/lib/api/contract';
 import { myrPerUsd } from '@/lib/solana/fx';
+import { maxTradeUnits, rpcUrl, treasuryAddress, usdcMint } from '@/lib/solana/config';
 import { issueQuote } from '@/lib/solana/quotes';
 import {
   associatedTokenAddress,
@@ -31,30 +32,6 @@ import {
 } from '@/lib/solana/sdk';
 
 export const dynamic = 'force-dynamic';
-
-function maxTradeUnits(): number {
-  const raw = Number(process.env['SOLANA_MAX_TRADE_UNITS'] ?? 500_000_000);
-  return Number.isInteger(raw) && raw > 0 ? raw : 500_000_000;
-}
-
-function usdcMint(): string {
-  const configured = process.env['SOLANA_USDC_MINT']?.trim();
-  if (configured) return configured;
-  return (process.env['SOLANA_CLUSTER'] ?? 'devnet') === 'mainnet-beta'
-    ? 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
-    : '4zMMC9srt5Ri5X14GAgXhaHii3L6VUHdfBMqBGE3ter';
-}
-
-function rpcUrl(): string | null {
-  const key = process.env['HELIUS_API_KEY'];
-  if (!key) return null;
-  const cluster = process.env['SOLANA_CLUSTER'] ?? 'devnet';
-  const host =
-    cluster === 'mainnet-beta'
-      ? 'https://mainnet.helius-rpc.com'
-      : 'https://devnet.helius-rpc.com';
-  return `${host}/?api-key=${key}`;
-}
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const supabase = await createServerSupabase();
@@ -78,7 +55,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       { status: 501 },
     );
   }
-  const treasuryWallet = process.env['SOLANA_TREASURY']?.trim() ?? '';
+  const treasuryWallet = treasuryAddress();
+  if (!treasuryWallet) {
+    return NextResponse.json(
+      { error: 'treasury not configured (SOLANA_TREASURY)' },
+      { status: 501 },
+    );
+  }
   try {
     new PublicKey(treasuryWallet);
   } catch {
@@ -156,10 +139,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const rpc = rpcUrl();
-  if (!rpc) {
+  let rpc: string;
+  try {
+    rpc = rpcUrl();
+  } catch (thrown) {
     return NextResponse.json(
-      { error: 'HELIUS_API_KEY is not set. Add it to .env.local — see DEPS.md.' },
+      { error: thrown instanceof Error ? thrown.message : 'rpc not configured' },
       { status: 501 },
     );
   }

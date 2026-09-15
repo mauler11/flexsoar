@@ -12,6 +12,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { base58Decode, base58Encode, decodeAddress } from '../lib/solana/base58';
+import { formatSol, formatUsdc, sumUsdcUnits } from '../lib/solana/balances';
 import { myrPerUsd } from '../lib/solana/fx';
 import { issueQuote, splitFee, verifyQuote } from '../lib/solana/quotes';
 import { verifyWalletLink, linkMessage } from '../lib/solana/wallet';
@@ -391,5 +392,34 @@ describe('myrPerUsd — provider chain with operator pin last', () => {
     await expect(myrPerUsd(deadFetch)).resolves.toBeNull();
     process.env.SOLANA_MYR_PER_USD = 'not-a-number';
     await expect(myrPerUsd(deadFetch)).resolves.toBeNull();
+  });
+});
+
+describe('balances — mint-filtered sums and display formatting', () => {
+  const MINT = 'USDC111111111111111111111111111111111111111';
+
+  function entry(mint: string, amount: string, decimals = 6) {
+    return {
+      account: { data: { parsed: { info: { mint, tokenAmount: { amount, decimals } } } } },
+    };
+  }
+
+  it('sums only the configured mint across accounts', () => {
+    expect(
+      sumUsdcUnits(
+        [entry(MINT, '1000000'), entry(MINT, '250000'), entry('NOPE', '999999999')],
+        MINT,
+      ),
+    ).toEqual({ units: 1250000, decimals: 6 });
+    expect(sumUsdcUnits([], MINT)).toEqual({ units: 0, decimals: null });
+  });
+
+  it('formats USDC without trailing zeros and SOL at fee scale', () => {
+    expect(formatUsdc(1_250_000)).toBe('1.25');
+    expect(formatUsdc(1_000_000)).toBe('1');
+    expect(formatUsdc(3)).toBe('0.000003');
+    expect(formatUsdc(-5)).toBe('0');
+    expect(formatSol(8_000)).toBe('0.000008');
+    expect(formatSol(2_500_000_000)).toBe('2.5');
   });
 });

@@ -22,6 +22,7 @@ import { Sidebar, type SidebarItem } from "@/components/market/Sidebar";
 import { SiteFooter } from "@/components/market/SiteFooter";
 import { OnboardingTour } from "@/components/market/OnboardingTour";
 import { NotificationBell } from "@/components/market/NotificationBell";
+import { WalletBalance } from "@/components/market/WalletBalance";
 
 interface NotificationPayload {
   sku?: { brand?: string; model?: string; colorway?: string; size_us?: number };
@@ -221,6 +222,7 @@ export default async function MarketLayout({
                       >
                         {(me.xp_total ?? 0).toLocaleString()} XP
                       </Link>
+                      <WalletBalance />
                       <form action={signOut}>
                         <button
                           type="submit"

@@ -41,20 +41,7 @@ export interface VerifyFailure {
   reason: string;
 }
 
-function rpcUrl(): string {
-  const key = process.env['HELIUS_API_KEY'];
-  if (!key) {
-    throw new Error(
-      'HELIUS_API_KEY is not set. Add it to .env.local — see DEPS.md.',
-    );
-  }
-  const cluster = process.env['SOLANA_CLUSTER'] ?? 'devnet';
-  const host =
-    cluster === 'mainnet-beta'
-      ? 'https://mainnet.helius-rpc.com'
-      : 'https://devnet.helius-rpc.com';
-  return `${host}/?api-key=${key}`;
-}
+import { rpcUrl } from './config';
 
 interface TokenBalance {
   accountIndex: number;

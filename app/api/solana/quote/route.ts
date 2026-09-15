@@ -18,15 +18,10 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { createServerSupabase, createServiceSupabase } from '@/lib/supabase/server';
 import { getListing } from '@/lib/api/contract';
 import { myrPerUsd } from '@/lib/solana/fx';
+import { maxTradeUnits } from '@/lib/solana/config';
 import { issueQuote, splitFee } from '@/lib/solana/quotes';
 
 export const dynamic = 'force-dynamic';
-
-/** Pre-audit per-trade cap, USDC base units. Mirrors MAX_PRICE_BASE_UNITS. */
-function maxTradeUnits(): number {
-  const raw = Number(process.env['SOLANA_MAX_TRADE_UNITS'] ?? 500_000_000);
-  return Number.isInteger(raw) && raw > 0 ? raw : 500_000_000;
-}
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const supabase = await createServerSupabase();

@@ -19,6 +19,7 @@ import { Transaction } from "@solana/web3.js";
 import { Button } from "@/components/ui/Button";
 import { Banner } from "@/components/market/Banner";
 import { LinkWalletButton, type InjectedSolana } from "@/components/market/LinkWalletButton";
+import { WalletBalance } from "@/components/market/WalletBalance";
 import type { Quote } from "@/lib/solana/quotes";
 
 interface BuildTxResponse {
@@ -153,6 +154,10 @@ export function SolanaBuyPanel({
         <span>or pay with USDC · {priceCents > 0 ? "devnet" : "devnet"}</span>
         <span className="h-px flex-1 bg-line" />
       </div>
+      <WalletBalance
+        label="Wallet balance"
+        className="rounded-lg border border-line-strong px-2.5 py-1 text-xs font-semibold tabular-nums text-foreground"
+      />
       {needsLink ? (
         <LinkWalletButton
           cta="Link wallet, then buy"

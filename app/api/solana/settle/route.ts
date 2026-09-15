@@ -23,21 +23,10 @@ import { NextResponse } from 'next/server';
 import { createServerSupabase, createServiceSupabase } from '@/lib/supabase/server';
 import { getListing, purchaseCardSplit } from '@/lib/api/contract';
 import { verifyQuote, type Quote } from '@/lib/solana/quotes';
+import { treasuryAddress, usdcMint } from '@/lib/solana/config';
 import { verifyBuyTransaction } from '@/lib/solana/verify';
 
 export const dynamic = 'force-dynamic';
-
-function usdcMint(): string {
-  const configured = process.env['SOLANA_USDC_MINT']?.trim();
-  if (configured) return configured;
-  return (process.env['SOLANA_CLUSTER'] ?? 'devnet') === 'mainnet-beta'
-    ? 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
-    : '4zMMC9srt5Ri5X14GAgXhaHii3L6VUHdfBMqBGE3ter';
-}
-
-function treasury(): string | null {
-  return process.env['SOLANA_TREASURY']?.trim() || null;
-}
 
 export async function POST(request: Request): Promise<NextResponse> {
   const supabase = await createServerSupabase();
@@ -89,7 +78,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (!sellerWallet || !buyerWallet) {
     return NextResponse.json({ error: 'wallets unlinked mid-trade' }, { status: 409 });
   }
-  const treasuryWallet = treasury();
+  const treasuryWallet = treasuryAddress();
   if (!treasuryWallet) {
     return NextResponse.json({ error: 'treasury not configured' }, { status: 500 });
   }
