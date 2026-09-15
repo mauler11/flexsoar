@@ -13,13 +13,10 @@
  */
 "use client";
 
-import { useState, useTransition } from "react";
-import { createCheckoutAction } from "@/app/(market)/actions";
-import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Banner } from "@/components/market/Banner";
 import { OrderPoll } from "@/components/market/OrderPoll";
-import { SolanaBuyPanelRoot } from "@/components/market/PrivyBuyBridge";
+import { BuyModal } from "@/components/market/BuyModal";
 import { FiatAmount } from "@/components/market/Fiat";
 
 export interface BuyPanelListing {
@@ -57,9 +54,6 @@ export function BuyPanel({
   checkoutActive,
   firstSalePending,
 }: BuyPanelProps) {
-  const [pending, startTransition] = useTransition();
-  const [unlocked, setUnlocked] = useState(false);
-
   if (checkoutActive) {
     return (
       <OrderPoll
@@ -70,15 +64,9 @@ export function BuyPanel({
     );
   }
 
-  const isPublic = true;
-  const buyable = isPublic;
   const underOracle =
     listing.oracleValueCents != null &&
     listing.priceCents < listing.oracleValueCents * 0.85;
-
-  function checkout() {
-    startTransition(() => createCheckoutAction(listing.id, 0));
-  }
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-line bg-raised p-4 shadow-soft">
@@ -114,16 +102,7 @@ export function BuyPanel({
         </Banner>
       )}
 
-      <Button
-        type="button"
-        size="lg"
-        disabled={!buyable || pending}
-        onClick={checkout}
-        className="py-3 text-base"
-      >
-        {pending ? "Redirecting…" : buyable ? "Buy Now" : "Sign in"}
-      </Button>
-      <SolanaBuyPanelRoot listingId={listing.id} priceCents={listing.priceCents} />
+      <BuyModal listing={listing} />
       <p className="text-[11px] text-muted">
         Sale is recorded when payment settles — never by this page.
       </p>

@@ -20,6 +20,7 @@ import Link from "next/link";
 import { FIAT_CURRENCIES, formatFiatFromUsd, formatSol, formatUsdc } from "@/lib/solana/balances";
 import { LinkWalletButton } from "@/components/market/LinkWalletButton";
 import { EmbeddedWalletSection } from "@/components/market/EmbeddedWalletSection";
+import { SendDialog } from "@/components/market/SendDialog";
 import { Modal } from "@/components/market/Modal";
 import { useFiat } from "@/components/market/Fiat";
 
@@ -27,6 +28,7 @@ interface BalancesResponse {
   wallet: string;
   solLamports: number;
   usdcUnits: number;
+  usdcMint: string;
   fx: Record<string, number> | null;
   error?: string;
 }
@@ -35,7 +37,7 @@ function short(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-type View = "overview" | "deposit" | "settings";
+type View = "overview" | "deposit" | "send" | "settings";
 
 /**
  * Balance block with the site-wide fiat controls. Reads the shared display
@@ -176,7 +178,7 @@ export function WalletMenu() {
           <div className="flex flex-col gap-4 p-5">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-bold tracking-tight">
-                {view === "deposit" ? (
+                {view === "deposit" || view === "send" ? (
                   <button
                     type="button"
                     onClick={() => setView(tab)}
@@ -186,7 +188,7 @@ export function WalletMenu() {
                     ‹
                   </button>
                 ) : null}
-                {view === "deposit" ? "Deposit" : "Wallet"}
+                {view === "deposit" ? "Deposit" : view === "send" ? "Send" : "Wallet"}
               </h2>
               <button
                 type="button"
@@ -198,7 +200,7 @@ export function WalletMenu() {
               </button>
             </div>
 
-            {view !== "deposit" && (
+            {view !== "deposit" && view !== "send" && (
               <div className="grid grid-cols-2 gap-1 rounded-xl bg-background p-1 text-sm font-semibold">
                 {(["overview", "settings"] as const).map((t) => (
                   <button
@@ -225,7 +227,7 @@ export function WalletMenu() {
                   />
                 )}
                 {view === "overview" && tab === "overview" && (
-                  <>
+                  <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
                       onClick={() => setView("deposit")}
@@ -233,7 +235,23 @@ export function WalletMenu() {
                     >
                       Deposit
                     </button>
-                  </>
+                    <button
+                      type="button"
+                      onClick={() => setView("send")}
+                      className="rounded-xl border border-line-strong bg-background px-4 py-2.5 text-sm font-semibold transition hover:border-muted"
+                    >
+                      Send
+                    </button>
+                  </div>
+                )}
+
+                {view === "send" && balance?.usdcMint && (
+                  <SendDialog
+                    walletAddress={balance.wallet}
+                    usdcMint={balance.usdcMint}
+                    usdcUnits={balance.usdcUnits}
+                    onClose={() => setView("overview")}
+                  />
                 )}
 
                 {view === "deposit" && (

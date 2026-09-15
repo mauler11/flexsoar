@@ -20,6 +20,7 @@ import {
   firstSolanaWallet,
   walletForAddress,
 } from '../lib/solana/privy';
+import { TRANSFER_DISCRIMINATOR, buildUsdcTransferIx } from '../lib/solana/transfers';
 import { issueQuote, splitFee, verifyQuote } from '../lib/solana/quotes';
 import { verifyWalletLink, linkMessage } from '../lib/solana/wallet';
 import { verifyBuyTransaction } from '../lib/solana/verify';
@@ -534,5 +535,30 @@ describe('privy adapters — structural narrowing, signature shapes', () => {
     expect(extractSignatureBytes('!!!not-base58!!!\n')).toBeNull();
     expect(extractSignatureBytes({ nope: 1 })).toBeNull();
     expect(extractSignatureBytes(null)).toBeNull();
+  });
+});
+
+describe('transfers — SPL Token Transfer layout', () => {
+  it('keys [source, dest, owner], data [0x01, u64 LE amount]', async () => {
+    const { Keypair } = await import('@solana/web3.js');
+    const source = Keypair.generate().publicKey.toBase58();
+    const dest = Keypair.generate().publicKey.toBase58();
+    const owner = Keypair.generate().publicKey.toBase58();
+    const ix = buildUsdcTransferIx({ sourceAta: source, destAta: dest, owner, amountUnits: 1_250_000 });
+    expect(ix.programId.toBase58()).toBe('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+    expect(ix.keys.map((k) => k.pubkey.toBase58())).toEqual([source, dest, owner]);
+    expect(ix.keys[0].isSigner).toBe(false);
+    expect(ix.keys[2].isSigner).toBe(true);
+    expect(ix.data[0]).toBe(TRANSFER_DISCRIMINATOR);
+    expect(ix.data.length).toBe(9);
+    expect(ix.data.readBigUInt64LE(1).toString()).toBe('1250000');
+  });
+
+  it('rejects non-positive amounts before anything is built', async () => {
+    const { Keypair } = await import('@solana/web3.js');
+    const any = Keypair.generate().publicKey.toBase58();
+    expect(() =>
+      buildUsdcTransferIx({ sourceAta: any, destAta: any, owner: any, amountUnits: 0 }),
+    ).toThrow(/positive integer/);
   });
 });
