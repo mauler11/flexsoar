@@ -20,6 +20,7 @@ import Link from "next/link";
 import { FIAT_CURRENCIES, formatFiatFromUsd, formatSol, formatUsdc } from "@/lib/solana/balances";
 import { LinkWalletButton } from "@/components/market/LinkWalletButton";
 import { EmbeddedWalletSection } from "@/components/market/EmbeddedWalletSection";
+import { FundingOptions } from "@/components/market/FundingOptions";
 import { SendDialog } from "@/components/market/SendDialog";
 import { Modal } from "@/components/market/Modal";
 import { useFiat } from "@/components/market/Fiat";
@@ -288,6 +289,7 @@ export function WalletMenu() {
                       Send only USDC on Solana to this address. Anything else
                       may be unrecoverable.
                     </p>
+                    <FundingOptions address={balance.wallet} />
                     <div className="flex flex-col gap-2 rounded-xl border border-line bg-background p-3">
                       <span className="text-xs font-semibold">Use a different wallet</span>
                       <LinkWalletButton cta="Link wallet" />

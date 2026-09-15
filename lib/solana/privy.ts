@@ -16,6 +16,29 @@ import { base58Decode } from './base58';
 /** Target chain for embedded sends. Devnet until mainnet launch. */
 export const SOLANA_CHAIN = 'solana:devnet';
 
+/**
+ * Parked Privy funding rails (method-picker deposits + card on-ramp).
+ * Nothing below runs unless NEXT_PUBLIC_ENABLE_PRIVY_CHECKOUT === '1':
+ * the current buy/deposit flows stay live until funding proves in sandbox.
+ */
+export function isPrivyCheckoutEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_ENABLE_PRIVY_CHECKOUT === '1';
+}
+
+/**
+ * On-ramp destination: Solana mainnet USDC. Providers do not deliver to
+ * testnets (Stripe's sandbox runs against mainnet chain IDs with play
+ * money), so funding targets mainnet even while trading proves on devnet —
+ * the address is identical on both clusters, only the funds' reality
+ * differs. Flip PRIVY_FUNDING_ENV to production at launch.
+ */
+export const FUNDING_CHAIN = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
+export const FUNDING_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+export const FUNDING_ENV =
+  process.env.NEXT_PUBLIC_PRIVY_FUNDING_ENV === 'production' ? 'production' : 'sandbox';
+/** Base fiat coverage (no setup). MYR arrives with the Meld KYB. */
+export const FUNDING_FIAT_ASSETS = ['usd', 'eur'] as const;
+
 /** A Solana wallet speaking the wallet-standard method shapes. */
 export interface StandardSolanaWallet {
   address: string;

@@ -21,6 +21,12 @@ import {
   walletForAddress,
 } from '../lib/solana/privy';
 import { TRANSFER_DISCRIMINATOR, buildUsdcTransferIx } from '../lib/solana/transfers';
+import {
+  FUNDING_CHAIN,
+  FUNDING_USDC_MINT,
+  isPrivyCheckoutEnabled,
+} from '../lib/solana/privy';
+import { usdcMint } from '../lib/solana/config';
 import { issueQuote, splitFee, verifyQuote } from '../lib/solana/quotes';
 import { verifyWalletLink, linkMessage } from '../lib/solana/wallet';
 import { verifyBuyTransaction } from '../lib/solana/verify';
@@ -560,5 +566,36 @@ describe('transfers — SPL Token Transfer layout', () => {
     expect(() =>
       buildUsdcTransferIx({ sourceAta: any, destAta: any, owner: any, amountUnits: 0 }),
     ).toThrow(/positive integer/);
+  });
+});
+
+describe('privy funding rails — parked behind the flag', () => {
+  const flag = process.env.NEXT_PUBLIC_ENABLE_PRIVY_CHECKOUT;
+  const cluster = process.env.SOLANA_CLUSTER;
+  const mintEnv = process.env.SOLANA_USDC_MINT;
+
+  afterEach(() => {
+    if (flag === undefined) delete process.env.NEXT_PUBLIC_ENABLE_PRIVY_CHECKOUT;
+    else process.env.NEXT_PUBLIC_ENABLE_PRIVY_CHECKOUT = flag;
+    if (cluster === undefined) delete process.env.SOLANA_CLUSTER;
+    else process.env.SOLANA_CLUSTER = cluster;
+    if (mintEnv === undefined) delete process.env.SOLANA_USDC_MINT;
+    else process.env.SOLANA_USDC_MINT = mintEnv;
+  });
+
+  it('stays off unless explicitly enabled', () => {
+    delete process.env.NEXT_PUBLIC_ENABLE_PRIVY_CHECKOUT;
+    expect(isPrivyCheckoutEnabled()).toBe(false);
+    process.env.NEXT_PUBLIC_ENABLE_PRIVY_CHECKOUT = '1';
+    expect(isPrivyCheckoutEnabled()).toBe(true);
+  });
+
+  it('funding mint matches the mainnet verifier mint', () => {
+    // If these ever disagree, mainnet on-ramp funds would fail settle's
+    // mint check while looking perfectly healthy in the modal.
+    delete process.env.SOLANA_USDC_MINT;
+    process.env.SOLANA_CLUSTER = 'mainnet-beta';
+    expect(usdcMint()).toBe(FUNDING_USDC_MINT);
+    expect(FUNDING_CHAIN).toBe('solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
   });
 });
