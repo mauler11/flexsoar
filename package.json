@@ -13,6 +13,7 @@
         "@aws-sdk/client-s3": "^3.1107.0",
         "@aws-sdk/s3-request-presigner": "^3.1107.0",
         "@coral-xyz/anchor": "^0.32.1",
+        "@privy-io/react-auth": "^3.42.0",
         "@solana/web3.js": "^1.99.0",
         "@supabase/ssr": "^0.12.4",
         "@supabase/supabase-js": "^2.112.2",
