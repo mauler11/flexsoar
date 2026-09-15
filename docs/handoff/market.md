@@ -1178,3 +1178,21 @@ are answered: (1) key custody for embedded addresses (MPC provider vs
 current connect model — custody + regulatory implications), (2) SOL vs
 USDC as the traded asset (program settles USDC today; SOL means new
 program logic, quote math, and verifier rules).
+
+## 2026-09-15 — Privy card on-ramp evaluation (docs only, no code)
+
+Human asked for Courtyard-style "Buy with Card" via Privy instead of
+Stripe checkout. From Privy's own docs (`useFiatOnramp`/`useAddFunds`):
+feasible but NOT a Stripe replacement today. (1) MYR card buys work ONLY
+via Meld, which requires completing KYB on Privy's Funding page — base
+no-setup coverage is USD/EUR/AUD/BRL (Stripe/MoonPay); the Stripe embedded
+path is US+EU only, never MY. (2) No testnet delivery: sandbox tests run
+against mainnet chain IDs, so the on-ramp CANNOT be e2e-tested on devnet
+like everything else. (3) Two-step, not atomic: on-ramp funds the wallet
+(minutes, provider-dependent), then our buy spends it — needs funding-
+status UX, not a single button. (4) Provider spreads (1–4%+) pass to the
+user; Privy itself charges no on-ramp fee. (5) Sellers still need Stripe
+Connect regardless — on-ramp only ever replaces the BUYER card path.
+Recommendation stands: prove embedded e2e first, keep Stripe buyer
+checkout until the on-ramp proves in sandbox+mainnet, start Meld KYB in
+parallel (paperwork, not code — it's the long pole).
