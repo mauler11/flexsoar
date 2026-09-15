@@ -1,10 +1,14 @@
 /**
  * components/market/WalletMenu.tsx
  *
- * Header wallet button + dropdown (frontend prototype of the embedded-wallet
- * UX): shows the linked address with copy, live USDC/SOL figures, and a
- * dashboard manage link — or a link-wallet CTA when unlinked. Every number
- * shown is REAL (GET /api/solana/balances, same source as WalletBalance);
+ * Header wallet button + modal (frontend prototype of the embedded-wallet
+ * UX, Polymarket-arranged, dark theme kept): balance display sits left of
+ * the button in the header (WalletBalance); the button opens a modal with
+ * Overview / Settings tabs, a Deposit sub-view (currency + network shown
+ * as FIXED rows — USDC on Solana is what the backend settles, so a
+ * selector would fake a choice that doesn't exist), and no QR code.
+ * No "Buy Crypto" on-ramp: there is none, and a dead button is worse than
+ * a missing one. Every number shown is REAL (GET /api/solana/balances);
  * nothing here is mocked. Address provisioning for new users (embedded
  * key management) and any SOL-vs-USDC settlement change are backend
  * decisions explicitly out of scope — see docs/handoff/market.md.
@@ -27,8 +31,12 @@ function short(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
+type View = "overview" | "deposit" | "settings";
+
 export function WalletMenu() {
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState<View>("overview");
+  const [tab, setTab] = useState<"overview" | "settings">("overview");
   const [balance, setBalance] = useState<BalancesResponse | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -41,11 +49,16 @@ export function WalletMenu() {
         const body = (await res.json()) as BalancesResponse;
         if (live && typeof body.usdcUnits === "number") setBalance(body);
       } catch {
-        // Dropdown simply shows the unlinked state on failure.
+        // Modal falls back to the unlinked state on failure.
       }
     }
     if (open && !balance) load();
   }, [open, balance]);
+
+  function close() {
+    setOpen(false);
+    setView("overview");
+  }
 
   async function copy() {
     if (!balance) return;
@@ -58,77 +71,169 @@ export function WalletMenu() {
     }
   }
 
+  function switchTab(next: "overview" | "settings") {
+    setTab(next);
+    setView(next);
+  }
+
   return (
-    <div className="relative">
+    <>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
+        onClick={() => setOpen(true)}
         className="inline-flex items-center gap-1.5 rounded-xl border border-line-strong bg-raised px-2.5 py-1 text-xs font-semibold text-foreground transition hover:border-muted"
       >
-        <span aria-hidden>◎</span>
-        {balance ? `${formatUsdc(balance.usdcUnits)} USDC` : "Wallet"}
+        <span aria-hidden>⤓</span> Deposit
       </button>
 
       {open && (
-        <>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <button
             type="button"
-            aria-label="Close wallet menu"
-            onClick={() => setOpen(false)}
-            className="fixed inset-0 z-40 cursor-default bg-transparent"
+            aria-label="Close wallet"
+            onClick={close}
+            className="absolute inset-0 cursor-default bg-black/70"
           />
-          <div className="absolute right-0 z-50 mt-2 flex w-72 flex-col gap-3 rounded-2xl border border-line bg-raised p-4 shadow-soft">
-            {balance ? (
-              <>
-                <div className="flex flex-col gap-1">
-                  <span className="text-[10px] uppercase tracking-wide text-muted">
-                    Deposit address (Solana)
-                  </span>
+          <div className="relative flex w-full max-w-sm flex-col gap-4 rounded-2xl border border-line bg-raised p-5 shadow-soft">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-bold tracking-tight">
+                {view === "deposit" ? (
                   <button
                     type="button"
-                    onClick={copy}
-                    title="Copy address"
-                    className="rounded-lg border border-line-strong bg-background px-2 py-1.5 font-mono text-xs text-foreground transition hover:border-muted"
+                    onClick={() => setView(tab)}
+                    className="mr-2 text-muted transition hover:text-foreground"
+                    aria-label="Back to wallet"
                   >
-                    {copied ? "Copied ✓" : short(balance.wallet)}
+                    ‹
                   </button>
-                </div>
-                <div className="flex items-baseline justify-between text-sm">
-                  <span className="text-muted">USDC</span>
-                  <span className="font-semibold tabular-nums">
-                    {formatUsdc(balance.usdcUnits)}
-                  </span>
-                </div>
-                <div className="flex items-baseline justify-between text-sm">
-                  <span className="text-muted">SOL (fees)</span>
-                  <span className="font-semibold tabular-nums">
-                    {formatSol(balance.solLamports)}
-                  </span>
-                </div>
-                <p className="text-[11px] leading-snug text-muted">
-                  Your keys, your coins — FlexSoar never holds these funds.
-                  Trades settle wallet-to-wallet on-chain.
-                </p>
-                <Link
-                  href="/dashboard"
-                  onClick={() => setOpen(false)}
-                  className="text-center text-xs font-semibold text-accent hover:underline"
-                >
-                  Manage in Dashboard →
-                </Link>
+                ) : null}
+                {view === "deposit" ? "Deposit" : "Wallet"}
+              </h2>
+              <button
+                type="button"
+                onClick={close}
+                aria-label="Close"
+                className="text-lg leading-none text-muted transition hover:text-foreground"
+              >
+                ×
+              </button>
+            </div>
+
+            {view !== "deposit" && (
+              <div className="grid grid-cols-2 gap-1 rounded-xl bg-background p-1 text-sm font-semibold">
+                {(["overview", "settings"] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => switchTab(t)}
+                    className={`rounded-lg px-3 py-1.5 capitalize transition ${
+                      tab === t ? "bg-raised text-foreground" : "text-muted hover:text-foreground"
+                    }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {balance ? (
+              <>
+                {view === "overview" && tab === "overview" && (
+                  <>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[11px] text-muted">Balance</span>
+                      <span className="text-2xl font-bold tabular-nums tracking-tight">
+                        {formatUsdc(balance.usdcUnits)}{" "}
+                        <span className="text-sm font-semibold text-muted">USDC</span>
+                      </span>
+                      <span className="text-[11px] text-muted">
+                        {formatSol(balance.solLamports)} SOL for fees
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setView("deposit")}
+                      className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-[#0B0B0B] transition hover:brightness-110"
+                    >
+                      Deposit
+                    </button>
+                  </>
+                )}
+
+                {view === "deposit" && (
+                  <>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[11px] text-muted">Currency</span>
+                      <div className="rounded-xl border border-line-strong bg-background px-3 py-2">
+                        <div className="text-sm font-semibold">USDC</div>
+                        <div className="text-[11px] text-muted">USD Coin</div>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[11px] text-muted">Network</span>
+                      <div className="rounded-xl border border-line-strong bg-background px-3 py-2 text-sm font-semibold">
+                        Solana
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[11px] text-muted">Address</span>
+                      <div className="flex items-stretch gap-2">
+                        <span className="min-w-0 flex-1 break-all rounded-xl border border-line-strong bg-background px-3 py-2 font-mono text-xs">
+                          {balance.wallet}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={copy}
+                          className="shrink-0 rounded-xl border border-line-strong bg-background px-3 text-xs font-semibold transition hover:border-muted"
+                        >
+                          {copied ? "Copied" : "Copy"}
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-[11px] leading-snug text-muted">
+                      Send only USDC on Solana to this address. Anything else
+                      may be unrecoverable.
+                    </p>
+                    <div className="flex flex-col gap-2 rounded-xl border border-line bg-background p-3">
+                      <span className="text-xs font-semibold">Use a different wallet</span>
+                      <LinkWalletButton cta="Link wallet" />
+                    </div>
+                  </>
+                )}
+
+                {view === "settings" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[11px] text-muted">Linked address</span>
+                      <span className="font-mono text-xs">{short(balance.wallet)}</span>
+                    </div>
+                    <LinkWalletButton cta="Change payout wallet" />
+                    <p className="text-[11px] leading-snug text-muted">
+                      Your keys, your coins — FlexSoar never holds these
+                      funds. Trades settle wallet-to-wallet on-chain.
+                    </p>
+                    <Link
+                      href="/dashboard"
+                      onClick={close}
+                      className="text-center text-xs font-semibold text-accent hover:underline"
+                    >
+                      Manage in Dashboard →
+                    </Link>
+                  </div>
+                )}
               </>
             ) : (
-              <>
+              <div className="flex flex-col gap-3">
                 <p className="text-[11px] leading-snug text-muted">
-                  Link a Solana wallet to see your balance and buy with USDC.
+                  Link a Solana wallet to see your balance, deposit, and buy
+                  with USDC.
                 </p>
                 <LinkWalletButton cta="Link wallet" />
-              </>
+              </div>
             )}
           </div>
-        </>
+        </div>
       )}
-    </div>
+    </>
   );
 }

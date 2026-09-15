@@ -15,14 +15,15 @@ import type { Notification as ContractNotification } from "@/lib/api/contract";
 import type { Json } from "@/lib/db/types";
 import { getUser, listNotifications } from "@/lib/api/contract";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { signOut } from "@/app/(auth)/actions";
 import { currentUserId } from "@/app/(market)/queries";
 import { SearchInput } from "@/components/market/SearchInput";
 import { Sidebar, type SidebarItem } from "@/components/market/Sidebar";
 import { SiteFooter } from "@/components/market/SiteFooter";
 import { OnboardingTour } from "@/components/market/OnboardingTour";
 import { NotificationBell } from "@/components/market/NotificationBell";
+import { WalletBalance } from "@/components/market/WalletBalance";
 import { WalletMenu } from "@/components/market/WalletMenu";
+import { UserMenu } from "@/components/market/UserMenu";
 
 interface NotificationPayload {
   sku?: { brand?: string; model?: string; colorway?: string; size_us?: number };
@@ -202,35 +203,16 @@ export default async function MarketLayout({
                 <div className="flex shrink-0 items-center gap-3">
                   {me ? (
                     <>
+                      <WalletBalance />
                       <WalletMenu />
                       <NotificationBell
                         notifications={notifications}
                         unreadCount={unreadCount}
                       />
-                      <a
-                        href={`/u/${me.handle}`}
-                        className="hidden text-[13px] text-muted hover:text-foreground md:inline"
-                      >
-                        @{me.handle}
-                      </a>
                       <span className="hidden text-xs font-semibold text-muted sm:inline">
                         LV {me.level}
                       </span>
-                      <Link
-                        href="/dashboard"
-                        title="Your XP"
-                        className="hidden rounded-lg border border-accent/50 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/10 sm:inline-block"
-                      >
-                        {(me.xp_total ?? 0).toLocaleString()} XP
-                      </Link>
-                      <form action={signOut}>
-                        <button
-                          type="submit"
-                          className="text-xs text-muted/70 transition hover:text-foreground"
-                        >
-                          Sign out
-                        </button>
-                      </form>
+                      <UserMenu handle={me.handle} />
                     </>
                   ) : (
                     <Button href="/sign-in" size="sm" variant="secondary" className="rounded-lg">
