@@ -18,7 +18,7 @@
  */
 
 import { cookies, headers } from 'next/headers';
-import { redirect } from 'next/navigation';
+import { redirect, unstable_rethrow } from 'next/navigation';
 
 import { safeNextPath } from '@/app/(auth)/paths';
 import { ensureUserRow } from '@/lib/db/provision';
@@ -147,12 +147,21 @@ export async function signInWithPassword(formData: FormData): Promise<void> {
   // First password sign-in creates the users row, exactly as the magic-link
   // callback does; later sign-ins no-op. If provisioning fails, drop the
   // session again rather than landing someone in a half-signed-in app.
+  // A fresh row goes through /welcome (same post-confirmation username
+  // claim as the callback path) instead of straight onward.
   try {
-    await ensureUserRow(
+    const provisioned = await ensureUserRow(
       { id: user.id, email: user.email, user_metadata: user.user_metadata },
       supabase,
     );
+    if (provisioned.created) {
+      redirect(`/welcome?next=${encodeURIComponent(next)}`);
+    }
   } catch (thrown) {
+    // redirect() above throws Next's own control-flow error on the fresh-
+    // account path — rethrow it before treating `thrown` as a failure, or
+    // every new password user gets signed straight back out.
+    unstable_rethrow(thrown);
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     await supabase.auth.signOut();
     redirect(backTo('sign-in', { error: message, next }));

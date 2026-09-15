@@ -23,6 +23,7 @@ import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { safeNextPath } from '@/app/(auth)/paths';
+import { normalizeUsername } from '@/lib/auth/handle';
 import { ensureUserRow } from '@/lib/db/provision';
 import { createServerSupabase } from '@/lib/supabase/server';
 
@@ -106,7 +107,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // just established above, so the insert runs as the user and 006's
   // users_self_insert policy vets it. See lib/db/provision.ts.
   try {
-    await ensureUserRow(
+    const provisioned = await ensureUserRow(
       {
         id: authUserId,
         email: authEmail,
@@ -114,6 +115,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       },
       supabase,
     );
+    // Brand-new account without a valid user_metadata handle seed (nothing
+    // in the sign-up UI sends one — the @username is claimed on /welcome
+    // instead): claim it AFTER confirmation, since a modal step could never
+    // survive the email hop. Kept as a live check rather than unconditional
+    // so any future metadata-carrying flow skips the gate honestly.
+    const chosen = authMetadata?.handle;
+    const choseHandle =
+      typeof chosen === 'string' && normalizeUsername(chosen).length >= 3;
+    if (provisioned.created && !choseHandle) {
+      return NextResponse.redirect(
+        new URL(`/welcome?next=${encodeURIComponent(next)}`, url.origin),
+      );
+    }
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     await supabase.auth.signOut();

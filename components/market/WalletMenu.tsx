@@ -19,6 +19,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { formatSol, formatUsdc } from "@/lib/solana/balances";
 import { LinkWalletButton } from "@/components/market/LinkWalletButton";
+import { Modal } from "@/components/market/Modal";
 
 interface BalancesResponse {
   wallet: string;
@@ -87,14 +88,8 @@ export function WalletMenu() {
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <button
-            type="button"
-            aria-label="Close wallet"
-            onClick={close}
-            className="absolute inset-0 cursor-default bg-black/70"
-          />
-          <div className="relative flex w-full max-w-sm flex-col gap-4 rounded-2xl border border-line bg-raised p-5 shadow-soft">
+        <Modal onClose={close} closeLabel="Close wallet" panelClassName="max-w-sm">
+          <div className="flex flex-col gap-4 p-5">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-bold tracking-tight">
                 {view === "deposit" ? (
@@ -232,7 +227,7 @@ export function WalletMenu() {
               </div>
             )}
           </div>
-        </div>
+        </Modal>
       )}
     </>
   );

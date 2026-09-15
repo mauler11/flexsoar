@@ -17,6 +17,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import {
+  isCleanUsername,
+  normalizeUsername,
+} from '../lib/auth/handle';
 
 import {
   cardProvenance,
@@ -3324,5 +3328,23 @@ describe('eBay comps math — median and currency conversion', () => {
     expect(toMyrSen(100, 'GBP', rates)).toBe(Math.round(((100 / 0.79) * 4.7) * 100));
     expect(toMyrSen(-5, 'USD', rates)).toBeNull();
     expect(toMyrSen(100, 'JPY', rates)).toBeNull();
+  });
+});
+
+describe('welcome username rules — mirror of provision.ts normalizeHandle', () => {
+  it('normalizeUsername folds exactly like the server', () => {
+    expect(normalizeUsername('Wizzy')).toBe('wizzy');
+    expect(normalizeUsername('a  b!!c')).toBe('a_b_c');
+    expect(normalizeUsername('_lead_')).toBe('lead');
+    expect(normalizeUsername('x'.repeat(30))).toBe('x'.repeat(24));
+    expect(normalizeUsername('ab')).toBe('ab');
+  });
+
+  it('isCleanUsername accepts only what survives untouched', () => {
+    expect(isCleanUsername('wizzy_99')).toBe(true);
+    expect(isCleanUsername('Wizzy')).toBe(false);
+    expect(isCleanUsername('ab')).toBe(false);
+    expect(isCleanUsername('has space')).toBe(false);
+    expect(isCleanUsername('x'.repeat(25))).toBe(false);
   });
 });

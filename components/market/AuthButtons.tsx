@@ -21,7 +21,7 @@ export function AuthButtons() {
         <Button
           size="md"
           variant="secondary"
-          className="rounded-xl"
+          className="rounded-lg text-base"
           onClick={() => setMode("sign-in")}
         >
           Log In
@@ -29,7 +29,7 @@ export function AuthButtons() {
         <Button
           size="md"
           variant="primary"
-          className="rounded-xl"
+          className="rounded-lg text-base"
           onClick={() => setMode("sign-up")}
         >
           Sign Up
