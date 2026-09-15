@@ -300,11 +300,34 @@ describe('verifyBuyTransaction — balance deltas, mint-checked', () => {
       SIG,
       EXPECTED,
       (async () => ({ ok: true, json: async () => ({ result: null }) }) as Response) as unknown as typeof fetch,
+      { tries: 2, delayMs: 0 },
     );
     expect(missing.ok).toBe(false);
 
     const malformed = await verifyBuyTransaction('zzz', EXPECTED);
     expect(malformed.ok).toBe(false);
+  });
+
+  it('rides out propagation lag and transport blips, then verifies', async () => {
+    const good = { slot: 7, err: null, meta: { err: null, ...balances(-1_000_000, 950_000, 50_000) } };
+    let calls = 0;
+    const slowThenThere = (async () => {
+      calls++;
+      if (calls < 3) return { ok: true, json: async () => ({ result: null }) };
+      return { ok: true, json: async () => ({ result: good }) };
+    }) as unknown as typeof fetch;
+    const out = await verifyBuyTransaction(SIG, EXPECTED, slowThenThere, { tries: 5, delayMs: 0 });
+    expect(out).toEqual({ ok: true, slot: 7 });
+    expect(calls).toBe(3);
+
+    let flaky = 0;
+    const blipThenThere = (async () => {
+      flaky++;
+      if (flaky === 1) throw new Error('socket hangup');
+      return { ok: true, json: async () => ({ result: good }) };
+    }) as unknown as typeof fetch;
+    const out2 = await verifyBuyTransaction(SIG, EXPECTED, blipThenThere, { tries: 3, delayMs: 0 });
+    expect(out2).toEqual({ ok: true, slot: 7 });
   });
 });
 

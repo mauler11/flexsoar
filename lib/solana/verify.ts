@@ -95,42 +95,60 @@ function deltasByOwner(
   return deltas;
 }
 
+export interface VerifyOptions {
+  /** Confirmation polls before giving up. Default 6. */
+  tries?: number;
+  /** Wait between polls, ms. Default 1500. Pass 0 in tests. */
+  delayMs?: number;
+}
+
 export async function verifyBuyTransaction(
   signature: string,
   expected: ExpectedTransfer,
   fetchImpl: typeof fetch = fetch,
+  opts?: VerifyOptions,
 ): Promise<VerifyResult | VerifyFailure> {
   if (!signature || signature.length < 80 || signature.length > 96) {
     return { ok: false, reason: 'malformed transaction signature' };
   }
-  let tx: ParsedTx;
-  try {
-    const res = await fetchImpl(rpcUrl(), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 'flexsoar-verify',
-        method: 'getTransaction',
-        params: [
-          signature,
-          { encoding: 'jsonParsed', commitment: 'confirmed', maxSupportedTransactionVersion: 0 },
-        ],
-      }),
-    });
-    if (!res.ok) {
-      return { ok: false, reason: `rpc unreachable (http ${res.status})` };
+  // Confirmation race: the wallet returns the signature the instant it
+  // broadcasts, but the RPC may not have SEEN the transaction yet. A single
+  // getTransaction turns propagation lag into "not found", so poll until
+  // the transaction appears or the budget runs out. Definitive answers
+  // (failed tx, wrong deltas) still return on first sight — only absence
+  // and transport blips are retried.
+  const tries = opts?.tries ?? 6;
+  const delayMs = opts?.delayMs ?? 1500;
+  let tx: ParsedTx | null = null;
+  for (let attempt = 0; attempt < tries; attempt++) {
+    if (attempt > 0 && delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
-    const body = (await res.json()) as { result?: ParsedTx | null };
-    if (!body.result) {
-      return { ok: false, reason: 'transaction not found (unconfirmed or unknown)' };
+    try {
+      const res = await fetchImpl(rpcUrl(), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'flexsoar-verify',
+          method: 'getTransaction',
+          params: [
+            signature,
+            { encoding: 'jsonParsed', commitment: 'confirmed', maxSupportedTransactionVersion: 0 },
+          ],
+        }),
+      });
+      if (!res.ok) continue;
+      const body = (await res.json()) as { result?: ParsedTx | null };
+      if (!body.result) continue;
+      tx = body.result;
+      break;
+    } catch {
+      continue;
     }
-    tx = body.result;
-  } catch (thrown) {
-    return {
-      ok: false,
-      reason: thrown instanceof Error ? `rpc failed: ${thrown.message}` : 'rpc failed',
-    };
+  }
+  if (!tx) {
+    return { ok: false, reason: 'transaction not found (unconfirmed or unknown)' };
   }
 
   if (tx.err != null || tx.meta?.err != null) {
