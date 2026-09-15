@@ -1194,5 +1194,21 @@ status UX, not a single button. (4) Provider spreads (1–4%+) pass to the
 user; Privy itself charges no on-ramp fee. (5) Sellers still need Stripe
 Connect regardless — on-ramp only ever replaces the BUYER card path.
 Recommendation stands: prove embedded e2e first, keep Stripe buyer
-checkout until the on-ramp proves in sandbox+mainnet, start Meld KYB in
+checkout until the on-ramp proves in sandbox + mainnet, start Meld KYB in
 parallel (paperwork, not code — it's the long pole).
+
+## 2026-09-15 — Privy withdrawal evaluation (docs only, no code)
+
+Seller balance: already works — proceeds land in the linked wallet as
+USDC, visible in header/modal within 60s for Phantom AND embedded alike.
+No Privy feature needed. Crypto withdrawal (send elsewhere): Phantom does
+it natively; embedded wallets can sign transfers but our UI offers no Send
+— small honest feature if wanted, user still signs everything.
+Fiat off-ramp (USDC→bank) exists via Bridge (`wallets.payout.fiat`,
+Solana USDC supported) but the price is steep: per-seller KYC + entity
+verification, our KYB + Bridge key, App Secret server-side, bank account
+registration per seller, and SERVER-SIDE wallet access (our backend moving
+user funds under policies — blurs the non-custodial line, needs explicit
+acceptance). MY corridor coverage unverified in docs. Stripe Connect
+already pays MY sellers through a proven corridor — Privy payouts only
+make sense if Stripe fails some seller class. Not building now.
