@@ -22,7 +22,7 @@ import { Sidebar, type SidebarItem } from "@/components/market/Sidebar";
 import { SiteFooter } from "@/components/market/SiteFooter";
 import { OnboardingTour } from "@/components/market/OnboardingTour";
 import { NotificationBell } from "@/components/market/NotificationBell";
-import { WalletBalance } from "@/components/market/WalletBalance";
+import { WalletMenu } from "@/components/market/WalletMenu";
 
 interface NotificationPayload {
   sku?: { brand?: string; model?: string; colorway?: string; size_us?: number };
@@ -194,7 +194,7 @@ export default async function MarketLayout({
                     priority
                   />
                 </Link>
-                <div className="mx-auto min-w-0 w-full max-w-xl flex-1">
+                <div className="mx-auto min-w-0 w-full max-w-sm flex-1">
                   <Suspense>
                     <SearchInput />
                   </Suspense>
@@ -202,6 +202,7 @@ export default async function MarketLayout({
                 <div className="flex shrink-0 items-center gap-3">
                   {me ? (
                     <>
+                      <WalletMenu />
                       <NotificationBell
                         notifications={notifications}
                         unreadCount={unreadCount}
@@ -222,7 +223,6 @@ export default async function MarketLayout({
                       >
                         {(me.xp_total ?? 0).toLocaleString()} XP
                       </Link>
-                      <WalletBalance />
                       <form action={signOut}>
                         <button
                           type="submit"
