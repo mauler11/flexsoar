@@ -229,7 +229,7 @@ function SendDialogInner({
         type="button"
         disabled={busy}
         onClick={send}
-        className="w-full py-3 text-base"
+        className="w-full py-3.5 text-lg"
       >
         {busy ? "Sending…" : "Send"}
       </Button>

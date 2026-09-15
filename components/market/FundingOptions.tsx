@@ -87,8 +87,15 @@ function FundingOptionsInner({ address }: { address: string }) {
         Card or crypto through Privy providers. Funds land in this wallet
         first — buying happens after, with Balance.
       </p>
-      <Button type="button" variant="secondary" size="md" disabled={busy} onClick={fund}>
-        {busy ? "Opening funding…" : "Add funds (card / crypto)"}
+      <Button
+        type="button"
+        variant="primary"
+        size="md"
+        disabled={busy}
+        onClick={fund}
+        className="rounded-lg px-4 py-2.5 text-sm"
+      >
+        {busy ? "Opening funding…" : "Add Funds"}
       </Button>
       {notice && (
         <Banner tone="success" title="Funding underway">

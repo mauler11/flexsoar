@@ -124,10 +124,10 @@ function FiatBalance({
 }
 
 /**
- * Deposit tab: balance figure plus one blue Add Funds button. Tapping it
- * reveals the funding rails — the Privy card/crypto flow when enabled,
- * otherwise the plain Transfer Crypto address (same address, zero new
- * machinery). Nothing renders twice; details stay one tap away.
+ * Deposit tab: balance figure plus one green Add Funds button that opens
+ * the funding rails directly — a single button, never a button behind a
+ * button. With the rails flag off, FundingOptions renders nothing and the
+ * plain transfer address shows instead (same address, zero new machinery).
  */
 function DepositTab({
   wallet,
@@ -140,7 +140,6 @@ function DepositTab({
   solLamports: number;
   fx: Record<string, number> | null;
 }) {
-  const [showFunding, setShowFunding] = useState(false);
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -161,35 +160,26 @@ function DepositTab({
         fx={fx}
         controls={false}
       />
-      <button
-        type="button"
-        onClick={() => setShowFunding((v) => !v)}
-        className="rounded-md bg-[#3B82F6] px-5 py-3 text-base font-semibold text-white transition hover:brightness-110"
-      >
-        Add Funds
-      </button>
-      {showFunding &&
-        (isPrivyCheckoutEnabled() ? (
-          <FundingOptions address={wallet} />
-        ) : (
-          <div className="flex flex-col gap-1">
-            <span className="text-[11px] text-muted">
-              Send USDC on Solana to this address from any wallet or exchange.
+      <FundingOptions address={wallet} />
+      {!isPrivyCheckoutEnabled() && (
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] text-muted">
+            Or send USDC on Solana to this address from any wallet or exchange.
+          </span>
+          <div className="flex items-stretch gap-2">
+            <span className="min-w-0 flex-1 break-all rounded-xl border border-line-strong bg-background px-3 py-2 font-mono text-xs">
+              {wallet}
             </span>
-            <div className="flex items-stretch gap-2">
-              <span className="min-w-0 flex-1 break-all rounded-xl border border-line-strong bg-background px-3 py-2 font-mono text-xs">
-                {wallet}
-              </span>
-              <button
-                type="button"
-                onClick={copy}
-                className="shrink-0 rounded-xl border border-line-strong bg-background px-3 text-xs font-semibold transition hover:border-muted"
-              >
-                {copied ? "Copied" : "Copy"}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={copy}
+              className="shrink-0 rounded-xl border border-line-strong bg-background px-3 text-xs font-semibold transition hover:border-muted"
+            >
+              {copied ? "Copied" : "Copy"}
+            </button>
           </div>
-        ))}
+        </div>
+      )}
     </>
   );
 }
@@ -251,7 +241,7 @@ export function WalletMenu() {
                   type="button"
                   onClick={() => setTab(t)}
                   className={`rounded-lg px-3 py-1.5 capitalize transition ${
-                    tab === t ? "bg-raised text-foreground" : "text-muted hover:text-foreground"
+                    tab === t ? "bg-[#2E2E2E] text-foreground" : "text-muted hover:text-foreground"
                   }`}
                 >
                   {t}

@@ -2,14 +2,15 @@
  * components/market/CheckoutModal.tsx
  *
  * Single-Buy-Now checkout popup (Courtyard-arranged): payment-method radio
- * (Card / FlexSoar Balance with live figure) on the left, order summary
- * (subtotal, 5% fee, total) on the right, method-specific action below.
+ * on the left, order summary with the action on the right. The fee math is
+ * stated the way it settles: the buyer pays the total, the 5% splits FROM
+ * it on-chain (seller nets 95%) — never added on top.
  *
  *   - Card → existing Stripe checkout redirect (the only true one-step
  *     card payment; raw PANs never touch our UI — PCI stays with Stripe).
- *   - Wallet → the proven USDC balance flow inline. Short balance opens
- *     the Privy funding rails (flag-gated) or the plain deposit address
- *     otherwise — never a dead end, never a fake top-up.
+ *   - Wallet → the proven USDC balance flow inline ("Buy with Balance").
+ *     Short balance opens top-up instead of dying: the Privy funding rails
+ *     (flag-gated) or the plain deposit address otherwise.
  */
 "use client";
 
@@ -26,16 +27,16 @@ import { formatUsdc } from "@/lib/solana/balances";
 import { isPrivyCheckoutEnabled } from "@/lib/solana/privy";
 import type { BuyPanelListing } from "./BuyPanel";
 
+export interface BuyModalProps {
+  listing: BuyPanelListing;
+}
+
 type Method = "card" | "wallet";
 
 interface WalletState {
   wallet: string;
   usdcMint: string;
   usdcUnits: number;
-}
-
-export interface BuyModalProps {
-  listing: BuyPanelListing;
 }
 
 export function CheckoutButton({ listing }: BuyModalProps) {
@@ -163,58 +164,14 @@ function CheckoutModal({ listing, onClose }: { listing: BuyPanelListing; onClose
               </span>
               <span className="flex-1">FlexSoar Wallet</span>
               <span className="tabular-nums text-muted">
-                {wallet ? formatUsdc(wallet.usdcUnits) : "—"}
+                {wallet ? `${formatUsdc(wallet.usdcUnits)} USDC` : "—"}
               </span>
             </button>
           </div>
-
-          {method === "card" ? (
-            <div className="flex flex-col gap-2">
-              <Banner tone="info" title="Card checkout">
-                Secure Stripe redirect — FlexSoar never sees card numbers.
-              </Banner>
-              <Button
-                type="button"
-                size="lg"
-                disabled={pending}
-                onClick={checkoutCard}
-                className="py-3 text-base"
-              >
-                {pending ? "Redirecting…" : "Buy now"}
-              </Button>
-            </div>
-          ) : wallet ? (
-            <div className="flex flex-col gap-2">
-              {shortfall ? (
-                <>
-                  <Banner tone="warn" title="Insufficient balance">
-                    This purchase needs {formatUsdc(totalUnits ?? 0)} USDC — you
-                    hold {formatUsdc(wallet.usdcUnits)}. Top up, then buy.
-                  </Banner>
-                  {isPrivyCheckoutEnabled() ? (
-                    <FundingOptions address={wallet.wallet} />
-                  ) : (
-                    <p className="text-[11px] leading-snug text-muted">
-                      Send USDC on Solana to{" "}
-                      <span className="font-mono">
-                        {wallet.wallet.slice(0, 6)}…{wallet.wallet.slice(-4)}
-                      </span>{" "}
-                      from any wallet or exchange, then retry.
-                    </p>
-                  )}
-                </>
-              ) : (
-                <SolanaBuyPanelRoot listingId={listing.id} priceCents={listing.priceCents} />
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <p className="text-[11px] leading-snug text-muted">
-                Link your FlexSoar wallet to pay with balance.
-              </p>
-              <EmbeddedLinkButton cta="Link wallet" />
-            </div>
-          )}
+          <p className="text-[11px] leading-snug text-muted">
+            Card pays by Stripe redirect. Wallet settles USDC on-chain —
+            no card fees, same total either way.
+          </p>
         </div>
 
         <div className="flex flex-col gap-3">
@@ -224,22 +181,63 @@ function CheckoutModal({ listing, onClose }: { listing: BuyPanelListing; onClose
               <span className="text-[11px] text-muted">1 item</span>
             </div>
             <div className="flex items-baseline justify-between border-t border-line pt-2 text-sm">
-              <span className="text-muted">Subtotal</span>
+              <span className="text-muted">Price</span>
               <FiatAmount cents={listing.priceCents} />
             </div>
             <div className="flex items-baseline justify-between text-sm">
-              <span className="text-muted">Platform fee (5%)</span>
+              <span className="text-muted">Platform fee (5%, included)</span>
               <FiatAmount cents={feeCents} />
             </div>
             <div className="flex items-baseline justify-between border-t border-line pt-2 text-sm font-bold">
-              <span>Total</span>
+              <span>You pay</span>
               <FiatAmount cents={listing.priceCents} />
             </div>
+            <p className="text-[11px] leading-snug text-muted">
+              The 5% splits from the total on-chain — the seller nets 95%.
+              You pay exactly the total above.
+            </p>
           </div>
-          <p className="text-[11px] leading-snug text-muted">
-            No fees on wallet settlement beyond the 5% platform split — it
-            moves wallet-to-wallet on-chain.
-          </p>
+
+          {method === "card" ? (
+            <Button
+              type="button"
+              size="lg"
+              disabled={pending}
+              onClick={checkoutCard}
+              className="py-3 text-base"
+            >
+              {pending ? "Redirecting…" : "Buy now"}
+            </Button>
+          ) : wallet ? (
+            shortfall ? (
+              <div className="flex flex-col gap-2">
+                <Banner tone="warn" title="Insufficient balance">
+                  This purchase needs {formatUsdc(totalUnits ?? 0)} USDC — you
+                  hold {formatUsdc(wallet.usdcUnits)}. Top up, then buy.
+                </Banner>
+                {isPrivyCheckoutEnabled() ? (
+                  <FundingOptions address={wallet.wallet} />
+                ) : (
+                  <p className="text-[11px] leading-snug text-muted">
+                    Send USDC on Solana to{" "}
+                    <span className="font-mono">
+                      {wallet.wallet.slice(0, 6)}…{wallet.wallet.slice(-4)}
+                    </span>{" "}
+                    from any wallet or exchange, then retry.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <SolanaBuyPanelRoot listingId={listing.id} priceCents={listing.priceCents} />
+            )
+          ) : (
+            <div className="flex flex-col gap-2">
+              <p className="text-[11px] leading-snug text-muted">
+                Link your FlexSoar wallet to pay with balance.
+              </p>
+              <EmbeddedLinkButton cta="Link wallet" />
+            </div>
+          )}
         </div>
       </div>
     </div>

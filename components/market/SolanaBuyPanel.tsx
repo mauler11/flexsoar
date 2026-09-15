@@ -18,7 +18,6 @@ import { Transaction } from "@solana/web3.js";
 import { Button } from "@/components/ui/Button";
 import { Banner } from "@/components/market/Banner";
 import { EmbeddedLinkButton } from "@/components/market/EmbeddedWalletSection";
-import { WalletBalance } from "@/components/market/WalletBalance";
 import type { Quote } from "@/lib/solana/quotes";
 import { base58Encode } from "@/lib/solana/base58";
 import {
@@ -154,15 +153,6 @@ export function SolanaBuyPanel({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted">
-        <span className="h-px flex-1 bg-line" />
-        <span>or pay with USDC · {priceCents > 0 ? "devnet" : "devnet"}</span>
-        <span className="h-px flex-1 bg-line" />
-      </div>
-      <WalletBalance
-        label="Wallet balance"
-        className="rounded-xl border border-line-strong bg-[#262626] px-3 py-1.5 text-sm font-bold tabular-nums text-foreground"
-      />
       {needsLink ? (
         <EmbeddedLinkButton
           cta="Link wallet, then buy"
@@ -186,7 +176,7 @@ export function SolanaBuyPanel({
               ? "Confirm in wallet…"
               : phase === "settling"
                 ? "Settling…"
-                : "Buy with USDC (Solana)"}
+                : "Buy with Balance"}
         </Button>
       )}
       {error && (
@@ -194,10 +184,6 @@ export function SolanaBuyPanel({
           {error}
         </Banner>
       )}
-      <p className="text-[11px] text-muted">
-        Non-custodial: 95% to the seller, 5% to FlexSoar, split atomically
-        on-chain. Sign with your FlexSoar wallet.
-      </p>
     </div>
   );
 }
