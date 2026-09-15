@@ -23,6 +23,14 @@ export function PrivyProviders({ children }: { children: React.ReactNode }) {
     <PrivyProvider
       appId={appId}
       config={{
+        // Privy's own modals (email login, embedded signing prompts,
+        // funding flows) match the FlexSoar dark theme + neon accent.
+        // Dashboard → Appearance can carry the logo further; code owns
+        // theme + accent so every environment renders identically.
+        appearance: {
+          theme: "dark",
+          accentColor: "#4dff88",
+        },
         embeddedWallets: {
           solana: {
             createOnLogin: "users-without-wallets",
