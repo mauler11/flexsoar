@@ -51,10 +51,10 @@ function FiatBalance({
   solLamports: number;
   fx: Record<string, number> | null;
 }) {
-  const { code, setCode, toggleFiat } = useFiat();
+  const { balanceCode, setBalanceCode, toggleBalanceFiat } = useFiat();
   // Estimates on for any fiat; MYR and USDC are both exact modes.
-  const fiatOn = code !== "MYR" && code !== "USDC";
-  const fiat = fiatOn ? formatFiatFromUsd(usdcUnits / 1_000_000, code, fx) : null;
+  const fiatOn = balanceCode !== "MYR" && balanceCode !== "USDC";
+  const fiat = fiatOn ? formatFiatFromUsd(usdcUnits / 1_000_000, balanceCode, fx) : null;
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
@@ -66,7 +66,7 @@ function FiatBalance({
             role="switch"
             aria-checked={fiatOn}
             aria-label="Display in Fiat"
-            onClick={toggleFiat}
+            onClick={toggleBalanceFiat}
             className={`relative h-5 w-9 rounded-full transition-colors ${
               fiatOn ? "bg-accent" : "bg-line-strong"
             }`}
@@ -82,10 +82,10 @@ function FiatBalance({
       </div>
       {fiatOn && (
         <select
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          aria-label="Fiat currency"
-          className="w-full rounded-xl border border-line-strong bg-background px-3 py-2 text-sm text-foreground focus:outline-none"
+          value={balanceCode}
+          onChange={(e) => setBalanceCode(e.target.value)}
+          aria-label="Balance currency"
+          className="w-full rounded-md border border-line-strong bg-background px-3 py-2 text-sm text-foreground focus:outline-none"
         >
           <option value="USDC">USDC — Exact</option>
           {FIAT_CURRENCIES.map((c) => (
@@ -97,7 +97,7 @@ function FiatBalance({
       )}
       <span className="text-2xl font-bold tabular-nums tracking-tight">
         {fiat ? (
-          <>≈ {fiat.text}</>
+          <>{fiat.text}</>
         ) : (
           <>
             {formatUsdc(usdcUnits)}{" "}
@@ -165,7 +165,7 @@ export function WalletMenu() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-[#0B0B0B] transition hover:brightness-110"
+        className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-[#0B0B0B] transition hover:brightness-110"
       >
         Wallet
       </button>

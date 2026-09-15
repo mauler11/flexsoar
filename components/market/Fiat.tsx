@@ -1,15 +1,22 @@
 /**
  * components/market/Fiat.tsx
  *
- * Site-wide display currency. One context owns the code (default USDC =
- * exact figures; any fiat = live-FX estimate), persisted per device under
- * the same localStorage keys the wallet modal has always used, so existing
- * preferences carry over. Rates arrive from GET /api/fx (public data, no
- * auth). Ledger, Stripe, and quotes are untouched — MYR sen stays the unit
- * of account everywhere money moves; this only changes how numbers render.
+ * Display currency, split in two on purpose:
+ *
+ *   - siteCode: market + card prices site-wide (default MYR = exact ledger
+ *     figures; any other code = live-FX figure). Header selector drives it.
+ *   - balanceCode: the wallet balance only (default USDC = exact on-chain
+ *     figure). The wallet modal's selector + switch drive it; the header
+ *     selector never touches it.
+ *
+ * Rates refresh every 60s from GET /api/fx (itself 60s-cached server-side,
+ * so free providers see at most one request per minute per deployment, not
+ * per client). No ≈ marks: figures are live-fetched, and every converted
+ * figure keeps its exact value in the tooltip — while checkout, quotes,
+ * and the ledger pin their own rates and stay MYR throughout.
  *
  *   <FiatAmount cents={priceCents} />   — MYR sen in, display string out
- *   <FiatSelect />                      — header currency picker
+ *   <FiatSelect />                      — header site-currency picker
  */
 "use client";
 
@@ -29,99 +36,116 @@ export const DISPLAY_CODES: readonly string[] = [
 ];
 
 interface FiatState {
-  code: string;
+  siteCode: string;
+  setSiteCode: (code: string) => void;
+  balanceCode: string;
+  setBalanceCode: (code: string) => void;
+  toggleBalanceFiat: () => void;
   rates: Record<string, number> | null;
-  setCode: (code: string) => void;
-  toggleFiat: () => void;
 }
 
 const FiatCtx = createContext<FiatState>({
-  code: "MYR",
+  siteCode: "MYR",
+  setSiteCode: () => {},
+  balanceCode: "USDC",
+  setBalanceCode: () => {},
+  toggleBalanceFiat: () => {},
   rates: null,
-  setCode: () => {},
-  toggleFiat: () => {},
 });
 
 function isKnownCode(code: string | null): code is string {
   return !!code && (DISPLAY_CODES as readonly string[]).includes(code);
 }
 
-function readStored(): string {
+function readStored(key: string, fallback: string): string {
   try {
-    // Legacy shape (separate on/off flag) migrates here: flag off or junk
-    // code means exact-by-default MYR; a stored fiat code carries over.
-    if (window.localStorage.getItem("flexsoar-fiat") === "1") {
-      const code = window.localStorage.getItem("flexsoar-fiat-code");
-      if (isKnownCode(code) && code !== "MYR") return code;
+    const code = window.localStorage.getItem(key);
+    if (isKnownCode(code)) return code;
+    // One-time legacy migration for the balance code: the old shared
+    // on/off flag + code pair becomes the wallet's own preference.
+    if (key === "flexsoar-balance-code") {
+      const legacy =
+        window.localStorage.getItem("flexsoar-fiat") === "1"
+          ? window.localStorage.getItem("flexsoar-fiat-code")
+          : null;
+      if (isKnownCode(legacy)) return legacy;
     }
-    return "MYR";
+    return fallback;
   } catch {
-    return "MYR";
+    return fallback;
   }
 }
 
-function store(code: string) {
+function store(key: string, code: string) {
   try {
-    window.localStorage.setItem("flexsoar-fiat", code === "MYR" || code === "USDC" ? "0" : "1");
-    window.localStorage.setItem("flexsoar-fiat-code", code);
+    window.localStorage.setItem(key, code);
   } catch {
     // Private mode — preference just won't persist.
   }
 }
 
 export function FiatProvider({ children }: { children: ReactNode }) {
-  const [code, setCodeState] = useState("MYR");
+  const [siteCode, setSiteCodeState] = useState("MYR");
+  const [balanceCode, setBalanceCodeState] = useState("USDC");
   const [rates, setRates] = useState<Record<string, number> | null>(null);
 
   useEffect(() => {
-    setCodeState(readStored());
+    setSiteCodeState(readStored("flexsoar-site-code", "MYR"));
+    setBalanceCodeState(readStored("flexsoar-balance-code", "USDC"));
     let live = true;
-    fetch("/api/fx")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((body) => {
+    async function load() {
+      try {
+        const res = await fetch("/api/fx");
+        if (!res.ok) return;
+        const body = (await res.json()) as { rates?: Record<string, number> };
         if (live && body?.rates) setRates(body.rates);
-      })
-      .catch(() => {});
-    const timer = setInterval(() => {
-      fetch("/api/fx")
-        .then((res) => (res.ok ? res.json() : null))
-        .then((body) => {
-          if (live && body?.rates) setRates(body.rates);
-        })
-        .catch(() => {});
-    }, 600_000);
+      } catch {
+        // Rates stay stale; figures fall back to exact units.
+      }
+    }
+    load();
+    const timer = setInterval(load, 60_000);
     return () => {
       live = false;
       clearInterval(timer);
     };
   }, []);
 
-  const setCode = useCallback((next: string) => {
-    setCodeState(next);
-    store(next);
+  const setSiteCode = useCallback((next: string) => {
+    if (!isKnownCode(next)) return;
+    setSiteCodeState(next);
+    store("flexsoar-site-code", next);
   }, []);
 
-  const toggleFiat = useCallback(() => {
-    // Quick flip between exact MYR and the last fiat (default USD).
-    setCodeState((current) => {
-      if (current !== "MYR") {
-        store("MYR");
-        return "MYR";
+  const setBalanceCode = useCallback((next: string) => {
+    if (!isKnownCode(next)) return;
+    setBalanceCodeState(next);
+    store("flexsoar-balance-code", next);
+  }, []);
+
+  const toggleBalanceFiat = useCallback(() => {
+    // Quick flip between the exact USDC figure and the last fiat.
+    setBalanceCodeState((current) => {
+      if (current !== "USDC") {
+        store("flexsoar-balance-code", "USDC");
+        return "USDC";
       }
-      let last = "USD";
+      let last = "MYR";
       try {
-        const stored = window.localStorage.getItem("flexsoar-fiat-code");
-        if (isKnownCode(stored) && stored !== "MYR") last = stored;
+        const stored = window.localStorage.getItem("flexsoar-balance-code");
+        if (isKnownCode(stored) && stored !== "USDC") last = stored;
       } catch {
-        // Private mode — fall back to USD.
+        // Private mode — fall back to MYR.
       }
-      store(last);
+      store("flexsoar-balance-code", last);
       return last;
     });
   }, []);
 
   return (
-    <FiatCtx.Provider value={{ code, rates, setCode, toggleFiat }}>
+    <FiatCtx.Provider
+      value={{ siteCode, setSiteCode, balanceCode, setBalanceCode, toggleBalanceFiat, rates }}
+    >
       {children}
     </FiatCtx.Provider>
   );
@@ -131,7 +155,7 @@ export function useFiat(): FiatState {
   return useContext(FiatCtx);
 }
 
-/** MYR sen rendered in the site display currency (exact or ≈ estimate). */
+/** MYR sen rendered in the site display currency (exact MYR or live FX). */
 export function FiatAmount({
   cents,
   className,
@@ -139,8 +163,8 @@ export function FiatAmount({
   cents: number;
   className?: string;
 }) {
-  const { code, rates } = useFiat();
-  const shaped = formatFiatAmount(cents, code, rates);
+  const { siteCode, rates } = useFiat();
+  const shaped = formatFiatAmount(cents, siteCode, rates);
   const fallback = `RM ${(cents / 100).toFixed(2)}`;
   if (!shaped) return <span className={className}>{fallback}</span>;
   return (
@@ -148,36 +172,34 @@ export function FiatAmount({
       className={className}
       title={shaped.estimated ? `Exact: ${fallback}` : undefined}
     >
-      {shaped.estimated ? `≈ ${shaped.text}` : shaped.text}
+      {shaped.text}
     </span>
   );
 }
 
-/** Compact header currency picker driving the site display currency. */
+/**
+ * Compact header site-currency picker: 3-letter code + native arrow,
+ * squared corners. Drives prices only — the wallet balance has its own
+ * selector inside the wallet modal.
+ */
 export function FiatSelect({ className }: { className?: string }) {
-  const { code, setCode } = useFiat();
+  const { siteCode, setSiteCode } = useFiat();
   return (
     <select
-      value={code}
-      onChange={(e) => setCode(e.target.value)}
+      value={siteCode}
+      onChange={(e) => setSiteCode(e.target.value)}
       aria-label="Display currency"
       title="Display currency — ledger and checkout stay MYR"
       className={
         className ??
-        "rounded-xl border border-line-strong bg-raised px-2 py-1 text-xs font-semibold text-foreground focus:outline-none"
+        "w-[4.5rem] rounded-md border border-line-strong bg-raised px-1.5 py-1 text-xs font-semibold text-foreground focus:outline-none"
       }
     >
-      {DISPLAY_CODES.map((c) =>
-        c === "USDC" ? (
-          <option key={c} value={c}>
-            USDC — Exact
-          </option>
-        ) : (
-          <option key={c} value={c}>
-            {c}
-          </option>
-        ),
-      )}
+      {DISPLAY_CODES.map((c) => (
+        <option key={c} value={c}>
+          {c}
+        </option>
+      ))}
     </select>
   );
 }

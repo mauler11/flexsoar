@@ -31,7 +31,7 @@ export function WalletBalance({
   /** Optional leading label — renders as a row; omitted keeps the bare chip. */
   label?: string;
 }) {
-  const { code } = useFiat();
+  const { balanceCode } = useFiat();
   const [balance, setBalance] = useState<BalancesResponse | null>(null);
 
   useEffect(() => {
@@ -57,10 +57,12 @@ export function WalletBalance({
   if (!balance) return null;
 
   const usd = balance.usdcUnits / 1_000_000;
+  // The header site selector never touches this chip: it follows the
+  // wallet's own currency (modal selector + switch).
   const shaped =
-    code === "USDC"
+    balanceCode === "USDC"
       ? { text: `${formatUsdc(balance.usdcUnits)} USDC`, estimated: false }
-      : formatFiatFromUsd(usd, code, balance.fx);
+      : formatFiatFromUsd(usd, balanceCode, balance.fx);
   const text = shaped?.text ?? `${formatUsdc(balance.usdcUnits)} USDC`;
   const estimated = shaped?.estimated ?? false;
 
@@ -76,7 +78,7 @@ export function WalletBalance({
         "hidden rounded-xl border border-line-strong bg-[#262626] px-3 py-1.5 text-sm font-bold tabular-nums text-foreground sm:inline-block"
       }
     >
-      {estimated ? `≈ ${text}` : text}
+      {text}
     </span>
   );
 

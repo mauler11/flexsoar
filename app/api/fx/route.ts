@@ -11,7 +11,9 @@ import { NextResponse } from 'next/server';
 
 import { fxTable } from '@/lib/solana/fx';
 
-export const dynamic = 'force-dynamic';
+/** 60s server cache: free providers see one request per minute per
+    deployment, not one per client poll. */
+export const revalidate = 60;
 
 export async function GET(): Promise<NextResponse> {
   const rates = await fxTable().catch(() => null);

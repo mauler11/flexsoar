@@ -206,7 +206,6 @@ export default async function MarketLayout({
                   {me ? (
                     <>
                       <WalletBalance />
-                      <FiatSelect />
                       <WalletMenu />
                       <NotificationBell
                         notifications={notifications}
@@ -216,6 +215,7 @@ export default async function MarketLayout({
                         LV {me.level}
                       </span>
                       <UserMenu handle={me.handle} />
+                      <FiatSelect />
                     </>
                   ) : (
                     <>
