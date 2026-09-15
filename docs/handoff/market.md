@@ -1148,7 +1148,6 @@ only (not dashboard/admin/receipts). FX reuses the `myrPerUsd` chain in
 the spirit (MYR default, estimates labelled, settlement untouched).
 
 ## 2026-09-15 — Devnet USDC end-to-end: PROVEN ✅
-
 First live trade settled on devnet. Chain: quote (`build-tx`) → Phantom
 sign+send → Helius balance-delta verify (`settle`) → `purchaseCardSplit`
 ledger. Receipt: signature `2HkgqWEoeYgGzvFA…`, slot 498356599, RM200 ask
@@ -1161,3 +1160,21 @@ pin) added after a provider outage blocked quotes. Seller link gap found
 and fixed: sellers never see BuyPanel on their own listings, so wallet
 linking now lives on the dashboard (`LinkWalletButton`, shared with the
 buyer flow).
+
+## 2026-09-15 — Wallet-model discussion (no backend change)
+
+Human floated a custodial "gambling type" wallet (deposit to platform,
+on-site balance) with Polymarket-like UI. Agent refused: Malaysian
+gambling law (§3), non-custodial settlement architecture, and §5
+(FSC earned-never-bought, no top-up). Human clarified: per-user SOL
+addresses the user actually holds, no gambling mechanics, sneaker
+marketplace unchanged — embedded-wallet UX only. Accepted reading.
+
+Shipped as FRONTEND PROTOTYPE only (`WalletMenu` dropdown in the header,
+minimized search `max-w-xl` → `max-w-sm`): every figure shown is real
+(`GET /api/solana/balances`), unlinked state offers the existing link
+flow, nothing mocked. Two backend decisions PARKED, no work until both
+are answered: (1) key custody for embedded addresses (MPC provider vs
+current connect model — custody + regulatory implications), (2) SOL vs
+USDC as the traded asset (program settles USDC today; SOL means new
+program logic, quote math, and verifier rules).
