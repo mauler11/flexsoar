@@ -19,6 +19,10 @@
  * table has no deadline column, so the 72h window below is a local constant
  * and is clearly labelled as one.
  *
+ * Payout plumbing lives on /payouts (see app/(market)/payouts/page.tsx):
+ * Stripe Connect onboarding and the linked USDC payout wallet both moved
+ * there so this page stays about stock, not money movement.
+ *
  * There used to be a "cash payout gate" panel here mirroring
  * users.fulfilments_completed against a client-side threshold. Removed: it
  * described a gate fn_submit_listing (019c) no longer has. Payout is derived
@@ -32,50 +36,9 @@ import { getCards, getConsignment, getConsignments, getRedemptions } from "@/lib
 import type { CardSummary } from "@/lib/api/contract";
 import type { ItemSummary } from "@/lib/api/contract";
 import { currentUserId, getHiddenCardIds, getMySubmittedItems } from "@/app/(market)/queries";
-import { createServerSupabase } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/Button";
-import { PayoutSetup } from "@/components/market/PayoutSetup";
-import { EmbeddedLinkButton } from "@/components/market/EmbeddedWalletSection";
 import { DashboardTabs } from "@/components/market/DashboardTabs";
 import { EmptyState } from "@/components/ui/EmptyState";
-
-/**
- * Stored Connect status for the dashboard. Reads the webhook-landed columns
- * (028) — the live check happens on /consignor/connect/return and via the
- * account.updated webhook. Never pre-mints an onboarding link here: account
- * links expire, so the link is minted on button click (PayoutSetup POSTs to
- * /api/consignor/connect).
- */
-async function getConnectStatus(userId: string): Promise<{
-  accountId: string | null;
-  payoutsEnabled: boolean;
-  isConsignor: boolean;
-  countryCode: string | null;
-  solanaAddress: string | null;
-}> {
-  const supabase = await createServerSupabase();
-  const { data } = await supabase
-    .from("users")
-    .select(
-      "stripe_connect_account_id, stripe_connect_payouts_enabled, is_consignor, country_code, solana_address",
-    )
-    .eq("id", userId)
-    .maybeSingle();
-  const row = (data ?? {}) as {
-    stripe_connect_account_id?: string | null;
-    stripe_connect_payouts_enabled?: boolean | null;
-    is_consignor?: boolean | null;
-    country_code?: string | null;
-    solana_address?: string | null;
-  };
-  return {
-    accountId: row.stripe_connect_account_id ?? null,
-    payoutsEnabled: row.stripe_connect_payouts_enabled ?? false,
-    isConsignor: row.is_consignor ?? false,
-    countryCode: row.country_code ?? null,
-    solanaAddress: row.solana_address ?? null,
-  };
-}
 
 export const metadata: Metadata = {
   title: "Dashboard — FlexSoar Market",
@@ -98,10 +61,6 @@ const HELD_CARD_STATUSES = ["active", "locked", "pending_vault"] as CardSummary[
 
 export default async function DashboardPage() {
   const me = await currentUserId();
-
-  const connectStatus = me
-    ? await getConnectStatus(me)
-    : { accountId: null, payoutsEnabled: false, isConsignor: false, countryCode: null, solanaAddress: null };
 
   if (!me) {
     return (
@@ -154,47 +113,6 @@ export default async function DashboardPage() {
           List a Shoe
         </Button>
       </div>
-
-      {/* Connect Payout Setup */}
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-bold tracking-tight text-foreground">
-          Payout setup
-        </h2>
-        <PayoutSetup
-          accountId={connectStatus.accountId}
-          payoutsEnabled={connectStatus.payoutsEnabled}
-          isConsignor={connectStatus.isConsignor}
-          countryCode={connectStatus.countryCode}
-        />
-      </section>
-
-      {/* USDC payout wallet — the ONLY seller-side link path. Sellers never
-          see the buy panel on their own listings, so without this section a
-          seller whose listings the quote path rejects ("seller has no linked
-          payout wallet yet") has nowhere to fix it. */}
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-bold tracking-tight text-foreground">
-          USDC payout wallet
-        </h2>
-        {connectStatus.solanaAddress ? (
-          <div className="flex flex-col gap-2">
-            <p className="text-[11px] text-muted">
-              Linked {connectStatus.solanaAddress.slice(0, 8)}…
-              {connectStatus.solanaAddress.slice(-6)} — USDC sale proceeds go
-              here (95% seller / 5% FlexSoar, split on-chain).
-            </p>
-            <EmbeddedLinkButton cta="Change payout wallet" />
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            <p className="text-[11px] text-muted">
-              No wallet linked — your listings can&apos;t be bought with USDC
-              until you link one. One signature proves you own it.
-            </p>
-            <EmbeddedLinkButton cta="Link payout wallet" />
-          </div>
-        )}
-      </section>
 
       <DashboardTabs
         submittedItems={submittedItems}

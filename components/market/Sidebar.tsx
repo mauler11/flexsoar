@@ -21,7 +21,7 @@ import { cn } from "@/components/ui/cn";
 export interface SidebarItem {
   href: string;
   label: string;
-  icon: "market" | "list" | "dashboard" | "profile" | "admin";
+  icon: "market" | "list" | "dashboard" | "payouts" | "profile" | "admin";
 }
 
 export interface SidebarProps {
@@ -66,6 +66,14 @@ function Icon({ icon }: { icon: SidebarItem["icon"] }) {
           <rect x="13" y="4" width="7" height="7" rx="1.5" />
           <rect x="4" y="13" width="7" height="7" rx="1.5" />
           <rect x="13" y="13" width="7" height="7" rx="1.5" />
+        </svg>
+      );
+    case "payouts":
+      return (
+        <svg {...props}>
+          <path d="M12 4v12" />
+          <path d="M8 11l4 4 4-4" />
+          <path d="M4 20h16" />
         </svg>
       );
     case "profile":

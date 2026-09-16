@@ -15,7 +15,7 @@ import { ContractError, createConnectAccount } from "@/lib/api/contract";
 export default async function ConnectRefreshPage() {
   const me = await currentUserId();
   if (!me) {
-    redirect("/sign-in?next=/dashboard");
+    redirect("/sign-in?next=/payouts");
   }
 
   try {
@@ -35,8 +35,8 @@ export default async function ConnectRefreshPage() {
         </h1>
         <p className="font-mono text-[11px] tracking-tight text-[#FF4444]">
           Could not refresh your Stripe link: {message}.{" "}
-          <Link href="/dashboard" className="text-accent hover:underline">
-            Back to dashboard
+          <Link href="/payouts" className="text-accent hover:underline">
+            Back to payouts
           </Link>
         </p>
       </div>

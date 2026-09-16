@@ -164,7 +164,7 @@ export function SolanaBuyPanel({
       ) : (
         <Button
           type="button"
-          variant="secondary"
+          variant="primary"
           size="lg"
           disabled={busy}
           onClick={buyWithUsdc}

@@ -17,7 +17,7 @@
 "use client";
 
 import { useState } from "react";
-import { useAddFunds } from "@privy-io/react-auth";
+import { useAddFunds, usePrivy } from "@privy-io/react-auth";
 import { Button } from "@/components/ui/Button";
 import { Banner } from "@/components/market/Banner";
 import {
@@ -36,10 +36,42 @@ export function FundingOptions({ address }: { address: string }) {
 }
 
 function FundingOptionsInner({ address }: { address: string }) {
+  const { ready, authenticated, login } = usePrivy();
   const { addFunds } = useAddFunds();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  if (!ready) {
+    return (
+      <div className="flex flex-col gap-2 rounded-xl border border-line bg-background p-3">
+        <span className="text-xs font-semibold">More deposit options</span>
+        <p className="text-[11px] leading-snug text-muted">Preparing funding…</p>
+      </div>
+    );
+  }
+
+  if (!authenticated) {
+    return (
+      <div className="flex flex-col gap-2 rounded-xl border border-line bg-background p-3">
+        <span className="text-xs font-semibold">More deposit options</span>
+        <p className="text-[11px] leading-snug text-muted">
+          Card or crypto through Privy providers. Log in with email to set up
+          your payment method — funds land in this wallet first, then you buy
+          with Balance.
+        </p>
+        <Button
+          type="button"
+          variant="primary"
+          size="md"
+          onClick={() => login()}
+          className="rounded-lg px-4 py-2.5 text-sm"
+        >
+          Continue with email
+        </Button>
+      </div>
+    );
+  }
 
   async function fund() {
     setBusy(true);

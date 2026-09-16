@@ -1212,3 +1212,46 @@ user funds under policies — blurs the non-custodial line, needs explicit
 acceptance). MY corridor coverage unverified in docs. Stripe Connect
 already pays MY sellers through a proven corridor — Privy payouts only
 make sense if Stripe fails some seller class. Not building now.
+
+## 2026-09-16 — Payouts page + funding auth gate (shipped)
+
+Four follow-ups from the Courtyard revamp pass, one commit.
+
+1. **"Buy with Balance" is green now** — `SolanaBuyPanel` button flipped
+   `secondary → primary` (the accent-green CTA), so the payment choice in
+   checkout reads Card (Stripe) vs green Balance, matching the wall of the
+   wallet tab.
+2. **Funding never auto-errors on an anonymous Privy session again.**
+   `FundingOptions` now gates `useAddFunds` behind `usePrivy()`:
+   `!ready` renders a "Preparing funding…" card, `!authenticated` renders a
+   **"Continue with email"** primary button that reuses `login()` — so the
+   "User must be authenticated to add funds" throw (Privy requires an
+   authenticated session for `addFunds`) is unreachable from the UI; the
+   user sets up their email first, then the Add Funds button appears.
+   Note: `login()` (email OTP) does NOT create the embedded wallet unless
+   `createOnLogin: "users-without-wallets"` is set in `PrivyProviders` —
+   confirmed present.
+3. **New `/payouts` route** — Stripe Connect (`PayoutSetup`) and the linked
+   USDC payout wallet moved off the dashboard (it was too full). The page
+   reads the same webhook-landed columns; seller-side wallet linking under
+   /payouts is still the ONLY fix surface for the "seller has no linked
+   payout wallet yet" quote rejection. Dashboard now renders stock only.
+   Nav: new "payouts" sidebar icon under Dashboard, UserMenu dropdown gets
+   Payouts, `payout_sent` notifications link /dashboard → /payouts (label
+   "View payouts"), wallet-settings link now "Manage in Payouts", and both
+   connect/return and connect/refresh pages link /payouts (refresh's
+   sign-in next URL too).
+4. **Why "Fiat balance topup is unavailable":** several compounding causes,
+   only one of them dev-mode:
+   - The error on screen ("User must be authenticated to add funds") is
+     Privy session auth, not dev mode — fixed by #2 above.
+   - Sandbox funding still targets **mainnet** chain IDs
+     (`FUNDING_CHAIN = solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`,
+     `FUNDING_USDC_MINT = EPjFWdd…` in `lib/solana/privy.ts`): providers
+     deliver to no testnet, so a "test" top-up can't land in a devnet
+     wallet by design. Dev mode is why balance is devnet; it's not why the
+     buy-in is missing.
+   - `FUNDING_FIAT_ASSETS = ['usd','eur']` today — MYR card funding needs
+     Meld KYB (paperwork), the documented long pole.
+   - `NEXT_PUBLIC_ENABLE_PRIVY_CHECKOUT=1` gates the whole FundingOptions
+     surface; harmless if unset in Vercel (panel simply won't render).

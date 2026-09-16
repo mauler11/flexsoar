@@ -49,6 +49,13 @@ export function UserMenu({ handle }: { handle: string }) {
             >
               Dashboard
             </Link>
+            <Link
+              href="/payouts"
+              onClick={() => setOpen(false)}
+              className="rounded-lg px-3 py-2 text-sm transition hover:bg-background"
+            >
+              Payouts
+            </Link>
             <form action={signOut}>
               <button
                 type="submit"

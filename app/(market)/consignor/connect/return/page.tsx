@@ -54,9 +54,9 @@ export default async function ConnectReturnPage() {
           Payout setup
         </h1>
         <p className="font-mono text-[11px] tracking-tight text-muted">
-          No Connect account found. Start from the dashboard.{" "}
-          <Link href="/dashboard" className="text-accent hover:underline">
-            Back to dashboard
+          No Connect account found. Start from Payouts.{" "}
+          <Link href="/payouts" className="text-accent hover:underline">
+            Back to payouts
           </Link>
         </p>
       </div>
@@ -89,15 +89,15 @@ export default async function ConnectReturnPage() {
         <p className="font-mono text-[11px] tracking-tight text-[#FF4444]">
           Could not check Stripe status: {statusError}. The webhook will still
           update your account when onboarding completes.{" "}
-          <Link href="/dashboard" className="text-accent hover:underline">
-            Back to dashboard
+          <Link href="/payouts" className="text-accent hover:underline">
+            Back to payouts
           </Link>
         </p>
       ) : status?.onboardingComplete ? (
         <p className="font-mono text-[11px] tracking-tight text-green-500">
           Payouts enabled — your Stripe account is ready.{" "}
-          <Link href="/dashboard" className="text-accent hover:underline">
-            Back to dashboard
+          <Link href="/payouts" className="text-accent hover:underline">
+            Back to payouts
           </Link>
         </p>
       ) : (
@@ -106,8 +106,8 @@ export default async function ConnectReturnPage() {
           {status?.chargesEnabled ? "enabled" : "pending"}, payouts:{" "}
           {status?.payoutsEnabled ? "enabled" : "pending"}). Finish
           Stripe&apos;s remaining steps, then come back.{" "}
-          <Link href="/dashboard" className="text-accent hover:underline">
-            Back to dashboard
+          <Link href="/payouts" className="text-accent hover:underline">
+            Back to payouts
           </Link>
         </p>
       )}

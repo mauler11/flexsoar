@@ -396,11 +396,11 @@ function WalletSettings({
         settle wallet-to-wallet on-chain.
       </p>
       <Link
-        href="/dashboard"
+        href="/payouts"
         onClick={onClose}
         className="text-center text-xs font-semibold text-accent hover:underline"
       >
-        Manage in Dashboard →
+        Manage in Payouts →
       </Link>
     </div>
   );

@@ -97,7 +97,7 @@ function notificationLink(type: ContractNotification["type"], payload: Json): st
     case "card_redeemed":
       return p.card_id ? `/card/${p.card_id}` : undefined;
     case "payout_sent":
-      return "/dashboard";
+      return "/payouts";
     case "request_approved":
       return p.model_id ? `/list/${p.model_id}` : "/list";
     case "request_rejected":
@@ -112,7 +112,7 @@ function notificationLinkLabel(type: ContractNotification["type"]): string | und
     case "card_redeemed":
       return "View card";
     case "payout_sent":
-      return "View dashboard";
+      return "View payouts";
     case "request_approved":
       return "List it now";
     case "request_rejected":
@@ -154,6 +154,7 @@ export default async function MarketLayout({
     { href: "/market", label: "Market", icon: "market" },
     { href: "/list", label: "List", icon: "list" },
     { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
+    { href: "/payouts", label: "Payouts", icon: "payouts" },
     ...(me
       ? [{ href: `/u/${me.handle}`, label: "Profile", icon: "profile" as const }]
       : [{ href: "/sign-in", label: "Profile", icon: "profile" as const }]),
