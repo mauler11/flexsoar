@@ -55,7 +55,7 @@ export async function usdBaseRates(
   fetchImpl: typeof fetch = fetch,
 ): Promise<Record<string, number> | null> {
   try {
-    const res = await fetchImpl('https://open.er-api.com/v1/latest/USD');
+    const res = await fetchImpl('https://open.er-api.com/v6/latest/USD');
     if (!res.ok) return null;
     const body = (await res.json()) as { rates?: Record<string, number> };
     const myr = body.rates?.MYR;
