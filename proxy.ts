@@ -30,8 +30,20 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+import {
+  RATE_LIMITED_PREFIXES,
+  checkRateLimit,
+  clientIp,
+  createRateLimitStore,
+  retryAfterSeconds,
+  type RateLimitStore,
+} from '@/lib/api/rate-limit';
+
 /** Prefixes gated on users.is_admin. */
 const ADMIN_PREFIX = '/admin';
+
+/** Per-instance throttle buckets. See lib/api/rate-limit.ts for the caveat. */
+const throttleStore: RateLimitStore = createRateLimitStore();
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -46,6 +58,31 @@ function withCookiesFrom(source: NextResponse, target: NextResponse): NextRespon
 }
 
 export async function proxy(request: NextRequest): Promise<NextResponse> {
+  // Throttle abuse-prone API prefixes BEFORE any session work, so rejected
+  // requests cost no Supabase round-trip. Webhooks are not matched here at
+  // all (see matcher) and are never throttled — Stripe retries on 429.
+  const { pathname } = request.nextUrl;
+  for (const { prefix, rule } of RATE_LIMITED_PREFIXES) {
+    if (!pathname.startsWith(prefix)) continue;
+    const verdict = checkRateLimit(
+      throttleStore,
+      `${prefix}${clientIp(request)}`,
+      rule,
+    );
+    if (!verdict.allowed) {
+      return NextResponse.json(
+        { error: 'rate_limited' },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(retryAfterSeconds(verdict.resetAt)),
+          },
+        },
+      );
+    }
+    break;
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
