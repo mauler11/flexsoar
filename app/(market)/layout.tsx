@@ -240,10 +240,23 @@ export default async function MarketLayout({
                 </div>
               )}
             </div>
-            <div className="w-full pb-3 sm:hidden">
-              <Suspense>
-                <SearchInput />
-              </Suspense>
+            {/* Row 2 (mobile only): shorter search + bell side by side,
+                one row. The bell only exists when signed in — signed-out
+                mobile keeps the full-width search. */}
+            <div className="flex w-full items-center gap-2 pb-3 sm:hidden">
+              <div className="min-w-0 flex-1">
+                <Suspense>
+                  <SearchInput />
+                </Suspense>
+              </div>
+              {me && (
+                <div className="shrink-0">
+                  <NotificationBell
+                    notifications={notifications}
+                    unreadCount={unreadCount}
+                  />
+                </div>
+              )}
             </div>
           </div>
         </header>
@@ -253,6 +266,7 @@ export default async function MarketLayout({
           <MobileNav
             items={sidebarItems}
             account={me ? <UserMenu handle={me.handle} /> : undefined}
+            wallet={me ? <WalletMenu /> : undefined}
           />
           <div className="flex min-w-0 flex-1 flex-col">
             <main className="mx-auto w-full max-w-6xl flex-1 px-0.5 py-6">

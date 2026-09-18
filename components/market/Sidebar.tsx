@@ -238,9 +238,12 @@ export function MobileNavButton() {
 export function MobileNav({
   items,
   account,
+  wallet,
 }: {
   items: readonly SidebarItem[];
   account?: React.ReactNode;
+  /** Signed-in wallet shortcut (button + modal live here). */
+  wallet?: React.ReactNode;
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -321,6 +324,14 @@ export function MobileNav({
             </Link>
           );
         })}
+        {wallet && (
+          <div className="mt-3 border-t border-line pt-3">
+            <span className="px-1 text-xs font-bold uppercase tracking-widest text-muted">
+              Wallet
+            </span>
+            <div className="mt-2 [&>button]:w-full">{wallet}</div>
+          </div>
+        )}
         {account && <div className="mt-auto pt-4">{account}</div>}
       </nav>
     </div>

@@ -97,7 +97,7 @@ export const TOUR_SLIDES: readonly Omit<TourSlide, "visual">[] = [
   {
     eyebrow: "The fine print",
     title: "Agree to the Terms",
-    body: "Cards are claims on physical sneakers, not investments. Prices are asks between people, and sales are final once the vault confirms receipt.",
+    body: "Cards are claims on physical sneakers, not investments. Prices are asks between people, and sales are final once the vault confirms receipt. Sellers pay a 5% platform fee on every sale — the buyer pays the listed price, and the seller receives 95% of it.",
   },
 ];
 

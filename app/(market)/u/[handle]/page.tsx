@@ -17,6 +17,7 @@ import {
 } from "@/app/(market)/queries";
 import { MarketTile } from "@/components/market/MarketTile";
 import { HeldCard } from "@/components/market/HeldCard";
+import { PlStrip, plEntriesForCards } from "@/components/market/PlStrip";
 import { TradeToggle } from "@/components/market/TradeToggle";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatMyr } from "@/components/card/format";
@@ -91,6 +92,26 @@ export default async function ProfilePage({
 
   const joined = profile.created_at.slice(0, 10);
 
+  // Owner-only unrealized P/L: open-hop cost vs live ask (else oracle).
+  // Visitors never see this strip — financial privacy, same instinct as
+  // the collection master switch. A per-account "show my P/L" needs a
+  // users.show_pl column (migration, human lane).
+  const openCostByCardId = new Map<string, number | null>();
+  for (const t of trades) {
+    if (t.releasedAt == null && !openCostByCardId.has(t.cardId)) {
+      openCostByCardId.set(t.cardId, t.priceCents);
+    }
+  }
+  const plEntries = plEntriesForCards(
+    ownedCards.map((c) => ({
+      id: c.id,
+      label: `${c.sku.brand} ${c.sku.model}`,
+      oracleCents: c.sku.market_price_cents ?? null,
+    })),
+    openCostByCardId,
+    livePriceByCardId,
+  );
+
   return (
     <div className="flex flex-col gap-5">
       <section className="flex flex-wrap items-center justify-between gap-3 border border-line bg-overlay p-3">
@@ -130,6 +151,8 @@ export default async function ProfilePage({
           description="This seller keeps their holdings hidden."
         />
       )}
+
+      {isOwner && holdingsVisible && <PlStrip entries={plEntries} />}
 
       {holdingsVisible && (
       <section>

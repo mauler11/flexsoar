@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
 import { GridSkeleton, TileSkeleton } from '@/components/market/MarketSkeleton';
+import { plEntriesForCards } from '@/components/market/PlStrip';
 
 vi.mock('@/lib/api/contract', () => ({
   getListings: vi.fn(async () => []),
@@ -71,5 +72,26 @@ describe('market cache', () => {
     await cachedPlatformConfig();
     await cachedPlatformConfig();
     expect(vi.mocked(getPlatformConfig)).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('p/l entries', () => {
+  const cards = [
+    { id: 'a', label: 'A', oracleCents: 2000 },
+    { id: 'b', label: 'B', oracleCents: null },
+    { id: 'c', label: 'C', oracleCents: 5000 },
+  ] as const;
+
+  it('prefers the live ask over the oracle, keeps unknown sides null', () => {
+    const entries = plEntriesForCards(
+      [...cards],
+      new Map([['a', 1000], ['b', 1000]]),
+      new Map([['a', 2500]]),
+    );
+    expect(entries[0]).toMatchObject({ costCents: 1000, valueCents: 2500 });
+    // No ask, no oracle: value stays null, never invented.
+    expect(entries[1]).toMatchObject({ costCents: 1000, valueCents: null });
+    // No cost hop: cost stays null.
+    expect(entries[2]).toMatchObject({ costCents: null, valueCents: 5000 });
   });
 });

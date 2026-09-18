@@ -32,12 +32,13 @@
  */
 
 import type { Metadata } from "next";
-import { getCards, getConsignment, getConsignments, getRedemptions } from "@/lib/api/contract";
+import { getCards, getConsignment, getConsignments, getListings, getRedemptions } from "@/lib/api/contract";
 import type { CardSummary } from "@/lib/api/contract";
 import type { ItemSummary } from "@/lib/api/contract";
-import { currentUserId, getHiddenCardIds, getMySubmittedItems } from "@/app/(market)/queries";
+import { currentUserId, getHiddenCardIds, getMySubmittedItems, getTradeHistory } from "@/app/(market)/queries";
 import { Button } from "@/components/ui/Button";
 import { DashboardTabs } from "@/components/market/DashboardTabs";
+import { PlStrip, plEntriesForCards } from "@/components/market/PlStrip";
 import { EmptyState } from "@/components/ui/EmptyState";
 
 export const metadata: Metadata = {
@@ -98,6 +99,30 @@ export default async function DashboardPage() {
     visibility[card.id] = !hiddenIds.has(card.id);
   }
 
+  // Unrealized P/L inputs: live asks for value, open provenance hops for
+  // cost. Sold cards are excluded by construction — provenance records no
+  // release price, so realized P/L cannot be computed from it.
+  const [liveListings, trades] = await Promise.all([
+    getListings({ sellerId: me }).catch(() => []),
+    getTradeHistory(me).catch(() => []),
+  ]);
+  const askByCardId = new Map(liveListings.map((l) => [l.card_id, l.price_cents]));
+  const openCostByCardId = new Map<string, number | null>();
+  for (const t of trades) {
+    if (t.releasedAt == null && !openCostByCardId.has(t.cardId)) {
+      openCostByCardId.set(t.cardId, t.priceCents);
+    }
+  }
+  const plEntries = plEntriesForCards(
+    heldCards.map((c) => ({
+      id: c.id,
+      label: `${c.sku.brand} ${c.sku.model}`,
+      oracleCents: c.sku.market_price_cents ?? null,
+    })),
+    openCostByCardId,
+    askByCardId,
+  );
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-end justify-between gap-3">
@@ -113,6 +138,8 @@ export default async function DashboardPage() {
           List a Shoe
         </Button>
       </div>
+
+      <PlStrip entries={plEntries} />
 
       <DashboardTabs
         submittedItems={submittedItems}

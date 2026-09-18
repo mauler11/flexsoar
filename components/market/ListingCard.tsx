@@ -6,18 +6,20 @@
  * indication. The whole card links to the detail page.
  *
  * Buy affordance is hover-reveal on hover-capable devices (desktop): a
- * scrim + Buy Now pill fades in over the art. Touch devices have no hover,
- * so the overlay never renders there — tapping the card opens the detail
- * page, where the real checkout lives. The pill is pointer-events-none and
- * aria-hidden: pure visual affordance, never a separate target (nested
- * interactives inside a link would break keyboard/screen-reader users).
+ * scrim + Buy Now pill fades in over the art. The pill is a real button —
+ * clicking it opens the checkout popup instantly without leaving the grid.
+ * Touch devices have no hover, so the overlay never renders there — tapping
+ * the card opens the detail page, where the real checkout lives.
  *
  * Only real data is rendered: no wishlist hearts (no watchlist UI), no trend
  * deltas (no price history), no make-offer (not a real flow). "Fair" anchors
  * on fair_price_cents (condition-adjusted) with oracle_value_cents as the
  * fallback; with neither, the indication line is omitted, never invented.
  */
+"use client";
+
 import Link from "next/link";
+import { useState } from "react";
 
 import type { ListingSummary } from "@/lib/api/contract";
 import { toSku } from "@/components/market/bridge";
@@ -27,6 +29,8 @@ import { FloatBar } from "@/components/card/FloatBar";
 import { TierBadge } from "@/components/card/TierBadge";
 import { formatMyr } from "@/components/card/format";
 import { FiatAmount } from "@/components/market/Fiat";
+import { Modal } from "@/components/market/Modal";
+import { CheckoutModal } from "@/components/market/CheckoutModal";
 import {
   borderColorFor,
   conditionGradeBand,
@@ -93,8 +97,10 @@ export function ListingCard({
     listing.card.tier,
     listing.card.is_exceptional,
   );
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
 
   return (
+    <>
     <Link
       href={detailHref}
       aria-label={`${listing.card.sku.brand} ${listing.card.sku.model} ${listing.card.sku.colorway}, ${formatMyr(listing.price_cents)}`}
@@ -112,13 +118,26 @@ export function ListingCard({
               isExceptional={listing.card.is_exceptional}
             />
           </div>
+          {/* Hover scrim: visual only. The pill inside is a real button —
+              keyboard users reach it by tabbing (focus-visible reveals the
+              scrim), mouse users by hovering. */}
           <div
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 bottom-0 hidden justify-center bg-gradient-to-t from-black/70 via-black/20 to-transparent px-3 pb-3 pt-10 opacity-0 transition-opacity duration-150 group-focus-visible:opacity-100 [@media(hover:hover)]:flex [@media(hover:hover)]:group-hover:opacity-100"
+            className="pointer-events-none absolute inset-x-0 bottom-0 hidden justify-center bg-gradient-to-t from-black/70 via-black/20 to-transparent px-3 pb-3 pt-10 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-focus-visible:opacity-100 [@media(hover:hover)]:flex [@media(hover:hover)]:group-hover:opacity-100"
           >
-            <span className="inline-flex items-center justify-center rounded-full bg-accent px-6 py-2 text-sm font-bold text-[#0B0B0B]">
+            <button
+              type="button"
+              aria-label={`Buy ${listing.card.sku.brand} ${listing.card.sku.model} now`}
+              onClick={(e) => {
+                // The pill lives inside the card link: swallow the click so
+                // the checkout popup opens instead of navigating away.
+                e.preventDefault();
+                e.stopPropagation();
+                setCheckoutOpen(true);
+              }}
+              className="pointer-events-auto inline-flex items-center justify-center rounded-full bg-accent px-6 py-2 text-sm font-bold text-[#0B0B0B] transition hover:brightness-110"
+            >
               Buy Now
-            </span>
+            </button>
           </div>
         </div>
       </div>
@@ -163,5 +182,22 @@ export function ListingCard({
         )}
       </div>
     </Link>
+    {checkoutOpen && (
+      <Modal onClose={() => setCheckoutOpen(false)} closeLabel="Close checkout" panelClassName="max-w-2xl">
+        <CheckoutModal
+          listing={{
+            id: listing.id,
+            cardId: listing.card_id,
+            priceCents: listing.price_cents,
+            fairPriceCents: listing.fair_price_cents,
+            oracleValueCents: listing.oracle_value_cents,
+            status: listing.status,
+            sellerId: listing.seller_id,
+          }}
+          onClose={() => setCheckoutOpen(false)}
+        />
+      </Modal>
+    )}
+    </>
   );
 }

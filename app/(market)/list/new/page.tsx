@@ -18,6 +18,7 @@ import {
 } from "@/lib/api/contract";
 import { currentUserId, getCashPayoutCountryCodes } from "@/app/(market)/queries";
 import { IntakeWizard } from "@/components/market/intake/IntakeWizard";
+import { Banner } from "@/components/market/Banner";
 import type { UUID } from "@/lib/db/types";
 
 export const metadata: Metadata = {
@@ -79,7 +80,12 @@ export default async function ListNewPage({
       variant = null;
     }
   }
-  if (!variant) redirect(`/list/${model.id}`);
+  // Variant resolution failed (ensure rejected for a signed-in seller, or
+  // the size genuinely doesn't exist). Never bounce back to the product
+  // page silently — that reads as a dead Sell button. Land on Photos'
+  // doorstep instead: the wizard at its SKU step with the failure stated,
+  // so the seller picks the shoe manually and keeps moving.
+  const variantMissing = !variant;
 
   const [sellerPayoutMethod, existingCountryCode, cashPayoutCountryCodes] = await Promise.all([
     me ? getPayoutMethodForUser(me).catch(() => null) : Promise.resolve(null),
@@ -94,7 +100,7 @@ export default async function ListNewPage({
           Submit your pair
         </h1>
         <p className="text-sm text-muted">
-          {model.brand} {model.model} · {model.colorway} · US {variant.size_us}
+          {model.brand} {model.model} · {model.colorway} · US {variant?.size_us ?? sizeUs}
           {" · "}
           <Link href={`/list/${model.id}`} className="text-accent hover:underline">
             change size
@@ -102,13 +108,23 @@ export default async function ListNewPage({
         </p>
       </div>
 
+      {variantMissing && (
+        <Banner tone="warn" title={`Couldn't lock in US M ${sizeUs}`}>
+          The size didn&apos;t resolve — pick your shoe below and you&apos;ll
+          be at Photos in one step.
+        </Banner>
+      )}
       <IntakeWizard
         skus={[]}
         signedIn={me != null}
         sellerPayoutMethod={sellerPayoutMethod}
         initialCountryCode={existingCountryCode}
         cashPayoutCountryCodes={cashPayoutCountryCodes}
-        preselected={{ sku: variant, unpriced: model.base_price_cents == null }}
+        preselected={
+          variant
+            ? { sku: variant, unpriced: model.base_price_cents == null }
+            : null
+        }
       />
     </div>
   );

@@ -2,9 +2,10 @@
  * components/market/CheckoutModal.tsx
  *
  * Single-Buy-Now checkout popup (Courtyard-arranged): payment-method radio
- * on the left, order summary with the action on the right. The fee math is
- * stated the way it settles: the buyer pays the total, the 5% splits FROM
- * it on-chain (seller nets 95%) — never added on top.
+ * on the left, order summary with the action on the right. The buyer pays
+ * the total, full stop — the platform fee is a seller-side matter (the 5%
+ * splits FROM the total on-chain, seller nets 95%) and is deliberately not
+ * shown here, so the summary states only what the buyer owes.
  *
  *   - Card → existing Stripe checkout redirect (the only true one-step
  *     card payment; raw PANs never touch our UI — PCI stays with Stripe).
@@ -61,12 +62,11 @@ export function CheckoutButton({ listing }: BuyModalProps) {
   );
 }
 
-function CheckoutModal({ listing, onClose }: { listing: BuyPanelListing; onClose: () => void }) {
+export function CheckoutModal({ listing, onClose }: { listing: BuyPanelListing; onClose: () => void }) {
   const [method, setMethod] = useState<Method>("wallet");
   const [pending, startTransition] = useTransition();
   const [wallet, setWallet] = useState<WalletState | null>(null);
   const { rates } = useFiat();
-  const feeCents = Math.floor((listing.priceCents * 500) / 10000);
 
   useEffect(() => {
     let live = true;
@@ -184,18 +184,10 @@ function CheckoutModal({ listing, onClose }: { listing: BuyPanelListing; onClose
               <span className="text-muted">Price</span>
               <FiatAmount cents={listing.priceCents} />
             </div>
-            <div className="flex items-baseline justify-between text-sm">
-              <span className="text-muted">Platform fee (5%, included)</span>
-              <FiatAmount cents={feeCents} />
-            </div>
             <div className="flex items-baseline justify-between border-t border-line pt-2 text-sm font-bold">
               <span>You pay</span>
               <FiatAmount cents={listing.priceCents} />
             </div>
-            <p className="text-[11px] leading-snug text-muted">
-              The 5% splits from the total on-chain — the seller nets 95%.
-              You pay exactly the total above.
-            </p>
           </div>
 
           {method === "card" ? (

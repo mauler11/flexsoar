@@ -125,17 +125,21 @@ export function FiatProvider({ children }: { children: ReactNode }) {
 
   const toggleBalanceFiat = useCallback(() => {
     // Quick flip between the exact USDC figure and the last fiat.
+    // NOTE: fiatOn excludes MYR and USDC, so the "on" landing must be a
+    // genuine fiat code — defaulting to MYR left the switch stuck off.
     setBalanceCodeState((current) => {
       if (current !== "USDC") {
         store("flexsoar-balance-code", "USDC");
         return "USDC";
       }
-      let last = "MYR";
+      let last = "USD";
       try {
         const stored = window.localStorage.getItem("flexsoar-balance-code");
-        if (isKnownCode(stored) && stored !== "USDC") last = stored;
+        if (isKnownCode(stored) && stored !== "USDC" && stored !== "MYR") {
+          last = stored;
+        }
       } catch {
-        // Private mode — fall back to MYR.
+        // Private mode — fall back to USD.
       }
       store("flexsoar-balance-code", last);
       return last;
