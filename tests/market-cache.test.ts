@@ -3,6 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GridSkeleton, TileSkeleton } from '@/components/market/MarketSkeleton';
+import { RarityBand } from '@/components/card/RarityBand';
+import { borderColorFor } from '@/lib/domain/rarity';
 
 vi.mock('@/lib/api/contract', () => ({
   getListings: vi.fn(async () => []),
@@ -28,6 +30,23 @@ describe('market skeletons', () => {
     const tiles = html.match(/aspect-\[4\/3\]/g) ?? [];
     expect(tiles).toHaveLength(12);
     expect(html).toContain('grid-cols-2');
+  });
+});
+
+describe('rarity band', () => {
+  it('renders the tier colour band, agreeing with TierBadge', () => {
+    const html = renderToStaticMarkup(
+      createElement(RarityBand, { tier: 5 }),
+    );
+    expect(html).toContain(borderColorFor(5));
+  });
+
+  it('exceptional renders red, like TierBadge', () => {
+    const html = renderToStaticMarkup(
+      createElement(RarityBand, { tier: 2, isExceptional: true }),
+    );
+    expect(html).toContain(borderColorFor(2, true));
+    expect(html).toContain('#FF4444');
   });
 });
 

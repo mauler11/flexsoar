@@ -18,6 +18,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { currentUserId } from "@/app/(market)/queries";
 import { SearchInput } from "@/components/market/SearchInput";
 import { Sidebar, type SidebarItem } from "@/components/market/Sidebar";
+import { MobileNav, MobileNavButton } from "@/components/market/Sidebar";
 import { SiteFooter } from "@/components/market/SiteFooter";
 import { OnboardingTour } from "@/components/market/OnboardingTour";
 import { NotificationBell } from "@/components/market/NotificationBell";
@@ -180,13 +181,14 @@ export default async function MarketLayout({
   }));
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-screen flex-col overflow-x-clip">
       <ToastProvider>
         <OnboardingTour accountAgreed={accountAgreed} />
         <FiatProvider>
         <PrivyProviders>
         <header className="sticky top-0 z-40 border-b border-line bg-background/80 backdrop-blur">
-          <div className="flex w-full items-center gap-3 px-4 py-3">
+          <div className="flex w-full items-center gap-2 px-3 py-3 sm:gap-3 sm:px-4">
+            <MobileNavButton />
             <Link
               href="/"
               aria-label="FlexSoar home"
@@ -198,6 +200,7 @@ export default async function MarketLayout({
                     width={150}
                     height={50}
                     priority
+                    className="h-9 w-auto sm:h-auto sm:w-[150px]"
                   />
                 </Link>
                 <div className="mx-auto min-w-0 w-full max-w-xl flex-1">
@@ -205,7 +208,9 @@ export default async function MarketLayout({
                     <SearchInput />
                   </Suspense>
                 </div>
-                <div className="flex shrink-0 items-center gap-3">
+                {/* Logged in: account cluster is sm+ only — on mobile the
+                    header is logo + search, account lives in the drawer. */}
+                <div className="hidden shrink-0 items-center gap-3 sm:flex">
                   {me ? (
                     <>
                       <WalletBalance />
@@ -227,11 +232,21 @@ export default async function MarketLayout({
                     </>
                   )}
                 </div>
+                {/* Signed out on mobile: auth buttons only (no fiat). */}
+                {!me && (
+                  <div className="flex shrink-0 items-center sm:hidden">
+                    <AuthButtons />
+                  </div>
+                )}
           </div>
         </header>
 
         <div className="flex flex-1">
           <Sidebar items={sidebarItems} />
+          <MobileNav
+            items={sidebarItems}
+            account={me ? <UserMenu handle={me.handle} /> : undefined}
+          />
           <div className="flex min-w-0 flex-1 flex-col">
             <main className="mx-auto w-full max-w-6xl flex-1 px-0.5 py-6">
               {children}

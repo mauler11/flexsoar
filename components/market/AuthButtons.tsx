@@ -17,11 +17,11 @@ export function AuthButtons() {
 
   return (
     <>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
         <Button
           size="md"
           variant="secondary"
-          className="rounded-lg text-base"
+          className="rounded-lg px-3 text-sm sm:text-base"
           onClick={() => setMode("sign-in")}
         >
           Log In
@@ -29,7 +29,7 @@ export function AuthButtons() {
         <Button
           size="md"
           variant="primary"
-          className="rounded-lg text-base"
+          className="rounded-lg px-3 text-sm sm:text-base"
           onClick={() => setMode("sign-up")}
         >
           Sign Up

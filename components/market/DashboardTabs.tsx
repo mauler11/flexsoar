@@ -69,7 +69,7 @@ export function DashboardTabs({
 
   return (
     <section className="flex flex-col gap-3">
-      <div role="tablist" aria-label="Dashboard sections" className="flex gap-2">
+      <div role="tablist" aria-label="Dashboard sections" className="flex flex-wrap gap-2">
         {tabs.map((t) => (
           <button
             key={t.id}

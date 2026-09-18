@@ -17,6 +17,7 @@ import type { CardSummary } from "@/lib/api/contract";
 import { toSku } from "@/components/market/bridge";
 import { CardArt } from "@/components/card/CardArt";
 import { ConditionBadge } from "@/components/card/ConditionBadge";
+import { RarityBand } from "@/components/card/RarityBand";
 import { TierBadge } from "@/components/card/TierBadge";
 import {
   conditionGradeBand,
@@ -77,6 +78,7 @@ export function HeldCard({
       >
         <div className="relative">
           <CardArt sku={sku} aspect="aspect-[4/3]" />
+          <RarityBand tier={card.tier} isExceptional={card.is_exceptional} />
           <div className="absolute left-2 top-2">
             <TierBadge tier={card.tier} isExceptional={card.is_exceptional} />
           </div>

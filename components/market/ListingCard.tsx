@@ -24,6 +24,7 @@ import { toSku } from "@/components/market/bridge";
 import { CardArt } from "@/components/card/CardArt";
 import { ConditionBadge } from "@/components/card/ConditionBadge";
 import { FloatBar } from "@/components/card/FloatBar";
+import { RarityBand } from "@/components/card/RarityBand";
 import { TierBadge } from "@/components/card/TierBadge";
 import { formatMyr } from "@/components/card/format";
 import { FiatAmount } from "@/components/market/Fiat";
@@ -96,6 +97,10 @@ export function ListingCard({
     >
       <div className="relative">
         <CardArt sku={sku} aspect="aspect-[4/3]" />
+        <RarityBand
+          tier={listing.card.tier}
+          isExceptional={listing.card.is_exceptional}
+        />
         <div className="absolute left-2 top-2">
           <TierBadge
             tier={listing.card.tier}
