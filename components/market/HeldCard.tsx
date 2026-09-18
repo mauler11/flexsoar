@@ -17,7 +17,6 @@ import type { CardSummary } from "@/lib/api/contract";
 import { toSku } from "@/components/market/bridge";
 import { CardArt } from "@/components/card/CardArt";
 import { ConditionBadge } from "@/components/card/ConditionBadge";
-import { RarityBand } from "@/components/card/RarityBand";
 import { TierBadge } from "@/components/card/TierBadge";
 import {
   borderColorFor,
@@ -77,13 +76,12 @@ export function HeldCard({
       <Link
         href={`/card/${card.id}`}
         aria-label={`${card.sku.brand} ${card.sku.model} ${card.sku.colorway}`}
-        className="group flex flex-1 flex-col overflow-hidden rounded-2xl border bg-raised transition-all hover:shadow-soft active:scale-[0.995]"
+        className="group flex flex-1 flex-col overflow-hidden rounded-2xl border-2 bg-raised transition-all hover:shadow-soft active:scale-[0.995]"
         style={{ borderColor: `${rarityColor}40` }}
       >
         <div className="px-2 pt-2">
           <div className="relative overflow-hidden rounded-xl">
             <CardArt sku={sku} aspect="aspect-[4/3]" />
-            <RarityBand tier={card.tier} isExceptional={card.is_exceptional} />
             <div className="absolute left-2 top-2">
               <TierBadge tier={card.tier} isExceptional={card.is_exceptional} />
             </div>

@@ -24,7 +24,6 @@ import { toSku } from "@/components/market/bridge";
 import { CardArt } from "@/components/card/CardArt";
 import { ConditionBadge } from "@/components/card/ConditionBadge";
 import { FloatBar } from "@/components/card/FloatBar";
-import { RarityBand } from "@/components/card/RarityBand";
 import { TierBadge } from "@/components/card/TierBadge";
 import { formatMyr } from "@/components/card/format";
 import { FiatAmount } from "@/components/market/Fiat";
@@ -99,18 +98,14 @@ export function ListingCard({
     <Link
       href={detailHref}
       aria-label={`${listing.card.sku.brand} ${listing.card.sku.model} ${listing.card.sku.colorway}, ${formatMyr(listing.price_cents)}`}
-      className="group flex flex-col overflow-hidden rounded-2xl border bg-raised transition-all hover:shadow-soft active:scale-[0.995]"
+      className="group flex flex-col overflow-hidden rounded-2xl border-2 bg-raised transition-all hover:shadow-soft active:scale-[0.995]"
       style={{ borderColor: `${rarityColor}40` }}
     >
       {/* Inset art frame: the picture sits inside the card like a trading
-          card window, with the rarity band across the top of the frame. */}
+          card window. */}
       <div className="px-2 pt-2">
         <div className="relative overflow-hidden rounded-xl">
           <CardArt sku={sku} aspect="aspect-[4/3]" />
-          <RarityBand
-            tier={listing.card.tier}
-            isExceptional={listing.card.is_exceptional}
-          />
           <div className="absolute left-2 top-2">
             <TierBadge
               tier={listing.card.tier}
