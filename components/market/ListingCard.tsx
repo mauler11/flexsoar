@@ -29,6 +29,7 @@ import { TierBadge } from "@/components/card/TierBadge";
 import { formatMyr } from "@/components/card/format";
 import { FiatAmount } from "@/components/market/Fiat";
 import {
+  borderColorFor,
   conditionGradeBand,
   floatBand,
   publishedConditionLabel,
@@ -88,36 +89,42 @@ export function ListingCard({
   );
 
   const detailHref = `/card/${listing.card_id}`;
+  // Subtle full-card outline in the rarity colour (hex alpha: faint, not neon).
+  const rarityColor = borderColorFor(
+    listing.card.tier,
+    listing.card.is_exceptional,
+  );
 
   return (
     <Link
       href={detailHref}
       aria-label={`${listing.card.sku.brand} ${listing.card.sku.model} ${listing.card.sku.colorway}, ${formatMyr(listing.price_cents)}`}
-      className="group flex flex-col overflow-hidden rounded-2xl border border-line bg-raised transition-all hover:border-line-strong hover:shadow-soft active:scale-[0.995]"
+      className="group flex flex-col overflow-hidden rounded-2xl border bg-raised transition-all hover:shadow-soft active:scale-[0.995]"
+      style={{ borderColor: `${rarityColor}40` }}
     >
-      <div className="relative">
-        <CardArt sku={sku} aspect="aspect-[4/3]" />
-        <RarityBand
-          tier={listing.card.tier}
-          isExceptional={listing.card.is_exceptional}
-        />
-        <div className="absolute left-2 top-2">
-          <TierBadge
+      {/* Inset art frame: the picture sits inside the card like a trading
+          card window, with the rarity band across the top of the frame. */}
+      <div className="px-2 pt-2">
+        <div className="relative overflow-hidden rounded-xl">
+          <CardArt sku={sku} aspect="aspect-[4/3]" />
+          <RarityBand
             tier={listing.card.tier}
             isExceptional={listing.card.is_exceptional}
           />
-        </div>
-        {/* Hover-only Buy Now scrim. Hidden entirely on touch devices
-            ([@media(hover:hover)] gates the display), keyboard users get it
-            via focus-visible. Decorative: the link's aria-label announces
-            the action, and pointer-events-none keeps the card one target. */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-0 hidden justify-center bg-gradient-to-t from-black/70 via-black/20 to-transparent px-3 pb-3 pt-10 opacity-0 transition-opacity duration-150 group-focus-visible:opacity-100 [@media(hover:hover)]:flex [@media(hover:hover)]:group-hover:opacity-100"
-        >
-          <span className="inline-flex items-center justify-center rounded-full bg-accent px-6 py-2 text-sm font-bold text-[#0B0B0B]">
-            Buy Now
-          </span>
+          <div className="absolute left-2 top-2">
+            <TierBadge
+              tier={listing.card.tier}
+              isExceptional={listing.card.is_exceptional}
+            />
+          </div>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 hidden justify-center bg-gradient-to-t from-black/70 via-black/20 to-transparent px-3 pb-3 pt-10 opacity-0 transition-opacity duration-150 group-focus-visible:opacity-100 [@media(hover:hover)]:flex [@media(hover:hover)]:group-hover:opacity-100"
+          >
+            <span className="inline-flex items-center justify-center rounded-full bg-accent px-6 py-2 text-sm font-bold text-[#0B0B0B]">
+              Buy Now
+            </span>
+          </div>
         </div>
       </div>
 

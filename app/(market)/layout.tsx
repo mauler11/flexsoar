@@ -187,57 +187,65 @@ export default async function MarketLayout({
         <FiatProvider>
         <PrivyProviders>
         <header className="sticky top-0 z-40 border-b border-line bg-background/80 backdrop-blur">
-          <div className="flex w-full items-center gap-2 px-3 py-3 sm:gap-3 sm:px-4">
-            <MobileNavButton />
-            <Link
-              href="/"
-              aria-label="FlexSoar home"
-              className="shrink-0"
-            >
-                  <Image
-                    src="/logo-white-big.png"
-                    alt="FlexSoar"
-                    width={150}
-                    height={50}
-                    priority
-                    className="h-9 w-auto sm:h-auto sm:w-[150px]"
-                  />
-                </Link>
-                <div className="mx-auto min-w-0 w-full max-w-xl flex-1">
-                  <Suspense>
-                    <SearchInput />
-                  </Suspense>
-                </div>
-                {/* Logged in: account cluster is sm+ only — on mobile the
-                    header is logo + search, account lives in the drawer. */}
-                <div className="hidden shrink-0 items-center gap-3 sm:flex">
-                  {me ? (
-                    <>
-                      <WalletBalance />
-                      <WalletMenu />
-                      <NotificationBell
-                        notifications={notifications}
-                        unreadCount={unreadCount}
-                      />
-                      <span className="hidden text-xs font-semibold text-muted sm:inline">
-                        LV {me.level}
-                      </span>
-                      <UserMenu handle={me.handle} />
-                      <FiatSelect />
-                    </>
-                  ) : (
-                    <>
-                      <FiatSelect />
-                      <AuthButtons />
-                    </>
-                  )}
-                </div>
-                {/* Signed out on mobile: auth buttons only (no fiat). */}
-                {!me && (
-                  <div className="flex shrink-0 items-center sm:hidden">
+          {/* Row 1: nav + brand + actions. Row 2 (mobile only): search. */}
+          <div className="flex w-full flex-col px-3 sm:px-4">
+            <div className="flex w-full items-center gap-2 py-3 sm:gap-3">
+              <MobileNavButton />
+              <Link
+                href="/"
+                aria-label="FlexSoar home"
+                className="shrink-0"
+              >
+                <Image
+                  src="/logo-white-big.png"
+                  alt="FlexSoar"
+                  width={150}
+                  height={50}
+                  priority
+                  className="h-7 w-auto sm:h-11"
+                />
+              </Link>
+              <div className="mx-auto hidden min-w-0 w-full max-w-xl flex-1 sm:block">
+                <Suspense>
+                  <SearchInput />
+                </Suspense>
+              </div>
+              {/* Logged in: account cluster is sm+ only — on mobile the
+                  header is logo + search, account lives in the drawer. */}
+              <div className="hidden shrink-0 items-center gap-3 sm:flex">
+                {me ? (
+                  <>
+                    <WalletBalance />
+                    <WalletMenu />
+                    <NotificationBell
+                      notifications={notifications}
+                      unreadCount={unreadCount}
+                    />
+                    <span className="hidden text-xs font-semibold text-muted sm:inline">
+                      LV {me.level}
+                    </span>
+                    <UserMenu handle={me.handle} />
+                    <FiatSelect />
+                  </>
+                ) : (
+                  <>
+                    <FiatSelect />
                     <AuthButtons />
-                  </div>
+                  </>
                 )}
+              </div>
+              {/* Signed out on mobile: auth buttons only (no fiat). */}
+              {!me && (
+                <div className="ml-auto flex shrink-0 items-center sm:hidden">
+                  <AuthButtons />
+                </div>
+              )}
+            </div>
+            <div className="w-full pb-3 sm:hidden">
+              <Suspense>
+                <SearchInput />
+              </Suspense>
+            </div>
           </div>
         </header>
 

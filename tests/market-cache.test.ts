@@ -1,6 +1,6 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
 import { GridSkeleton, TileSkeleton } from '@/components/market/MarketSkeleton';
 import { RarityBand } from '@/components/card/RarityBand';
@@ -57,6 +57,11 @@ describe('market cache', () => {
     vi.mocked(getListings).mockClear();
     vi.mocked(getPlatformConfig).mockClear();
     clearMarketCaches();
+  });
+
+  // Never leak fake timers/Date into other test files sharing a worker.
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('serves repeat identical queries from cache', async () => {

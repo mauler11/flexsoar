@@ -24,13 +24,13 @@ export function RarityBand({ tier, isExceptional = false }: RarityBandProps) {
     <>
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 z-10 h-1"
-        style={{ background: color, boxShadow: `0 1px 12px ${color}` }}
+        className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5"
+        style={{ background: color, boxShadow: `0 0 8px ${color}66` }}
       />
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 z-10"
-        style={{ boxShadow: `inset 0 0 0 1px ${color}59` }}
+        style={{ boxShadow: `inset 0 0 0 1px ${color}33` }}
       />
     </>
   );

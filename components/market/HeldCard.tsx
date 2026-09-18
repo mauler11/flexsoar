@@ -20,6 +20,7 @@ import { ConditionBadge } from "@/components/card/ConditionBadge";
 import { RarityBand } from "@/components/card/RarityBand";
 import { TierBadge } from "@/components/card/TierBadge";
 import {
+  borderColorFor,
   conditionGradeBand,
   floatBand,
   publishedConditionLabel,
@@ -69,18 +70,23 @@ export function HeldCard({
     });
   }
 
+  const rarityColor = borderColorFor(card.tier, card.is_exceptional);
+
   return (
     <div className="flex flex-col">
       <Link
         href={`/card/${card.id}`}
         aria-label={`${card.sku.brand} ${card.sku.model} ${card.sku.colorway}`}
-        className="group flex flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-raised transition-colors hover:border-line-strong hover:shadow-soft"
+        className="group flex flex-1 flex-col overflow-hidden rounded-2xl border bg-raised transition-all hover:shadow-soft active:scale-[0.995]"
+        style={{ borderColor: `${rarityColor}40` }}
       >
-        <div className="relative">
-          <CardArt sku={sku} aspect="aspect-[4/3]" />
-          <RarityBand tier={card.tier} isExceptional={card.is_exceptional} />
-          <div className="absolute left-2 top-2">
-            <TierBadge tier={card.tier} isExceptional={card.is_exceptional} />
+        <div className="px-2 pt-2">
+          <div className="relative overflow-hidden rounded-xl">
+            <CardArt sku={sku} aspect="aspect-[4/3]" />
+            <RarityBand tier={card.tier} isExceptional={card.is_exceptional} />
+            <div className="absolute left-2 top-2">
+              <TierBadge tier={card.tier} isExceptional={card.is_exceptional} />
+            </div>
           </div>
         </div>
         <div className="flex flex-1 flex-col gap-0.5 p-2.5">

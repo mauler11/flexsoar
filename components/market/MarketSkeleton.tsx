@@ -13,7 +13,9 @@ export function TileSkeleton() {
       aria-hidden
       className="flex flex-col overflow-hidden rounded-2xl border border-line bg-raised"
     >
-      <div className="aspect-[4/3] animate-pulse bg-line/70" />
+      <div className="px-2 pt-2">
+        <div className="aspect-[4/3] animate-pulse rounded-xl bg-line/70" />
+      </div>
       <div className="flex flex-1 flex-col gap-1.5 p-2.5">
         <div className="h-4 w-3/4 animate-pulse rounded bg-line" />
         <div className="h-3 w-1/2 animate-pulse rounded bg-line/70" />
