@@ -98,7 +98,7 @@ export function ListingCard({
     <Link
       href={detailHref}
       aria-label={`${listing.card.sku.brand} ${listing.card.sku.model} ${listing.card.sku.colorway}, ${formatMyr(listing.price_cents)}`}
-      className="group flex flex-col overflow-hidden rounded-2xl border-2 bg-raised transition-all hover:shadow-soft active:scale-[0.995]"
+      className="group flex flex-col overflow-hidden rounded-2xl border-2 bg-[#141d18] transition-all hover:shadow-soft active:scale-[0.995]"
       style={{ borderColor: `${rarityColor}40` }}
     >
       {/* Inset art frame: the picture sits inside the card like a trading
