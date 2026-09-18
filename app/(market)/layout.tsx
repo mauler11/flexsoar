@@ -202,7 +202,6 @@ export default async function MarketLayout({
                   width={150}
                   height={50}
                   priority
-                    className="h-6 w-auto sm:h-9"
                 />
               </Link>
               <div className="mx-auto hidden min-w-0 w-full max-w-xl flex-1 sm:block">
