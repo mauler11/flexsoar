@@ -82,8 +82,13 @@ export function AuthForm({ mode, next = "/" }: AuthFormProps) {
         if (err) {
           setError(err);
         } else if (sent) {
+          // Plain text only — this value comes from the redirect URL and must
+          // never flow into HTML. React escapes {successMessage} at render.
+          // Only echo it when it looks like an email; otherwise stay generic.
           setSuccessMessage(
-            `Magic link sent to <strong>${sent}</strong>. Check your inbox.`
+            isValidEmail(sent)
+              ? `Magic link sent to ${sent}. Check your inbox.`
+              : "Magic link sent. Check your inbox."
           );
         }
       } else {
@@ -409,7 +414,7 @@ export function AuthForm({ mode, next = "/" }: AuthFormProps) {
           role="status"
           className="border p-3 pixel-shadow-sm border-accent bg-accent/10"
         >
-          <p className="font-mono text-[11px] text-accent" dangerouslySetInnerHTML={{ __html: successMessage }} />
+          <p className="font-mono text-[11px] text-accent">{successMessage}</p>
         </div>
       )}
 
