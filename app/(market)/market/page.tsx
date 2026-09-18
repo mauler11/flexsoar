@@ -5,16 +5,28 @@
  * and early-access ones they hold a level for (or sell). Filters are URL
  * state, the server does the rest, and the same query that renders the grid
  * feeds the card links.
+ *
+ * Data goes through cached.ts (viewer-keyed 30s TTL for listings — RLS
+ * visibility differs per viewer, so the key must include who asks; global
+ * 300s TTL for platform config). Route-level loading.tsx covers the wait
+ * with skeletons, and next.config staleTimes keeps repeat filter visits
+ * instant from the client router cache.
  */
 import type { Metadata } from "next";
-import { BRAND_PILL_EXCLUSIONS, getListings, getPlatformConfig } from "@/lib/api/contract";
-import type { ListingSort, ListingsQuery } from "@/lib/api/contract";
+import { BRAND_PILL_EXCLUSIONS } from "@/lib/api/contract";
+import type {
+  ListingSort,
+  ListingsQuery,
+  ListingSummary,
+} from "@/lib/api/contract";
 import type { Tier } from "@/lib/db/types";
+import { createServerSupabase } from "@/lib/supabase/server";
 import { FeaturedCard } from "@/components/market/FeaturedCard";
 import { MarketFilters } from "@/components/market/MarketFilters";
 import { MarketTile } from "@/components/market/MarketTile";
 import { Banner } from "@/components/market/Banner";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { cachedListings, cachedPlatformConfig } from "./cached";
 
 export const metadata: Metadata = {
   title: "Market — FlexSoar",
@@ -66,14 +78,22 @@ export default async function BrowsePage({
   if (sizeUs != null && Number.isFinite(sizeUs)) query.sizeUs = sizeUs;
   if (tier.length) query.tier = tier as Tier[];
 
-  let listings = [] as Awaited<ReturnType<typeof getListings>>;
+  // Viewer key for the listings cache: RLS visibility differs per viewer,
+  // so 'anon' and each user id get their own entries.
+  const supabase = await createServerSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const viewerKey = user?.id ?? "anon";
+
+  let listings: ListingSummary[] = [];
   let platformConfig = { show_numeric_float: false };
   let loadError: string | null = null;
 
   try {
     [listings, platformConfig] = await Promise.all([
-      getListings(query),
-      getPlatformConfig(),
+      cachedListings(viewerKey, query),
+      cachedPlatformConfig(),
     ]);
   } catch (err) {
     loadError = err instanceof Error ? err.message : String(err);
@@ -113,13 +133,13 @@ export default async function BrowsePage({
         }}
       />
 
-      {listings.length === 0 ? (
+      {listings.length === 0 && !loadError ? (
         <EmptyState
           title="Nothing listed yet"
           description="No listings match these filters right now. New mints fill this grid as they unlock."
         />
       ) : (
-        <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
           {gridListings.map((listing) => (
             <MarketTile
               key={listing.id}

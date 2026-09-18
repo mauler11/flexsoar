@@ -10,6 +10,7 @@
  */
 "use client";
 
+import { useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { BRAND_PILL_EXCLUSIONS } from "@/lib/domain/rarity";
 
@@ -32,6 +33,9 @@ export function MarketFilters({ initial }: MarketFiltersProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  // Pending navigation: the grid suspends underneath while the pills stay
+  // mounted, so the tap gets instant visual feedback instead of dead air.
+  const [isPending, startTransition] = useTransition();
 
   function push(changes: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams.toString());
@@ -43,7 +47,9 @@ export function MarketFilters({ initial }: MarketFiltersProps) {
       params.delete(key);
     }
     const qs = params.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname);
+    startTransition(() => {
+      router.replace(qs ? `${pathname}?${qs}` : pathname);
+    });
   }
 
   const pillActive =
@@ -61,7 +67,12 @@ export function MarketFilters({ initial }: MarketFiltersProps) {
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-line bg-raised/40 p-3">
+    <div
+      aria-busy={isPending}
+      className={`flex flex-col gap-3 rounded-2xl border border-line bg-raised/40 p-3 transition-opacity ${
+        isPending ? "opacity-70" : ""
+      }`}
+    >
       <div className="flex items-center gap-3">
         <div
           role="group"
@@ -87,6 +98,11 @@ export function MarketFilters({ initial }: MarketFiltersProps) {
         </div>
         <label className="flex shrink-0 items-center gap-1.5 text-[13px] text-muted">
           <span className="hidden sm:inline">Sort</span>
+          {isPending && (
+            <span aria-hidden className="text-[11px] text-accent">
+              Updating…
+            </span>
+          )}
           <select
             aria-label="Sort listings"
             value={initial.sort}

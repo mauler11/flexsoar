@@ -3,8 +3,14 @@
  *
  * One live listing in the market grid: tier pill over the art, shoe name,
  * variant · size, colour-coded condition, big price with a below/above-fair
- * indication, and a Buy now call-to-action. The whole card links to the
- * detail page — the button is the visual affordance, not a separate target.
+ * indication. The whole card links to the detail page.
+ *
+ * Buy affordance is hover-reveal on hover-capable devices (desktop): a
+ * scrim + Buy Now pill fades in over the art. Touch devices have no hover,
+ * so the overlay never renders there — tapping the card opens the detail
+ * page, where the real checkout lives. The pill is pointer-events-none and
+ * aria-hidden: pure visual affordance, never a separate target (nested
+ * interactives inside a link would break keyboard/screen-reader users).
  *
  * Only real data is rendered: no wishlist hearts (no watchlist UI), no trend
  * deltas (no price history), no make-offer (not a real flow). "Fair" anchors
@@ -86,7 +92,7 @@ export function ListingCard({
     <Link
       href={detailHref}
       aria-label={`${listing.card.sku.brand} ${listing.card.sku.model} ${listing.card.sku.colorway}, ${formatMyr(listing.price_cents)}`}
-      className="group flex flex-col overflow-hidden rounded-2xl border border-line bg-raised transition-colors hover:border-line-strong hover:shadow-soft"
+      className="group flex flex-col overflow-hidden rounded-2xl border border-line bg-raised transition-all hover:border-line-strong hover:shadow-soft active:scale-[0.995]"
     >
       <div className="relative">
         <CardArt sku={sku} aspect="aspect-[4/3]" />
@@ -95,6 +101,18 @@ export function ListingCard({
             tier={listing.card.tier}
             isExceptional={listing.card.is_exceptional}
           />
+        </div>
+        {/* Hover-only Buy Now scrim. Hidden entirely on touch devices
+            ([@media(hover:hover)] gates the display), keyboard users get it
+            via focus-visible. Decorative: the link's aria-label announces
+            the action, and pointer-events-none keeps the card one target. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 bottom-0 hidden justify-center bg-gradient-to-t from-black/70 via-black/20 to-transparent px-3 pb-3 pt-10 opacity-0 transition-opacity duration-150 group-focus-visible:opacity-100 [@media(hover:hover)]:flex [@media(hover:hover)]:group-hover:opacity-100"
+        >
+          <span className="inline-flex items-center justify-center rounded-full bg-accent px-6 py-2 text-sm font-bold text-[#0B0B0B]">
+            Buy Now
+          </span>
         </div>
       </div>
 
@@ -136,10 +154,6 @@ export function ListingCard({
             {fair.text}
           </p>
         )}
-
-        <span className="mt-2 inline-flex w-full items-center justify-center rounded-md bg-accent px-3 py-2.5 text-sm font-bold text-[#0B0B0B] transition group-hover:brightness-110">
-          Buy Now
-        </span>
       </div>
     </Link>
   );
