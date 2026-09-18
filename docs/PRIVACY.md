@@ -1,6 +1,6 @@
 # FlexSoar — Privacy Policy / Dasar Privasi
 
-Last updated / Kemas kini terakhir: 27/08/2026
+Last updated / Kemas kini terakhir: 18/09/2026
 
 ---
 
@@ -20,6 +20,7 @@ This notice explains what we collect, why, who we share it with, and what you ca
 - Email address
 - Your chosen handle (this is public)
 - Country of residence — this determines whether we can pay you
+- If you use "Continue with Google", Google sends us your name, email address, and profile picture. This is the minimum Google shares for sign-in; we do not request access to your emails, contacts, files, or anything else in your Google account
 
 **When you list shoes**
 - Photographs of your shoes
@@ -46,6 +47,7 @@ We do not collect identity documents, dates of birth, or financial account detai
 ## 3. Why we use it
 
 - To run your account and keep you signed in
+- To create and identify your account when you sign in with Google, using only your name, email address, and profile picture from Google. We use Google account data solely to identify you and keep you signed in. We never use it for advertising, never analyse it for profiling, never sell it, and never share it except as listed in section 5
 - To publish your listings and show your public handle and holdings
 - To process purchases, trades and redemptions
 - To pay you what you are owed
@@ -82,6 +84,9 @@ We use these services, and your data passes through them:
 | Stripe | Payment data for purchases | Global |
 | Resend | Email address and message content, to send you service emails | Global |
 | Couriers (J&T, Lalamove, others) | Name, address and contact, to deliver parcels | Malaysia and destination country |
+| Google LLC | Name, email address, and profile picture, but only when you use "Continue with Google" — identity verification for sign-in | Global |
+
+If you signed in with Google, you can revoke FlexSoar's access to your Google account at any time in your Google Account settings (myaccount.google.com/permissions). Revoking access does not close your FlexSoar account — you can keep using it by signing in with your email address — but you will not be able to sign in with Google until you reconnect it.
 
 We also share data where the law requires it, or to establish or defend a legal claim. We do not share your data with anyone else.
 
@@ -93,7 +98,7 @@ By using FlexSoar you consent to your personal data being transferred outside Ma
 
 ## 7. How long we keep it
 
-- **Account data** — while your account is open, and for 12 months after you close it
+- **Account data** — while your account is open, and for 12 months after you close it. This includes the name and profile picture supplied by Google when you use "Continue with Google"
 - **Transaction and payment records** — 7 years, because tax and accounting law requires it
 - **Listing photographs** — for the life of the Card, since they are the evidence behind its condition grade, and for 12 months after it is redeemed or destroyed
 - **Shipping addresses** — 12 months after delivery
@@ -164,6 +169,7 @@ Notis ini menerangkan apa yang kami kumpulkan, mengapa, dengan siapa kami berkon
 - Alamat e-mel
 - Nama pengguna pilihan anda (ini bersifat awam)
 - Negara kediaman — ini menentukan sama ada kami boleh membayar anda
+- Jika anda menggunakan "Continue with Google", Google menghantar nama, alamat e-mel, dan gambar profil anda kepada kami. Ini adalah maklumat minimum yang dikongsi Google untuk log masuk; kami tidak meminta akses kepada e-mel, kenalan, fail, atau apa-apa lagi dalam akaun Google anda
 
 **Apabila anda menyenaraikan kasut**
 - Gambar kasut anda
@@ -190,6 +196,7 @@ Kami tidak mengumpul dokumen pengenalan diri, tarikh lahir, atau butiran akaun k
 ## 3. Mengapa kami menggunakannya
 
 - Untuk mengendalikan akaun anda dan mengekalkan log masuk anda
+- Untuk membuka dan mengenal pasti akaun anda apabila anda log masuk dengan Google, menggunakan hanya nama, alamat e-mel, dan gambar profil anda daripada Google. Kami menggunakan data akaun Google semata-mata untuk mengenal pasti anda dan mengekalkan log masuk anda. Kami tidak pernah menggunakannya untuk pengiklanan, tidak pernah menganalisisnya untuk pemprofilan, tidak menjualnya, dan tidak berkongsinya kecuali seperti yang dinyatakan dalam seksyen 5
 - Untuk menerbitkan penyenaraian anda dan memaparkan nama pengguna serta pegangan awam anda
 - Untuk memproses pembelian, pertukaran dan penebusan
 - Untuk membayar apa yang terhutang kepada anda
@@ -226,6 +233,9 @@ Kami menggunakan perkhidmatan berikut, dan data anda melaluinya:
 | Stripe | Data pembayaran bagi pembelian | Global |
 | Resend | Alamat e-mel dan kandungan mesej, untuk menghantar e-mel perkhidmatan | Global |
 | Kurier (J&T, Lalamove, dan lain-lain) | Nama, alamat dan butiran perhubungan, untuk menghantar bungkusan | Malaysia dan negara destinasi |
+| Google LLC | Nama, alamat e-mel, dan gambar profil, tetapi hanya apabila anda menggunakan "Continue with Google" — pengesahan identiti untuk log masuk | Global |
+
+Jika anda log masuk dengan Google, anda boleh menarik balik akses FlexSoar ke akaun Google anda pada bila-bila masa dalam tetapan Akaun Google anda (myaccount.google.com/permissions). Menarik balik akses tidak menutup akaun FlexSoar anda — anda boleh terus menggunakannya dengan log masuk menggunakan alamat e-mel anda — tetapi anda tidak akan dapat log masuk dengan Google sehingga anda menyambungkannya semula.
 
 Kami juga berkongsi data apabila dikehendaki oleh undang-undang, atau untuk menegakkan atau mempertahankan tuntutan undang-undang. Kami tidak berkongsi data anda dengan sesiapa lain.
 
@@ -237,7 +247,7 @@ Dengan menggunakan FlexSoar, anda memberi keizinan untuk data peribadi anda dipi
 
 ## 7. Berapa lama kami menyimpannya
 
-- **Data akaun** — selagi akaun anda dibuka, dan selama 12 bulan selepas anda menutupnya
+- **Data akaun** — selagi akaun anda dibuka, dan selama 12 bulan selepas anda menutupnya. Ini termasuk nama dan gambar profil yang diberikan oleh Google apabila anda menggunakan "Continue with Google"
 - **Rekod transaksi dan pembayaran** — 7 tahun, kerana undang-undang cukai dan perakaunan menghendakinya
 - **Gambar penyenaraian** — sepanjang hayat Kad, kerana ia merupakan bukti di sebalik gred keadaannya, dan selama 12 bulan selepas Kad itu ditebus atau dimusnahkan
 - **Alamat penghantaran** — 12 bulan selepas penghantaran
