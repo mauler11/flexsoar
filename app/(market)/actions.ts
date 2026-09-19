@@ -25,6 +25,7 @@ import Stripe from 'stripe';
 import {
   getCard,
   getListing,
+  getListings,
   listCard,
   cancelListing,
   redeemCard,
@@ -557,4 +558,26 @@ export async function toggleTradeHistoryAction(
   }
   revalidatePath(safeNextPath(next) || '/dashboard');
   return { ok: true };
+}
+
+/**
+ * Top market hits for the mobile search overlay. Read-only, session-scoped
+ * (getListings enforces RLS visibility), capped at 6 — the overlay links
+ * out to /market?q= for the full grid. Empty query returns [] without
+ * touching the database.
+ */
+export async function searchMarketAction(
+  query: string,
+): Promise<{ ok: boolean; listings?: import('@/lib/api/contract').ListingSummary[]; message?: string }> {
+  const q = query.trim().slice(0, 60);
+  if (!q) return { ok: true, listings: [] };
+  try {
+    const listings = await getListings({ search: q, sort: 'recent', limit: 6 });
+    return { ok: true, listings };
+  } catch (thrown) {
+    return {
+      ok: false,
+      message: thrown instanceof Error ? thrown.message : 'Search failed — try again.',
+    };
+  }
 }
