@@ -14,7 +14,9 @@ import {
 export default function MarketLoading() {
   return (
     <div className="flex flex-col gap-4" aria-label="Loading market">
-      <FeaturedSkeleton />
+      <div className="hidden md:block">
+        <FeaturedSkeleton />
+      </div>
       <div
         aria-hidden
         className="h-[76px] animate-pulse rounded-2xl border border-line bg-raised/40"

@@ -111,7 +111,13 @@ export default async function BrowsePage({
 
   return (
     <div className="flex flex-col gap-4">
-      {featured != null && <FeaturedCard listing={featured} />}
+      {/* Featured hero is desktop-only: on mobile the same listing appears
+          as a regular grid tile below instead of vanishing entirely. */}
+      {featured != null && (
+        <div className="hidden md:block">
+          <FeaturedCard listing={featured} />
+        </div>
+      )}
 
       {params.error && (
         <Banner tone="error" title="Couldn't do that">
@@ -140,6 +146,14 @@ export default async function BrowsePage({
         />
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+          {featured != null && listings.length > 1 && (
+            <div className="md:hidden">
+              <MarketTile
+                listing={featured}
+                showNumericFloat={platformConfig.show_numeric_float}
+              />
+            </div>
+          )}
           {gridListings.map((listing) => (
             <MarketTile
               key={listing.id}
