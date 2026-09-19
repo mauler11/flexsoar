@@ -50,6 +50,11 @@ import {
   isFscOnlyPurchase,
   validateRequestedCredit,
 } from '@/app/(market)/checkout-math';
+import {
+  SHIPPING_ZONES,
+  shippingZoneForPostcode,
+  type ShippingZoneCode,
+} from '@/lib/market/shipping';
 
 /** The market route for a card id. Cards and listings live under (market). */
 function cardPath(cardId: UUID): string {
@@ -585,4 +590,72 @@ export async function searchMarketAction(
       message: thrown instanceof Error ? thrown.message : 'Search failed — try again.',
     };
   }
+}
+
+export interface ShippingQuote {
+  zone: ShippingZoneCode;
+  zoneName: string;
+  rateCents: number;
+  etaNote: string;
+  /** False when the shipping_zones table is absent and the approved seed applies. */
+  live: boolean;
+}
+
+/**
+ * Courier quote for a redemption postcode (MY-only, origin Damansara
+ * Damai). Pure mapping decides the zone; the rate comes from the
+ * shipping_zones table when present, else the approved seed — the table
+ * is the rate source of truth the moment the migration lands, so a later
+ * counter-check changes one row, never code.
+ *
+ * Read-only and session-safe to call unsigned: it reveals a public price
+ * for a zone, nothing personal. Freezing the figure onto the redemption
+ * is redeemCard's job (data lane), not this action's.
+ */
+export async function getShippingQuoteAction(
+  postcode: string,
+): Promise<{ ok: true; quote: ShippingQuote } | { ok: false; message: string }> {
+  const zone = shippingZoneForPostcode(postcode);
+  if (!zone) {
+    return {
+      ok: false,
+      message: /^\d{5}$/.test(postcode.trim())
+        ? 'We don\u2019t recognise that postcode — double-check it.'
+        : 'Enter a 5-digit Malaysian postcode.',
+    };
+  }
+  const meta = SHIPPING_ZONES[zone];
+  try {
+    const supabase = await createServerSupabase();
+    const { data, error } = await supabase
+      .from('shipping_zones')
+      .select('rate_cents')
+      .eq('code', zone)
+      .maybeSingle();
+    const rate = (data as { rate_cents: number } | null)?.rate_cents;
+    if (!error && Number.isInteger(rate) && (rate as number) >= 0) {
+      return {
+        ok: true,
+        quote: {
+          zone,
+          zoneName: meta.name,
+          rateCents: rate as number,
+          etaNote: meta.etaNote,
+          live: true,
+        },
+      };
+    }
+  } catch {
+    // Table absent or unreadable — fall through to the approved seed.
+  }
+  return {
+    ok: true,
+    quote: {
+      zone,
+      zoneName: meta.name,
+      rateCents: meta.seedRateCents,
+      etaNote: meta.etaNote,
+      live: false,
+    },
+  };
 }
