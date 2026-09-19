@@ -13,7 +13,7 @@ import type { ListingSummary } from "@/lib/api/contract";
 import { toSku } from "@/components/market/bridge";
 import { CardArt } from "@/components/card/CardArt";
 import { TierBadge } from "@/components/card/TierBadge";
-import { fairIndicator } from "@/components/market/ListingCard";
+import { fairIndicator } from "@/lib/market/pricing";
 
 export interface FeaturedCardProps {
   listing: ListingSummary;

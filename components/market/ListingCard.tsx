@@ -31,6 +31,7 @@ import { formatMyr } from "@/components/card/format";
 import { FiatAmount } from "@/components/market/Fiat";
 import { Modal } from "@/components/market/Modal";
 import { CheckoutModal } from "@/components/market/CheckoutModal";
+import { fairIndicator } from "@/lib/market/pricing";
 import {
   borderColorFor,
   conditionGradeBand,
@@ -49,25 +50,10 @@ export interface ListingCardProps {
 }
 
 /**
- * Below/above-fair indication. Anchors on fair_price_cents
- * (condition-adjusted) with oracle_value_cents as fallback; null when
- * neither exists or the price is exactly fair — never invented.
+ * One live listing in the market grid. Below/above-fair math comes from
+ * fairIndicator() in lib/market/pricing (server-safe, shared with the card
+ * page and FeaturedCard).
  */
-export function fairIndicator(
-  priceCents: number,
-  fairPriceCents: number | null,
-  oracleValueCents: number | null,
-): { text: string; below: boolean } | null {
-  const anchor = fairPriceCents ?? oracleValueCents ?? null;
-  if (anchor == null || anchor <= 0) return null;
-  const pct = Math.round(((priceCents - anchor) / anchor) * 100);
-  if (pct === 0) return null;
-  return {
-    text: `${Math.abs(pct)}% ${pct < 0 ? "below" : "above"} fair`,
-    below: pct < 0,
-  };
-}
-
 export function ListingCard({
   listing,
   showNumericFloat = false,

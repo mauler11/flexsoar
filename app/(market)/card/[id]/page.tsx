@@ -25,14 +25,13 @@ import { ListForm } from "@/components/market/ListForm";
 import { RedeemForm } from "@/components/market/RedeemForm";
 import { ProvenanceChain } from "@/components/market/ProvenanceChain";
 import { PriceChart } from "@/components/market/PriceChart";
-import { marketRead } from "@/lib/market/pricing";
+import { fairIndicator, marketRead } from "@/lib/market/pricing";
 import { Countdown } from "@/components/market/Countdown";
 import { ExpandableSection } from "@/components/ui/ExpandableSection";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { ConditionBadge } from "@/components/card/ConditionBadge";
 import { formatMyr } from "@/components/card/format";
-import { fairIndicator } from "@/components/market/ListingCard";
 import {
   conditionGradeBand,
   floatBand,

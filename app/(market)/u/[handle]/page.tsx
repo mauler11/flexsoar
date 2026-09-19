@@ -17,7 +17,8 @@ import {
 } from "@/app/(market)/queries";
 import { MarketTile } from "@/components/market/MarketTile";
 import { HeldCard } from "@/components/market/HeldCard";
-import { PlStrip, plEntriesForCards } from "@/components/market/PlStrip";
+import { PlStrip } from "@/components/market/PlStrip";
+import { plEntriesForCards } from "@/lib/market/pricing";
 import { TradeToggle } from "@/components/market/TradeToggle";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatMyr } from "@/components/card/format";

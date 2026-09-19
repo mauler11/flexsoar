@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
 import { GridSkeleton, TileSkeleton } from '@/components/market/MarketSkeleton';
-import { plEntriesForCards } from '@/components/market/PlStrip';
+import { plEntriesForCards } from '@/lib/market/pricing';
 
 vi.mock('@/lib/api/contract', () => ({
   getListings: vi.fn(async () => []),

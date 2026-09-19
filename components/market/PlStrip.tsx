@@ -13,6 +13,9 @@
  * Hide/show is per device (localStorage). An account-level "show my P/L"
  * switch needs a users.show_pl column — migration, human lane — so for now
  * the profile strip renders to the owner only, never to visitors.
+ *
+ * Entry math lives in plEntriesForCards() in lib/market/pricing (server-safe;
+ * pages call it during render, and this file is "use client").
  */
 
 import { useEffect, useState } from "react";
@@ -104,23 +107,4 @@ export function PlStrip({ entries }: { entries: PlEntry[] }) {
       </div>
     </section>
   );
-}
-
-/**
- * Build strip entries for held cards. Cost comes from the open provenance
- * hop (releasedAt == null); value prefers the live ask, else the oracle.
- */
-export function plEntriesForCards<
-  T extends { id: string; label: string; oracleCents: number | null },
->(
-  cards: readonly T[],
-  openCostByCardId: ReadonlyMap<string, number | null>,
-  askByCardId: ReadonlyMap<string, number>,
-): PlEntry[] {
-  return cards.map((c) => ({
-    cardId: c.id,
-    label: c.label,
-    costCents: openCostByCardId.get(c.id) ?? null,
-    valueCents: askByCardId.get(c.id) ?? c.oracleCents,
-  }));
 }

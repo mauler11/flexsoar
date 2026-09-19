@@ -213,3 +213,58 @@ export function marketRead(
   }
   return { fairMarket, trend: t, volatility: v, sales30d, vsRetailPct, summary };
 }
+
+/**
+ * Below/above-fair indication for a listing price. Anchors on
+ * fair_price_cents (condition-adjusted) with oracle_value_cents as fallback;
+ * null when neither exists or the price is exactly fair — never invented.
+ *
+ * Lives here (not in ListingCard.tsx) because server pages call it during
+ * render — anything behind a "use client" boundary cannot be invoked from
+ * the server, only rendered.
+ */
+export function fairIndicator(
+  priceCents: number,
+  fairPriceCents: number | null,
+  oracleValueCents: number | null,
+): { text: string; below: boolean } | null {
+  const anchor = fairPriceCents ?? oracleValueCents ?? null;
+  if (anchor == null || anchor <= 0) return null;
+  const pct = Math.round(((priceCents - anchor) / anchor) * 100);
+  if (pct === 0) return null;
+  return {
+    text: `${Math.abs(pct)}% ${pct < 0 ? 'below' : 'above'} fair`,
+    below: pct < 0,
+  };
+}
+
+export interface PlEntryInput {
+  id: string;
+  label: string;
+  oracleCents: number | null;
+}
+
+/**
+ * Build P/L strip entries for held cards. Cost comes from the open
+ * provenance hop (releasedAt == null); value prefers the live ask, else the
+ * oracle. Missing sides stay null — never invented. Lives here for the same
+ * server-safety reason as fairIndicator: dashboard and profile pages call it
+ * during render.
+ */
+export function plEntriesForCards(
+  cards: readonly PlEntryInput[],
+  openCostByCardId: ReadonlyMap<string, number | null>,
+  askByCardId: ReadonlyMap<string, number>,
+): Array<{
+  cardId: string;
+  label: string;
+  costCents: number | null;
+  valueCents: number | null;
+}> {
+  return cards.map((c) => ({
+    cardId: c.id,
+    label: c.label,
+    costCents: openCostByCardId.get(c.id) ?? null,
+    valueCents: askByCardId.get(c.id) ?? c.oracleCents,
+  }));
+}

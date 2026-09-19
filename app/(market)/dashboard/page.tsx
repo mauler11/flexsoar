@@ -38,7 +38,8 @@ import type { ItemSummary } from "@/lib/api/contract";
 import { currentUserId, getHiddenCardIds, getMySubmittedItems, getTradeHistory } from "@/app/(market)/queries";
 import { Button } from "@/components/ui/Button";
 import { DashboardTabs } from "@/components/market/DashboardTabs";
-import { PlStrip, plEntriesForCards } from "@/components/market/PlStrip";
+import { PlStrip } from "@/components/market/PlStrip";
+import { plEntriesForCards } from "@/lib/market/pricing";
 import { EmptyState } from "@/components/ui/EmptyState";
 
 export const metadata: Metadata = {
