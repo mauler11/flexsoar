@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useId } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import { cn } from "@/components/ui/cn";
@@ -46,13 +46,21 @@ export function NotificationBell({
   // Polling fallback: if the socket never delivers (blocked websocket,
   // subscription authorised as anon, RLS hiccup), a 20s visible-tab refresh
   // still picks the row up — the bell must never need a manual reload.
+  //
+  // The channel topic is per mounted instance (useId): the header renders
+  // two bells at once (desktop cluster + mobile row, one CSS-hidden), and
+  // supabase-js hands out ONE shared channel per topic — a second mount
+  // calling .on() after the first mount's .subscribe() throws
+  // "cannot add postgres_changes callbacks ... after subscribe()" and takes
+  // the whole page down. Unique topics keep the mounts independent.
+  const instanceId = useId().replace(/[^a-zA-Z0-9-_]/g, "");
   useEffect(() => {
     const supabase = createBrowserClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     );
     const channel = supabase
-      .channel("notifications-bell")
+      .channel(`notifications-bell-${instanceId}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "notifications" },
@@ -71,7 +79,7 @@ export function NotificationBell({
       clearInterval(timer);
       void supabase.removeChannel(channel);
     };
-  }, [router]);
+  }, [router, instanceId]);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
