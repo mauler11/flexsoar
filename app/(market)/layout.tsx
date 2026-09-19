@@ -187,7 +187,9 @@ export default async function MarketLayout({
         <FiatProvider>
         <PrivyProviders>
         <header className="sticky top-0 z-40 border-b border-line bg-background/80 backdrop-blur">
-          {/* Row 1: nav + brand + actions. Row 2 (mobile only): search. */}
+          {/* Single header row on mobile: burger + mini logo + compact
+              search + bell (signed in) or auth (signed out). The search
+              takes whatever the row leaves — small by construction. */}
           <div className="flex w-full flex-col px-3 sm:px-4">
             <div className="flex w-full items-center gap-2 py-3 sm:gap-3">
               <MobileNavButton />
@@ -202,8 +204,14 @@ export default async function MarketLayout({
                   width={150}
                   height={50}
                   priority
+                  className="h-5 w-auto sm:h-auto"
                 />
               </Link>
+              <div className="min-w-0 flex-1 sm:hidden">
+                <Suspense>
+                  <SearchInput />
+                </Suspense>
+              </div>
               <div className="mx-auto hidden min-w-0 w-full max-w-xl flex-1 sm:block">
                 <Suspense>
                   <SearchInput />
@@ -233,28 +241,19 @@ export default async function MarketLayout({
                   </>
                 )}
               </div>
-              {/* Signed out on mobile: auth buttons only (no fiat). */}
-              {!me && (
-                <div className="ml-auto flex shrink-0 items-center sm:hidden">
-                  <AuthButtons />
-                </div>
-              )}
-            </div>
-            {/* Row 2 (mobile only): compact search + bell, one row. The
-                search idles short and expands to fill on focus. The bell
-                only exists when signed in — signed-out keeps full width. */}
-            <div className="flex w-full items-center gap-2 pb-3 sm:hidden">
-              <div className="w-36 min-w-0 transition-all focus-within:w-full focus-within:flex-1">
-                <Suspense>
-                  <SearchInput />
-                </Suspense>
-              </div>
-              {me && (
-                <div className="ml-auto shrink-0">
+              {/* Signed-in mobile: bell shares the single row. Signed-out
+                  mobile: compact auth shares it. Desktop account cluster
+                  unchanged below. */}
+              {me ? (
+                <div className="shrink-0 sm:hidden">
                   <NotificationBell
                     notifications={notifications}
                     unreadCount={unreadCount}
                   />
+                </div>
+              ) : (
+                <div className="flex shrink-0 items-center sm:hidden">
+                  <AuthButtons />
                 </div>
               )}
             </div>

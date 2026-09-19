@@ -17,18 +17,18 @@ export function AuthButtons() {
 
   return (
     <>
-      <div className="flex shrink-0 items-center gap-1 sm:gap-3">
+      <div className="flex shrink-0 items-center gap-0.5 sm:gap-3">
         <button
           type="button"
           onClick={() => setMode("sign-in")}
-          className="rounded-full px-3 py-2 text-sm font-semibold text-foreground transition hover:text-accent sm:px-4"
+          className="rounded-full px-2 py-2 text-[13px] font-semibold text-foreground transition hover:text-accent sm:px-4 sm:text-sm"
         >
           Log in
         </button>
         <button
           type="button"
           onClick={() => setMode("sign-up")}
-          className="rounded-full bg-accent px-4 py-2 text-sm font-bold text-[#0B0B0B] transition hover:brightness-110 sm:px-5"
+          className="rounded-full bg-accent px-3 py-1.5 text-[13px] font-bold text-[#0B0B0B] transition hover:brightness-110 sm:px-5 sm:py-2 sm:text-sm"
         >
           Sign up
         </button>
