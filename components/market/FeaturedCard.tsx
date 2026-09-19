@@ -65,17 +65,6 @@ export function FeaturedCard({ listing }: FeaturedCardProps) {
         >
           View details →
         </Link>
-        <div
-          className="mt-2 flex items-center gap-2 text-xs text-muted"
-          aria-label="Featured carousel position (coming soon)"
-        >
-          <span className="font-semibold text-foreground">01</span>
-          <span>/ 04</span>
-          <span className="ml-2 inline-flex items-center gap-3 text-base" aria-hidden="true">
-            <span>←</span>
-            <span>→</span>
-          </span>
-        </div>
       </div>
       <div className="relative bg-[radial-gradient(ellipse_at_center,rgba(53,240,122,0.08),transparent_70%)]">
         <CardArt sku={sku} aspect="aspect-[16/10] sm:aspect-auto sm:h-full sm:min-h-60" px={8} />

@@ -11,6 +11,7 @@
  */
 
 import { useState } from "react";
+import Link from "next/link";
 
 import { Button } from "@/components/ui/Button";
 
@@ -125,8 +126,12 @@ export function PayoutSetup({
         </p>
       )}
       <p className="mt-2 text-[9px] text-muted">
-        Connect your Stripe account to receive payouts. Payout method (cash vs
-        credit) is determined by your country — see TERMS.md §10.
+        Connect your Stripe account to receive payouts. Payout method (cash
+        vs credit) is determined by your country — see{" "}
+        <Link href="/terms" className="text-accent hover:underline">
+          Getting paid
+        </Link>
+        .
       </p>
       {error && (
         <p role="alert" className="mt-2 text-[10px] text-[#FF4444]">

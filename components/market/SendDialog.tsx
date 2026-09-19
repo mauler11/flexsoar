@@ -27,6 +27,23 @@ import { formatUsdc } from "@/lib/solana/balances";
 
 /** Public RPC for preflight reads only — sends go out over each wallet's own connection. */
 const DEVNET_RPC = "https://api.devnet.solana.com";
+const MAINNET_RPC = "https://api.mainnet-beta.solana.com";
+/** Mainnet USDC mint — matches lib/solana/config.ts's mainnet default. */
+const MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+/**
+ * Chain pointers derived from the USDC mint the backend settled: a devnet
+ * mint means devnet RPC + devnet explorer, anything else means mainnet. The
+ * mint is the one trustworthy cluster signal client-side — a hardcoded
+ * devnet RPC here once built mainnet transactions with devnet blockhashes
+ * and pointed users at the wrong explorer.
+ */
+function chainForMint(usdcMint: string): { rpc: string; explorerSuffix: string } {
+  if (usdcMint === MAINNET_USDC_MINT) {
+    return { rpc: MAINNET_RPC, explorerSuffix: "" };
+  }
+  return { rpc: DEVNET_RPC, explorerSuffix: "?cluster=devnet" };
+}
 
 export function SendDialog({
   walletAddress,
@@ -111,7 +128,8 @@ function SendDialogInner({
     }
     setBusy(true);
     try {
-      const connection = new Connection(DEVNET_RPC, "confirmed");
+      const chain = chainForMint(usdcMint);
+      const connection = new Connection(chain.rpc, "confirmed");
       const destAta = associatedTokenAddress(dest.trim(), usdcMint);
       const destInfo = await connection.getAccountInfo(new PublicKey(destAta));
       if (!destInfo) {
@@ -216,7 +234,7 @@ function SendDialogInner({
         <Banner tone="success" title="Sent">
           Signature {signature.slice(0, 16)}… —{" "}
           <a
-            href={`https://solscan.io/tx/${signature}?cluster=devnet`}
+            href={`https://solscan.io/tx/${signature}${chainForMint(usdcMint).explorerSuffix}`}
             target="_blank"
             rel="noreferrer"
             className="underline underline-offset-2"

@@ -131,6 +131,23 @@ function SlideVisual({ index }: { index: number }) {
       return <Badge tone="info">Pending vault</Badge>;
     case 5:
       return <Badge tone="warn">Ships to you</Badge>;
+    case 6:
+      // The 5% platform fee, at a glance: the buyer pays the list price,
+      // the bar splits into the seller's 95 and FlexSoar's 5.
+      return (
+        <div className="flex w-full flex-col gap-1.5" aria-label="95 percent to the seller, 5 percent platform fee">
+          <div className="flex h-6 w-full overflow-hidden rounded-full border border-line-strong">
+            <div className="flex items-center justify-center bg-accent text-[11px] font-black text-[#0B0B0B]" style={{ width: "95%" }}>
+              95%
+            </div>
+            <div className="flex items-center justify-center bg-overlay text-[11px] font-black text-muted" style={{ width: "5%" }} />
+          </div>
+          <div className="flex items-center justify-between text-[11px] font-semibold">
+            <span className="text-accent">You keep 95%</span>
+            <span className="text-muted">5% platform fee</span>
+          </div>
+        </div>
+      );
     default:
       return null;
   }

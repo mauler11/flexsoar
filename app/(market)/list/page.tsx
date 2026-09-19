@@ -21,7 +21,7 @@ const STEPS: ReadonlyArray<{ title: string }> = [
   { title: "We authenticate it and your listing goes live." },
   { title: "Ship within 48 hours when it sells." },
   { title: "Receive your payout after the clearing hold." },
-  { title: "Sell more, level up, unlock lower selling fees." },
+  { title: "One flat 5% platform fee on every sale — no tiers, no surprises." },
 ];
 
 export default function ListLandingPage() {

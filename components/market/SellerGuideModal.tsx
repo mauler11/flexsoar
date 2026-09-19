@@ -5,7 +5,7 @@
  *
  * SELLER GUIDE popup: how selling on FlexSoar actually works — submit with
  * photos, authentication, listing goes live, ship in 48h on sale, payout
- * after the clearing hold, fees by level. Written from the real flow
+ * after the clearing hold, flat 5% platform fee. Written from the real flow
  * (TERMS.md), not marketplace boilerplate.
  */
 
@@ -28,11 +28,11 @@ const STEPS: ReadonlyArray<{ title: string; body: string }> = [
   },
   {
     title: "4. Get paid after the hold clears",
-    body: "Payout is price minus your level fee, released after the 7-day clearing hold once the vault confirms receipt. Malaysian sellers are paid cash to bank; everyone else earns FSC credit.",
+    body: "Payout is your price minus the flat 5% platform fee, released after the 7-day clearing hold once the vault confirms receipt. Malaysian sellers are paid cash to bank; everyone else earns FSC credit.",
   },
   {
-    title: "5. Sell more, pay less",
-    body: "Every sale earns XP. Higher levels cut your seller fee, so volume directly raises your margins.",
+    title: "5. One fee for everyone",
+    body: "Every seller pays the same flat 5% on every sale — no tiers, no volume games. XP and levels are reputation, not discounts.",
   },
 ];
 

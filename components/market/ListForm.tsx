@@ -72,7 +72,7 @@ export function ListForm({
   function submit() {
     const value = toCents(price);
     if (value == null) {
-      setError("Enter a price in FSC (whole cents, > 0).");
+      setError("Enter an asking price in RM, above 0.");
       return;
     }
     if (needsCountry && !isValidCountryCode(selectedCountry)) {
@@ -145,14 +145,14 @@ export function ListForm({
       <Input
         type="text"
         inputMode="decimal"
-        placeholder="Ask price in FSC"
+        placeholder="Ask price (RM)"
         value={price}
         onChange={(e) => {
           setPrice(e.target.value);
           if (e.target.value) setError(null);
         }}
         disabled={pending}
-        aria-label="Ask price in FSC"
+        aria-label="Ask price in ringgit"
       />
 
       {belowOracle && (
