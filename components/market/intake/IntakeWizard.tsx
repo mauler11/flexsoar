@@ -103,6 +103,12 @@ export function IntakeWizard({
   }>({ state: "idle", itemId: null, error: null });
   const [isPending, startTransition] = useTransition();
 
+  // Preselected entry (product page → Sell): the SKU is already decided, so
+  // the SKU step is removed from the flow entirely — hidden from the
+  // stepper and unreachable via Back. Landing on (or going back to) an
+  // empty SKU picker reads as a dead Sell button.
+  const skuLocked = preselected != null;
+
   const declaredFloat = useMemo(() => {
     if (!CONDITION_QUESTIONS.every((q) => answers[q.key] != null)) return null;
     return gradeFloatFromComponents(answers as GradeComponents);
@@ -175,19 +181,21 @@ export function IntakeWizard({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Stepper */}
+      {/* Stepper (SKU hidden when the entry preselected it) */}
       <ol className="flex flex-wrap items-center gap-1.5 rounded-xl border border-line-strong bg-overlay p-2">
         {STEPS.map((label, i) => {
+          if (skuLocked && i === 0) return null;
           const active = i === step;
           const reached = i <= step || (i < step && canStepReached(i));
+          const n = skuLocked ? i : i + 1;
           return (
             <li key={label} className="flex items-center gap-1.5">
               <Button
                 variant={active ? "primary" : reached && i < step ? "secondary" : "ghost"}
                 size="sm"
-                onClick={() => i < step && setStep(i)}
+                onClick={() => i < step && !(skuLocked && i === 0) && setStep(i)}
               >
-                {i + 1}. {label}
+                {n}. {label}
               </Button>
               {i < STEPS.length - 1 && (
                 <span className="text-[9px] text-muted">/</span>
@@ -274,7 +282,12 @@ export function IntakeWizard({
 
       {/* Footer nav */}
       <div className="flex items-center justify-between border-t border-line-strong pt-3">
-        <Button variant="ghost" size="md" onClick={back} disabled={step === 0}>
+        <Button
+          variant="ghost"
+          size="md"
+          onClick={back}
+          disabled={step === 0 || (skuLocked && step === 1)}
+        >
           Back
         </Button>
         {step < STEPS.length - 1 ? (

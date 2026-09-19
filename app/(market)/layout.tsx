@@ -240,17 +240,17 @@ export default async function MarketLayout({
                 </div>
               )}
             </div>
-            {/* Row 2 (mobile only): shorter search + bell side by side,
-                one row. The bell only exists when signed in — signed-out
-                mobile keeps the full-width search. */}
+            {/* Row 2 (mobile only): compact search + bell, one row. The
+                search idles short and expands to fill on focus. The bell
+                only exists when signed in — signed-out keeps full width. */}
             <div className="flex w-full items-center gap-2 pb-3 sm:hidden">
-              <div className="min-w-0 flex-1">
+              <div className="w-36 min-w-0 transition-all focus-within:w-full focus-within:flex-1">
                 <Suspense>
                   <SearchInput />
                 </Suspense>
               </div>
               {me && (
-                <div className="shrink-0">
+                <div className="ml-auto shrink-0">
                   <NotificationBell
                     notifications={notifications}
                     unreadCount={unreadCount}
