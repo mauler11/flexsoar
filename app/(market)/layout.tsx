@@ -17,7 +17,7 @@ import { getUser, listNotifications } from "@/lib/api/contract";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { currentUserId } from "@/app/(market)/queries";
 import { SearchInput } from "@/components/market/SearchInput";
-import { MarketSearchOverlay } from "@/components/market/MarketSearchOverlay";
+import { MarketSearchPill } from "@/components/market/MarketSearchOverlay";
 import { Sidebar, type SidebarItem } from "@/components/market/Sidebar";
 import { MobileNav, MobileNavButton } from "@/components/market/Sidebar";
 import { SiteFooter } from "@/components/market/SiteFooter";
@@ -208,10 +208,10 @@ export default async function MarketLayout({
                   className="h-5 w-auto sm:h-auto"
                 />
               </Link>
-              {/* Mobile search (Novelship-style): a compact pill opens the
-                  full search view. Desktop keeps the inline field below. */}
+              {/* Mobile search: a compact pill into the /search section.
+                  Desktop keeps the inline field below. */}
               <div className="min-w-0 flex-1 sm:hidden">
-                <MarketSearchOverlay />
+                <MarketSearchPill />
               </div>
               <div className="mx-auto hidden min-w-0 w-full max-w-xl flex-1 sm:block">
                 <Suspense>
@@ -246,7 +246,7 @@ export default async function MarketLayout({
                   mobile: compact auth shares it. Desktop account cluster
                   unchanged below. */}
               {me ? (
-                <div className="shrink-0 sm:hidden">
+                <div className="-mr-1 shrink-0 sm:hidden">
                   <NotificationBell
                     notifications={notifications}
                     unreadCount={unreadCount}

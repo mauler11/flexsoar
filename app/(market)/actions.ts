@@ -312,6 +312,11 @@ export async function createCheckoutAction(
     const stripe = new Stripe(apiKey);
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
+      // Pinned, not dashboard-derived: without an explicit card type, a
+      // project with no MYR payment method activated fails with "No valid
+      // payment method types for this Checkout Session". Cards are the only
+      // method this checkout supports (raw PANs never touch our UI).
+      payment_method_types: ['card'],
       line_items: [
         {
           quantity: 1,
