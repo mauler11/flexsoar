@@ -17,6 +17,7 @@ import { getUser, listNotifications } from "@/lib/api/contract";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { currentUserId } from "@/app/(market)/queries";
 import { MarketSearchBox } from "@/components/market/MarketSearchBox";
+import { MarketSearchPill } from "@/components/market/SearchPageView";
 import { Sidebar, type SidebarItem } from "@/components/market/Sidebar";
 import { MobileNav, MobileNavButton } from "@/components/market/Sidebar";
 import { SiteFooter } from "@/components/market/SiteFooter";
@@ -186,7 +187,7 @@ export default async function MarketLayout({
         <OnboardingTour accountAgreed={accountAgreed} />
         <FiatProvider>
         <PrivyProviders>
-        <header className="sticky top-0 z-40 border-b border-line bg-background/80 backdrop-blur">
+        <header className="market-shell-header sticky top-0 z-40 border-b border-line bg-background/80 backdrop-blur">
           {/* Single header row on mobile: burger + mini logo + compact
               search + bell (signed in) or auth (signed out). The search
               takes whatever the row leaves — small by construction. */}
@@ -207,9 +208,11 @@ export default async function MarketLayout({
                   className="h-5 w-auto sm:h-auto"
                 />
               </Link>
-              {/* Mobile search: inline expanding field with dropdown. */}
+              {/* Mobile search: a compact pill into the /search section,
+                  whose header IS the expanded search bar. Desktop keeps
+                  the inline dropdown field below. */}
               <div className="min-w-0 flex-1 sm:hidden">
-                <MarketSearchBox mobile />
+                <MarketSearchPill />
               </div>
               <div className="mx-auto hidden min-w-0 w-full max-w-xl flex-1 sm:block">
                 <MarketSearchBox />
