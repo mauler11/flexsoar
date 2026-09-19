@@ -65,6 +65,7 @@ export function PlStrip({ entries }: { entries: PlEntry[] }) {
   );
 
   return (
+    <>
     <section
       aria-label="Unrealized profit and loss"
       className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-line bg-raised px-4 py-3"
@@ -106,5 +107,10 @@ export function PlStrip({ entries }: { entries: PlEntry[] }) {
         </button>
       </div>
     </section>
+    <p className="px-1 text-[11px] text-muted">
+      Live asks where available, oracle value otherwise · unrealized only —
+      sold cards aren&apos;t in this number.
+    </p>
+    </>
   );
 }

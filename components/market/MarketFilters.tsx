@@ -95,6 +95,16 @@ export function MarketFilters({ initial }: MarketFiltersProps) {
               </button>
             );
           })}
+          {initial.q && (
+            <button
+              type="button"
+              onClick={() => push({ q: null })}
+              aria-label={`Clear search ${initial.q}`}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-accent/60 bg-accent/10 px-3 py-2 text-sm font-semibold text-accent transition hover:bg-accent/20"
+            >
+              “{initial.q}” <span aria-hidden="true">×</span>
+            </button>
+          )}
         </div>
         <label className="flex shrink-0 items-center gap-1.5 text-[13px] text-muted">
           <span className="hidden sm:inline">Sort</span>
@@ -117,18 +127,6 @@ export function MarketFilters({ initial }: MarketFiltersProps) {
           </select>
         </label>
       </div>
-      {initial.q && (
-        <p className="text-[13px] text-muted">
-          Results for <span className="font-semibold text-foreground">“{initial.q}”</span>{" "}
-          <button
-            type="button"
-            onClick={() => push({ q: null })}
-            className="text-accent hover:underline"
-          >
-            clear
-          </button>
-        </p>
-      )}
     </div>
   );
 }

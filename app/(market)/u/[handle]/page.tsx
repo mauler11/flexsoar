@@ -132,14 +132,18 @@ export default async function ProfilePage({
             </p>
           </div>
         </div>
-        <dl className="flex gap-6 text-[10px] uppercase tracking-wide">
+        <dl className="flex gap-6 text-xs">
           <div>
-            <dt className="text-muted">Xp</dt>
-            <dd className="text-foreground">{profile.xp_total.toLocaleString()}</dd>
+            <dt className="uppercase tracking-wide text-muted">Xp</dt>
+            <dd className="font-semibold text-foreground">{profile.xp_total.toLocaleString()}</dd>
           </div>
           <div>
-            <dt className="text-muted">Portfolio</dt>
-            <dd className="text-foreground" title="Live asks plus shown collection value">
+            <dt className="uppercase tracking-wide text-muted">Cards</dt>
+            <dd className="font-semibold text-foreground">{visibleLive.length + collection.length}</dd>
+          </div>
+          <div>
+            <dt className="uppercase tracking-wide text-muted">Portfolio</dt>
+            <dd className="font-semibold text-foreground" title="Live asks plus shown collection value">
               {formatMyr(visiblePortfolioCents)}
             </dd>
           </div>

@@ -133,11 +133,12 @@ function EmbeddedLinkButtonInner({
     return (
       <div className="flex flex-col gap-2">
         <Button type="button" variant="secondary" size="lg" onClick={() => login()} className="py-3 text-base">
-          {cta} — continue with email
+          {cta}
         </Button>
         <p className="text-[11px] text-muted">
-          Creates your FlexSoar wallet on first login — kept by you, never
-          by FlexSoar.
+          You&apos;ll continue with email first, then sign one message to
+          link the wallet. Creates your FlexSoar wallet on first login —
+          kept by you, never by FlexSoar.
         </p>
       </div>
     );

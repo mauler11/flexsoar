@@ -15,11 +15,11 @@ export const metadata: Metadata = {
   title: "Sell — FlexSoar Market",
 };
 
-const STEPS: ReadonlyArray<{ title: string }> = [
+const STEPS: ReadonlyArray<{ title: string; hot?: boolean }> = [
   { title: "Search for the product you'd like to sell." },
   { title: "Submit your pair — photos, honest condition, your price." },
   { title: "We authenticate it and your listing goes live." },
-  { title: "Ship within 48 hours when it sells." },
+  { title: "Ship within 48 hours when it sells.", hot: true },
   { title: "Receive your payout after the clearing hold." },
   { title: "One flat 5% platform fee on every sale — no tiers, no surprises." },
 ];
@@ -32,8 +32,15 @@ export default function ListLandingPage() {
       <ol className="flex flex-col gap-3">
         {STEPS.map((step, i) => (
           <li key={step.title} className="flex items-center gap-3 text-[15px]">
-            <span className="font-bold text-foreground">{i + 1}.</span>
-            <span className="text-muted">{step.title}</span>
+            <span
+              aria-hidden="true"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-black text-[#0B0B0B]"
+            >
+              {i + 1}
+            </span>
+            <span className={step.hot ? "font-bold text-foreground" : "text-muted"}>
+              {step.title}
+            </span>
           </li>
         ))}
       </ol>

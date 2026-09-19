@@ -26,7 +26,6 @@ import {
 } from "@/lib/domain/rarity";
 import { toggleCardVisibilityAction } from "@/app/(market)/actions";
 import { formatMyr } from "@/components/card/format";
-import { cn } from "@/components/ui/cn";
 
 export interface HeldCardProps {
   card: CardSummary;
@@ -114,20 +113,29 @@ export function HeldCard({
       </Link>
       {showToggle && (
         <>
-          <button
-            type="button"
-            onClick={flip}
-            disabled={isPending}
-            aria-pressed={shown}
-            className={cn(
-              "mt-2 inline-flex items-center justify-center px-3 py-2 text-sm font-bold transition disabled:opacity-60",
-              shown
-                ? "rounded-lg bg-accent text-[#0B0B0B] hover:brightness-110"
-                : "rounded-lg border border-line-strong text-muted hover:border-muted hover:text-foreground",
-            )}
-          >
-            {shown ? "Shown In Profile" : "Not Shown In Profile"}
-          </button>
+          <div className="mt-2 flex items-center justify-between gap-2 px-0.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Profile
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={shown}
+              aria-label={shown ? "Shown in profile — hide it" : "Hidden from profile — show it"}
+              onClick={flip}
+              disabled={isPending}
+              className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-60 ${
+                shown ? "bg-accent" : "bg-line-strong"
+              }`}
+            >
+              <span
+                aria-hidden
+                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
+                  shown ? "left-[18px]" : "left-0.5"
+                }`}
+              />
+            </button>
+          </div>
           {failed && (
             <p role="alert" className="mt-1 text-xs text-[#FF4444]">
               Couldn&apos;t save — try again.
