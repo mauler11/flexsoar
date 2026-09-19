@@ -16,8 +16,7 @@ import type { Json } from "@/lib/db/types";
 import { getUser, listNotifications } from "@/lib/api/contract";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { currentUserId } from "@/app/(market)/queries";
-import { SearchInput } from "@/components/market/SearchInput";
-import { MarketSearchPill } from "@/components/market/MarketSearchOverlay";
+import { MarketSearchBox } from "@/components/market/MarketSearchBox";
 import { Sidebar, type SidebarItem } from "@/components/market/Sidebar";
 import { MobileNav, MobileNavButton } from "@/components/market/Sidebar";
 import { SiteFooter } from "@/components/market/SiteFooter";
@@ -208,15 +207,12 @@ export default async function MarketLayout({
                   className="h-5 w-auto sm:h-auto"
                 />
               </Link>
-              {/* Mobile search: a compact pill into the /search section.
-                  Desktop keeps the inline field below. */}
+              {/* Mobile search: inline expanding field with dropdown. */}
               <div className="min-w-0 flex-1 sm:hidden">
-                <MarketSearchPill />
+                <MarketSearchBox mobile />
               </div>
               <div className="mx-auto hidden min-w-0 w-full max-w-xl flex-1 sm:block">
-                <Suspense>
-                  <SearchInput />
-                </Suspense>
+                <MarketSearchBox />
               </div>
               {/* Logged in: account cluster is sm+ only — on mobile the
                   header is logo + search, account lives in the drawer. */}
