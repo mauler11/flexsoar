@@ -26,6 +26,8 @@ import {
   getCard,
   getListing,
   getListings,
+  getRedemptionHandlingFeeCents,
+  getUser,
   listCard,
   cancelListing,
   redeemCard,
@@ -40,8 +42,9 @@ import {
 import type { ShippingAddress } from '@/lib/api/contract';
 import type { UUID } from '@/lib/db/types';
 import { createServerSupabase } from '@/lib/supabase/server';
+import { sendRedemptionRequestedEmail } from '@/lib/email/send';
 import { safeNextPath } from '@/app/(auth)/paths';
-import { currentUserId, currentUserLevel, REDEMPTION_HANDLING_FEE_CENTS } from '@/app/(market)/queries';
+import { currentUserId, currentUserLevel } from '@/app/(market)/queries';
 import { isValidCountryCode } from '@/components/market/intake/intake-config';
 import {
   CREDIT_HOLD_MINUTES_FALLBACK,
@@ -401,21 +404,38 @@ export async function getListingForOrderAction(
 }
 
 // ------------------------------------------------------------
-// REDEMPTION — owner only
+// REDEMPTION — owner only (paid flow: quote → Stripe → verify → burn)
+// ------------------------------------------------------------
+// The old free redeemCardAction was removed with the inline form: every
+// redemption now goes through createRedemptionCheckoutAction (pay) +
+// completeRedemptionAction (verify + burn). No path may burn without
+// a verified shipping payment, except the explicit zero-total branch
+// inside creation.
+
+// ------------------------------------------------------------
+// REDEMPTION WITH SHIPPING CHECKOUT — owner only
 // ------------------------------------------------------------
 
 /**
- * Submits a redemption request for an owned card. The handling fee is the
- * server-side constant, shown to the user before they confirm — the form
- * sends the address only.
+ * Step 1 of paid redemption: validates the card and address, quotes live,
+ * and redirects to a Stripe Checkout for the shipping total (zone rate +
+ * handling fee, both read live — never typed by the client).
+ *
+ * The handling fee is the live platform_config value, so zeroing the config
+ * removes it without a deploy. Malaysia-only: the zone map covers MY
+ * postcodes and anything else is rejected before money moves.
+ *
+ * Nothing burns here. The card burns in completeRedemptionAction after
+ * Stripe confirms payment — a buyer who bails at Stripe loses nothing.
  */
-export async function redeemCardAction(formData: FormData): Promise<void> {
+export async function createRedemptionCheckoutAction(
+  formData: FormData,
+): Promise<void> {
   const cardId = String(formData.get('card_id') ?? '');
-  const backTo = cardPath(cardId);
+  const backTo = cardPath(cardId as UUID);
 
   const me = await currentUserId();
   if (!me) requireSignedIn(backTo);
-
   if (!/^[0-9a-f-]{36}$/i.test(cardId)) {
     redirectWithError(backTo, 'invalid card id');
   }
@@ -427,38 +447,260 @@ export async function redeemCardAction(formData: FormData): Promise<void> {
     city: String(formData.get('city') ?? '').trim(),
     state: String(formData.get('state') ?? '').trim() || null,
     postal_code: String(formData.get('postal_code') ?? '').trim(),
-    country_code: String(formData.get('country_code') ?? '').trim().toUpperCase(),
+    country_code: 'MY',
     phone: String(formData.get('phone') ?? '').trim() || null,
   };
-
   if (!address.recipient_name || !address.line1 || !address.city || !address.postal_code) {
     redirectWithError(backTo, 'recipient name, address line 1, city and postal code are required');
   }
-  if (!/^[A-Z]{2}$/.test(address.country_code)) {
-    redirectWithError(backTo, 'country must be a two-letter ISO 3166-1 alpha-2 code');
-  }
 
+  let detail;
   try {
-    const detail = await getCard(cardId);
-    if (!detail) {
-      redirectWithError(backTo, 'card not found');
-    }
-    if (detail.owner.id !== me) {
-      redirectWithError(backTo, 'not your card');
-    }
-    if (detail.status !== 'active') {
-      redirectWithError(backTo, `card is ${detail.status}, expected active`);
-    }
-    if (detail.listing) {
-      redirectWithError(backTo, 'redeem a card only after cancelling its live listing');
-    }
-
-    await redeemCard(cardId, me, address, REDEMPTION_HANDLING_FEE_CENTS);
+    detail = await getCard(cardId as UUID);
   } catch (thrown) {
     redirectWithError(backTo, errorText(thrown));
   }
+  if (!detail) redirectWithError(backTo, 'card not found');
+  if (detail.owner.id !== me) redirectWithError(backTo, 'not your card');
+  if (detail.status !== 'active') {
+    redirectWithError(backTo, `card is ${detail.status}, expected active`);
+  }
+  if (detail.listing) {
+    redirectWithError(backTo, 'redeem a card only after cancelling its live listing');
+  }
 
-  redirect(`${backTo}?redeemed=1`);
+  // Quote now, from the same sources the completion step re-checks: zone
+  // rate (table-first, seed fallback) + live handling fee.
+  const quoted = await redemptionQuote(address.postal_code);
+  if (!quoted.ok) redirectWithError(backTo, quoted.message ?? 'shipping quote failed');
+  const { rateCents, handlingCents, totalCents } = quoted.quote;
+  const zone = quoted.quote.zone;
+  const zoneName = quoted.quote.zoneName;
+
+  if (totalCents <= 0) {
+    // Nothing to collect — redeem directly, same as the old free path.
+    try {
+      await redeemCard(cardId as UUID, me, address, handlingCents);
+      await sendRedemptionEmail(me, detail, address, { zoneName, rateCents }, handlingCents, totalCents);
+    } catch (thrown) {
+      redirectWithError(backTo, errorText(thrown));
+    }
+    redirect(`${backTo}?redeemed=1`);
+  }
+
+  const apiKey = process.env['STRIPE_SECRET_KEY'];
+  if (!apiKey) {
+    redirectWithError(backTo, 'checkout is not configured (STRIPE_SECRET_KEY unset)');
+  }
+
+  const sku = detail.sku;
+  const origin = await siteOrigin();
+
+  try {
+    const stripe = new Stripe(apiKey);
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: 'myr',
+            unit_amount: totalCents,
+            product_data: {
+              name: `Redemption shipping — ${sku.brand} ${sku.model} · US ${sku.size_us} (${zoneName})`,
+            },
+          },
+        },
+      ],
+      // Per-field address (each value far under Stripe's 500-char metadata
+      // cap) so completion rebuilds the exact ShippingAddress the buyer
+      // confirmed — the joined one-liner below is display-only.
+      payment_intent_data: {
+        metadata: {
+          kind: 'redemption_shipping',
+          card_id: cardId,
+          user_id: me,
+          zone,
+          quote_cents: String(rateCents),
+          handling_cents: String(handlingCents),
+          r_name: address.recipient_name.slice(0, 200),
+          r_line1: address.line1.slice(0, 200),
+          r_line2: (address.line2 ?? '').slice(0, 200),
+          r_city: address.city.slice(0, 200),
+          r_state: (address.state ?? '').slice(0, 200),
+          r_post: address.postal_code.slice(0, 20),
+          r_phone: (address.phone ?? '').slice(0, 50),
+        },
+      },
+      metadata: { kind: 'redemption_shipping', card_id: cardId, user_id: me },
+      success_url: `${origin}${backTo}?shipping=paid&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}${backTo}`,
+    });
+    if (!session.url) redirectWithError(backTo, 'stripe returned no checkout url');
+    redirect(session.url);
+  } catch (thrown) {
+    unstable_rethrow(thrown);
+    const message =
+      thrown instanceof Stripe.errors.StripeError
+        ? thrown.message
+        : errorText(thrown);
+    redirectWithError(backTo, message);
+  }
+}
+
+/**
+ * Sends the redemption confirmation email. Email failure never unwinds a
+ * paid redemption — it returns the error text for the UI to state plainly.
+ */
+async function sendRedemptionEmail(
+  userId: string,
+  detail: NonNullable<Awaited<ReturnType<typeof getCard>>>,
+  address: ShippingAddress,
+  quote: { zoneName: string; rateCents: number },
+  handlingCents: number,
+  totalCents: number,
+): Promise<{ mailed: boolean; mailError?: string }> {
+  try {
+    const user = await getUser({ id: userId as UUID }).catch(() => null);
+    const origin = await siteOrigin().catch(() => 'https://flexsoar.net');
+    const email = user?.email ?? null;
+    if (!email) return { mailed: false, mailError: 'no email on file — add one to receive confirmations' };
+    const sku = detail.sku;
+    const addressLine = [
+      address.recipient_name,
+      address.line1,
+      address.line2,
+      `${address.postal_code} ${address.city}`,
+      address.state,
+      'Malaysia',
+    ]
+      .filter(Boolean)
+      .join(', ');
+    const result = await sendRedemptionRequestedEmail({
+      redeemerEmail: email,
+      redeemerHandle: detail.owner.handle,
+      shoeBrand: sku.brand,
+      shoeModel: sku.model,
+      shoeColorway: sku.colorway,
+      shoeSizeUs: sku.size_us,
+      shippingZoneName: quote.zoneName,
+      shippingCents: quote.rateCents,
+      handlingCents,
+      totalPaidCents: totalCents,
+      addressLine,
+      cardUrl: `${origin}/card/${detail.id}`,
+    });
+    if (!result.success) return { mailed: false, mailError: result.error ?? 'email failed to send' };
+    return { mailed: true };
+  } catch (thrown) {
+    return { mailed: false, mailError: errorText(thrown) };
+  }
+}
+
+export interface CompleteRedemptionResult {
+  ok: boolean;
+  message?: string;
+  mailed?: boolean;
+  mailError?: string;
+}
+
+/**
+ * Step 2 of paid redemption, run when the buyer returns from Stripe:
+ * verifies the session actually got paid (server-side retrieve — the
+ * success_url alone proves nothing), re-checks the quote hasn't moved,
+ * then burns and emails. Idempotent: a card that is already redeemed
+ * (retry, double-click, back-button) returns success without re-burning.
+ *
+ * The paid-but-closed-tab edge (user pays, never returns) is NOT closed
+ * here — that needs the webhook to complete redemptions (data lane). This
+ * path covers every user who comes back, which is the launch flow.
+ */
+export async function completeRedemptionAction(
+  sessionId: string,
+  cardId: string,
+): Promise<CompleteRedemptionResult> {
+  const me = await currentUserId();
+  if (!me) return { ok: false, message: 'sign in to complete the redemption' };
+  if (!/^[0-9a-f-]{36}$/i.test(cardId)) return { ok: false, message: 'invalid card id' };
+  if (!sessionId.trim()) return { ok: false, message: 'missing checkout session' };
+
+  const apiKey = process.env['STRIPE_SECRET_KEY'];
+  if (!apiKey) return { ok: false, message: 'checkout is not configured (STRIPE_SECRET_KEY unset)' };
+
+  let detail;
+  try {
+    detail = await getCard(cardId as UUID);
+  } catch (thrown) {
+    return { ok: false, message: errorText(thrown) };
+  }
+  if (!detail) return { ok: false, message: 'card not found' };
+  if (detail.status !== 'active') {
+    // Already redeemed (retry/double-submit/back-button): success, nothing
+    // left to burn. The card page's own redeemed banner states it.
+    return { ok: true };
+  }
+  if (detail.owner.id !== me) return { ok: false, message: 'not your card' };
+  if (detail.listing) {
+    return { ok: false, message: 'redeem a card only after cancelling its live listing' };
+  }
+
+  let session;
+  try {
+    const stripe = new Stripe(apiKey);
+    session = await stripe.checkout.sessions.retrieve(sessionId.trim());
+  } catch (thrown) {
+    return { ok: false, message: errorText(thrown) };
+  }
+  const meta = session.metadata ?? {};
+  if (session.payment_status !== 'paid') {
+    return { ok: false, message: 'payment not completed — finish checkout, then retry' };
+  }
+  if (meta['kind'] !== 'redemption_shipping' || meta['card_id'] !== cardId || meta['user_id'] !== me) {
+    return { ok: false, message: 'this checkout session is not for this redemption' };
+  }
+
+  // Re-derive what the session SHOULD have charged: a rate change between
+  // pay and return must fail closed with a human-readable path (support +
+  // session id for manual completion), never a silent over/under-charge.
+  const address: ShippingAddress = {
+    recipient_name: String(meta['r_name'] ?? ''),
+    line1: String(meta['r_line1'] ?? ''),
+    line2: String(meta['r_line2'] ?? '') || null,
+    city: String(meta['r_city'] ?? ''),
+    state: String(meta['r_state'] ?? '') || null,
+    postal_code: String(meta['r_post'] ?? ''),
+    country_code: 'MY',
+    phone: String(meta['r_phone'] ?? '') || null,
+  };
+  if (!address.recipient_name || !address.line1 || !address.city || !address.postal_code) {
+    return { ok: false, message: 'checkout session is missing the address — contact support with session ' + sessionId.trim() };
+  }
+  const quote = await redemptionQuote(address.postal_code);
+  if (!quote.ok) return { ok: false, message: quote.message ?? 'shipping quote failed' };
+  const handlingCents = quote.quote.handlingCents;
+  const expectedTotal = quote.quote.totalCents;
+  if (session.amount_total !== expectedTotal) {
+    return {
+      ok: false,
+      message: `rates changed after payment (paid ${session.amount_total}, now ${expectedTotal}) — contact support with session ${sessionId.trim()} for manual completion`,
+    };
+  }
+
+  try {
+    await redeemCard(cardId as UUID, me, address, handlingCents);
+  } catch (thrown) {
+    return { ok: false, message: errorText(thrown) };
+  }
+  const mail = await sendRedemptionEmail(
+    me,
+    detail,
+    address,
+    { zoneName: quote.quote.zoneName, rateCents: quote.quote.rateCents },
+    handlingCents,
+    expectedTotal,
+  );
+  return { ok: true, mailed: mail.mailed, mailError: mail.mailError };
 }
 
 // ------------------------------------------------------------
@@ -658,4 +900,48 @@ export async function getShippingQuoteAction(
       live: false,
     },
   };
+}
+
+export interface RedemptionQuote {
+  zone: ShippingZoneCode;
+  zoneName: string;
+  rateCents: number;
+  handlingCents: number;
+  totalCents: number;
+  etaNote: string;
+}
+
+/**
+ * The single computation behind both the displayed quote and the charged
+ * total: zone rate (table-first, seed fallback) + live handling fee.
+ * CompleteRedemptionAction re-runs this exact function and compares
+ * against what Stripe collected — one definition, never two numbers.
+ */
+async function redemptionQuote(
+  postalCode: string,
+): Promise<{ ok: true; quote: RedemptionQuote } | { ok: false; message: string }> {
+  const zone = await getShippingQuoteAction(postalCode);
+  if (!zone.ok) return zone;
+  const handlingCents = await getRedemptionHandlingFeeCents().catch(() => 0);
+  return {
+    ok: true,
+    quote: {
+      zone: zone.quote.zone,
+      zoneName: zone.quote.zoneName,
+      rateCents: zone.quote.rateCents,
+      handlingCents,
+      totalCents: zone.quote.rateCents + handlingCents,
+      etaNote: zone.quote.etaNote,
+    },
+  };
+}
+
+/**
+ * Quote preview for the redeem popup. Read-only wrapper over the same
+ * computation checkout and completion use.
+ */
+export async function getRedemptionQuoteAction(
+  postalCode: string,
+): Promise<{ ok: true; quote: RedemptionQuote } | { ok: false; message: string }> {
+  return redemptionQuote(postalCode);
 }

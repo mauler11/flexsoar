@@ -29,6 +29,21 @@ export interface SubmissionApprovedEmailInput {
   listingUrl: string;
 }
 
+export interface RedemptionRequestedEmailInput {
+  redeemerEmail: string;
+  redeemerHandle: string;
+  shoeBrand: string;
+  shoeModel: string;
+  shoeColorway: string;
+  shoeSizeUs: number;
+  shippingZoneName: string;
+  shippingCents: number;
+  handlingCents: number;
+  totalPaidCents: number;
+  addressLine: string;
+  cardUrl: string;
+}
+
 export interface CardSoldEmailInput {
   consignorEmail: string;
   consignorHandle: string;
@@ -106,6 +121,99 @@ Size: US ${shoeSizeUs}
 Listing: ${listingUrl}
 
 The listing is public and can be purchased immediately.
+
+— FlexSoar
+Questions? Contact ${SUPPORT_EMAIL}
+  `.trim();
+
+  return { subject, html, text };
+}
+
+export function buildRedemptionRequestedEmail(input: RedemptionRequestedEmailInput): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const {
+    redeemerHandle,
+    shoeBrand,
+    shoeModel,
+    shoeColorway,
+    shoeSizeUs,
+    shippingZoneName,
+    shippingCents,
+    handlingCents,
+    totalPaidCents,
+    addressLine,
+    cardUrl,
+  } = input;
+
+  const subject = `Redemption requested: ${shoeBrand} ${shoeModel} ${shoeColorway} (US ${shoeSizeUs})`;
+
+  const rows = `
+<tr>
+  <td style="padding: 8px 0; font-weight: 600;">Shoe</td>
+  <td style="padding: 8px 0;">${shoeBrand} ${shoeModel} ${shoeColorway}</td>
+</tr>
+<tr>
+  <td style="padding: 8px 0; font-weight: 600;">Size</td>
+  <td style="padding: 8px 0;">US ${shoeSizeUs}</td>
+</tr>
+<tr>
+  <td style="padding: 8px 0; font-weight: 600;">Ship to</td>
+  <td style="padding: 8px 0;">${addressLine}</td>
+</tr>
+<tr>
+  <td style="padding: 8px 0; font-weight: 600;">Shipping (${shippingZoneName})</td>
+  <td style="padding: 8px 0;">${formatPrice(shippingCents)}</td>
+</tr>
+${
+  handlingCents > 0
+    ? `<tr>
+  <td style="padding: 8px 0; font-weight: 600;">Handling fee</td>
+  <td style="padding: 8px 0;">${formatPrice(handlingCents)}</td>
+</tr>`
+    : ``
+}
+<tr>
+  <td style="padding: 8px 0; font-weight: 600;">Total paid</td>
+  <td style="padding: 8px 0;">${formatPrice(totalPaidCents)}</td>
+</tr>
+<tr>
+  <td style="padding: 8px 0; font-weight: 600;">Card</td>
+  <td style="padding: 8px 0;"><a href="${cardUrl}" style="color: #0066cc;">${cardUrl}</a></td>
+</tr>`.trim();
+
+  const html = `
+<!DOCTYPE html>
+<html>
+  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1a1a1a; max-width: 600px; margin: 0 auto; padding: 24px;">
+    <p>Hi ${redeemerHandle},</p>
+    <p><strong>Your redemption is requested.</strong> The card claim is burned and the physical shoes are being prepared for shipping to you.</p>
+    <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+      ${rows}
+    </table>
+    <p>You will receive another email with the courier tracking number once the parcel ships.</p>
+    <p>— FlexSoar</p>
+    <hr style="border: none; border-top: 1px solid #e5e5e5; margin: 24px 0;" />
+    <p style="font-size: 12px; color: #666;">Questions? Contact ${SUPPORT_EMAIL}</p>
+  </body>
+</html>
+  `.trim();
+
+  const text = `
+Hi ${redeemerHandle},
+
+Your redemption is requested. The card claim is burned and the physical shoes are being prepared for shipping to you.
+
+Shoe: ${shoeBrand} ${shoeModel} ${shoeColorway}
+Size: US ${shoeSizeUs}
+Ship to: ${addressLine}
+Shipping (${shippingZoneName}): ${formatPrice(shippingCents)}
+${handlingCents > 0 ? `Handling fee: ${formatPrice(handlingCents)}\n` : ``}Total paid: ${formatPrice(totalPaidCents)}
+Card: ${cardUrl}
+
+You will receive another email with the courier tracking number once the parcel ships.
 
 — FlexSoar
 Questions? Contact ${SUPPORT_EMAIL}
@@ -257,6 +365,19 @@ export async function sendSubmissionApprovedEmail(
     html,
     text,
     'submission_approved',
+  );
+}
+
+export async function sendRedemptionRequestedEmail(
+  input: RedemptionRequestedEmailInput,
+): Promise<{ success: boolean; error?: string; id?: string }> {
+  const { subject, html, text } = buildRedemptionRequestedEmail(input);
+  return sendEmailWithLogging(
+    input.redeemerEmail,
+    subject,
+    html,
+    text,
+    'redemption_requested',
   );
 }
 

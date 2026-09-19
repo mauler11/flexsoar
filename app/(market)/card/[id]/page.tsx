@@ -12,7 +12,6 @@ import { getCard, getListing, getItem, getCreditAvailable, getPayoutMethodForUse
 import type { CardStatus } from "@/lib/db/types";
 import {
   currentUserId,
-  REDEMPTION_HANDLING_FEE_CENTS,
   getVaultIntakeForCard,
   type VaultIntakeStatus,
 } from "@/app/(market)/queries";
@@ -22,7 +21,7 @@ import { CardDetail } from "@/components/card/CardDetail";
 import { Banner } from "@/components/market/Banner";
 import { BuyPanel } from "@/components/market/BuyPanel";
 import { ListForm } from "@/components/market/ListForm";
-import { RedeemForm } from "@/components/market/RedeemForm";
+import { RedeemButton, CompleteRedemption } from "@/components/market/RedeemForm";
 import { ProvenanceChain } from "@/components/market/ProvenanceChain";
 import { PriceChart } from "@/components/market/PriceChart";
 import { fairIndicator, marketRead } from "@/lib/market/pricing";
@@ -85,6 +84,8 @@ interface CardSearchParams {
   error?: string;
   order?: string;
   redeemed?: string;
+  shipping?: string;
+  session_id?: string;
 }
 
 export default async function CardPage({
@@ -282,10 +283,11 @@ export default async function CardPage({
                   <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
                     Redeem the physical card
                   </h2>
-                  <RedeemForm
-                    cardId={detail.id}
-                    feeCents={REDEMPTION_HANDLING_FEE_CENTS}
-                  />
+                  {sp.shipping === "paid" && sp.session_id ? (
+                    <CompleteRedemption cardId={detail.id} sessionId={sp.session_id} />
+                  ) : (
+                    <RedeemButton cardId={detail.id} />
+                  )}
                 </div>
               </>
             ) : (

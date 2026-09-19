@@ -4,6 +4,7 @@ import {
   SHIPPING_ZONES,
   shippingZoneForPostcode,
 } from '@/lib/market/shipping';
+import { buildRedemptionRequestedEmail } from '@/lib/email/send';
 
 describe('shipping zones', () => {
   it('maps Klang Valley prefixes to A', () => {
@@ -43,5 +44,45 @@ describe('shipping zones', () => {
     expect(SHIPPING_ZONES.A.seedRateCents).toBe(1000);
     expect(SHIPPING_ZONES.B.seedRateCents).toBe(1200);
     expect(SHIPPING_ZONES.C.seedRateCents).toBe(3000);
+  });
+});
+
+describe('redemption email', () => {
+  const base = {
+    redeemerEmail: 'wizzy@example.com',
+    redeemerHandle: 'wizzy',
+    shoeBrand: 'Nike',
+    shoeModel: 'Air Force 1',
+    shoeColorway: 'White',
+    shoeSizeUs: 10,
+    shippingZoneName: 'Klang Valley',
+    shippingCents: 1000,
+    handlingCents: 0,
+    totalPaidCents: 1000,
+    addressLine: 'Wizzy, 1 Jalan SS2, 47830 Petaling Jaya, Malaysia',
+    cardUrl: 'https://flexsoar.net/card/abc',
+  };
+
+  it('states the paid total, address, and zone', () => {
+    const { subject, html, text } = buildRedemptionRequestedEmail(base);
+    expect(subject).toContain('Redemption requested');
+    for (const body of [html, text]) {
+      expect(body).toContain('RM 10.00');
+      expect(body).toContain('47830 Petaling Jaya');
+      expect(body).toContain('Klang Valley');
+    }
+  });
+
+  it('omits the handling row when the fee is zero', () => {
+    const { html, text } = buildRedemptionRequestedEmail(base);
+    expect(html).not.toContain('Handling fee');
+    expect(text).not.toContain('Handling fee');
+    const withFee = buildRedemptionRequestedEmail({
+      ...base,
+      handlingCents: 1500,
+      totalPaidCents: 2500,
+    });
+    expect(withFee.html).toContain('RM 15.00');
+    expect(withFee.text).toContain('RM 25.00');
   });
 });
