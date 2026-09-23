@@ -155,7 +155,6 @@ export default async function MarketLayout({
   const sidebarItems: SidebarItem[] = [
     { href: "/market", label: "Market", icon: "market" },
     { href: "/list", label: "List", icon: "list" },
-    { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
     { href: "/payouts", label: "Payouts", icon: "payouts" },
     ...(me
       ? [{ href: `/u/${me.handle}`, label: "Profile", icon: "profile" as const }]

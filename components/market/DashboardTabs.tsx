@@ -8,6 +8,10 @@
  * verdicts (Approved / Rejected / In review) instead of raw item statuses.
  * The Held tab carries the profile-visibility switch for the whole
  * collection.
+ *
+ * Lives on the owner's profile now (/dashboard redirects there): the
+ * profile shows submissions + redemptions below the collection grid, and
+ * the collection cards carry the visibility toggles themselves.
  */
 
 import { useState } from "react";
@@ -26,6 +30,12 @@ export interface DashboardTabsProps {
   redemptions: RedemptionSummary[];
   /** cardId -> show_in_profile. Absent means visible (pre-046 rows). */
   visibility: Record<string, boolean>;
+  /**
+   * Which tabs render. The profile embeds only submissions + redemptions
+   * (its collection grid already covers held stock with toggles) —
+   * dashboard's own page is gone, redirected to the owner's profile.
+   */
+  visibleTabs?: Tab[];
 }
 
 type Tab = "held" | "submissions" | "redemptions";
@@ -58,14 +68,16 @@ export function DashboardTabs({
   heldCards,
   redemptions,
   visibility,
+  visibleTabs = ["held", "submissions", "redemptions"],
 }: DashboardTabsProps) {
-  const [tab, setTab] = useState<Tab>("held");
+  const [tab, setTab] = useState<Tab>(visibleTabs[0] ?? "held");
 
-  const tabs: Array<{ id: Tab; label: string; count: number }> = [
+  const allTabs: Array<{ id: Tab; label: string; count: number }> = [
     { id: "held", label: "Held items", count: heldItems.length + heldCards.length },
     { id: "submissions", label: "Submissions", count: submittedItems.length },
     { id: "redemptions", label: "Redemptions", count: redemptions.length },
   ];
+  const tabs = allTabs.filter((t) => visibleTabs.includes(t.id));
 
   return (
     <section className="flex flex-col gap-3">

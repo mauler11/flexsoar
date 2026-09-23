@@ -8,15 +8,17 @@
  */
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getCards, getListings, getPlatformConfig } from "@/lib/api/contract";
+import { getCards, getListings, getPlatformConfig, getRedemptions } from "@/lib/api/contract";
 import {
   currentUserId,
   getHiddenCardIds,
+  getMySubmittedItems,
   getPublicProfileByHandle,
   getTradeHistory,
 } from "@/app/(market)/queries";
 import { MarketTile } from "@/components/market/MarketTile";
 import { HeldCard } from "@/components/market/HeldCard";
+import { DashboardTabs } from "@/components/market/DashboardTabs";
 import { PlStrip } from "@/components/market/PlStrip";
 import { plEntriesForCards } from "@/lib/market/pricing";
 import { TradeToggle } from "@/components/market/TradeToggle";
@@ -67,6 +69,15 @@ export default async function ProfilePage({
     getHiddenCardIds(profile.id),
     getPlatformConfig(),
   ]);
+
+  // Owner-only seller sections (absorbed from /dashboard): submissions and
+  // redemptions. Visitors never fetch these.
+  const [submittedItems, redemptions] = isOwner
+    ? await Promise.all([
+        getMySubmittedItems(profile.id).catch(() => []),
+        getRedemptions({ userId: profile.id }).catch(() => []),
+      ])
+    : [[], []];
 
   // 046: per-shoe hiding applies on top of the master switch. Owners see
   // their own hidden shoes ghosted (so the toggle visibly does something);
@@ -212,7 +223,7 @@ export default async function ProfilePage({
                       card={card}
                       statusLabel="In collection"
                       shownInProfile={!hidden}
-                      showToggle={false}
+                      showToggle={isOwner}
                       priceCents={ask ?? oracle}
                       priceCaption={ask != null ? "Ask" : oracle != null ? "Market" : undefined}
                     />
@@ -223,6 +234,17 @@ export default async function ProfilePage({
           </div>
         )}
       </section>
+      )}
+
+      {isOwner && (
+        <DashboardTabs
+          submittedItems={submittedItems}
+          heldItems={[]}
+          heldCards={[]}
+          redemptions={redemptions}
+          visibility={{}}
+          visibleTabs={["submissions", "redemptions"]}
+        />
       )}
 
       {holdingsVisible && tradesVisible && (
