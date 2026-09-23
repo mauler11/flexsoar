@@ -8,7 +8,7 @@
  */
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getCards, getListings, getPlatformConfig, getRedemptions } from "@/lib/api/contract";
+import { getCards, getListings, getPlatformConfig, getRedemptions, getPriceHistory, listSkuModels } from "@/lib/api/contract";
 import {
   currentUserId,
   getHiddenCardIds,
@@ -19,9 +19,10 @@ import {
 import { MarketTile } from "@/components/market/MarketTile";
 import { HeldCard } from "@/components/market/HeldCard";
 import { DashboardTabs } from "@/components/market/DashboardTabs";
-import { PlStrip } from "@/components/market/PlStrip";
-import { plEntriesForCards } from "@/lib/market/pricing";
+import { PlGraph } from "@/components/market/PlGraph";
+import { ProfileTabs } from "@/components/market/ProfileTabs";
 import { TradeToggle } from "@/components/market/TradeToggle";
+import { portfolioSeries } from "@/lib/market/portfolio";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatMyr } from "@/components/card/format";
 
@@ -104,25 +105,57 @@ export default async function ProfilePage({
 
   const joined = profile.created_at.slice(0, 10);
 
-  // Owner-only unrealized P/L: open-hop cost vs live ask (else oracle).
-  // Visitors never see this strip — financial privacy, same instinct as
-  // the collection master switch. A per-account "show my P/L" needs a
-  // users.show_pl column (migration, human lane).
-  const openCostByCardId = new Map<string, number | null>();
-  for (const t of trades) {
-    if (t.releasedAt == null && !openCostByCardId.has(t.cardId)) {
-      openCostByCardId.set(t.cardId, t.priceCents);
+  // Owner-only portfolio graph inputs: open-hop cost/acquired date per
+  // card plus each distinct model's tape (resolved once, cached per model).
+  // Visitors never pay for these reads. Empty book → flat zero line.
+  let series = {
+    points: [] as Array<{ tMs: number; valueCents: number }>,
+    valuedCount: 0,
+    totalCount: 0,
+    costCents: 0,
+    currentCents: 0,
+  };
+  if (isOwner && holdingsVisible && ownedCards.length > 0) {
+    const openHop = new Map<string, { cost: number | null; acquiredAtMs: number }>();
+    for (const t of trades) {
+      if (t.releasedAt == null && !openHop.has(t.cardId)) {
+        openHop.set(t.cardId, {
+          cost: t.priceCents,
+          acquiredAtMs: new Date(t.acquiredAt).getTime(),
+        });
+      }
     }
+    const distinct = new Map<string, { brand: string; model: string; colorway: string }>();
+    for (const c of ownedCards) {
+      distinct.set(`${c.sku.brand}|${c.sku.model}|${c.sku.colorway}`, c.sku);
+    }
+    const tapeByKey = new Map<string, Array<{ tMs: number; priceCents: number }>>();
+    await Promise.all(
+      [...distinct.entries()].map(async ([key, sku]) => {
+        const models = await listSkuModels({ brand: sku.brand, model: sku.model }).catch(() => []);
+        const match = models.find((m) => m.colorway === sku.colorway) ?? null;
+        const history = match ? await getPriceHistory(match.id).catch(() => []) : [];
+        tapeByKey.set(
+          key,
+          history.map((p) => ({ tMs: new Date(p.observedAt).getTime(), priceCents: p.priceCents })),
+        );
+      }),
+    );
+    series = portfolioSeries(
+      ownedCards.map((c) => {
+        const hop = openHop.get(c.id);
+        return {
+          cardId: c.id,
+          acquiredAtMs: hop ? hop.acquiredAtMs : Date.now(),
+          costCents: hop?.cost ?? null,
+          tape: tapeByKey.get(`${c.sku.brand}|${c.sku.model}|${c.sku.colorway}`) ?? [],
+          fallbackCents: livePriceByCardId.get(c.id) ?? c.sku.market_price_cents ?? null,
+        };
+      }),
+      30,
+      Date.now(),
+    );
   }
-  const plEntries = plEntriesForCards(
-    ownedCards.map((c) => ({
-      id: c.id,
-      label: `${c.sku.brand} ${c.sku.model}`,
-      oracleCents: c.sku.market_price_cents ?? null,
-    })),
-    openCostByCardId,
-    livePriceByCardId,
-  );
 
   return (
     <div className="flex flex-col gap-5">
@@ -161,79 +194,157 @@ export default async function ProfilePage({
         </dl>
       </section>
 
-      {!holdingsVisible && (
+      {isOwner && holdingsVisible && (
+        <PlGraph
+          points30={series.points}
+          costCents={series.costCents}
+          valuedCount={series.valuedCount}
+          totalCount={series.totalCount}
+        />
+      )}
+
+      {!holdingsVisible ? (
         <EmptyState
           title="Private collection"
           description="This seller keeps their holdings hidden."
         />
-      )}
-
-      {isOwner && holdingsVisible && <PlStrip entries={plEntries} />}
-
-      {holdingsVisible && (
-      <section>
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-          Live listings ({visibleLive.length})
-        </h2>
-        {visibleLive.length === 0 ? (
-          <EmptyState
-            title="Nothing listed"
-            description="This account has no live listings right now."
-          />
-        ) : (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {visibleLive.map((listing) => (
-              <MarketTile
-                key={listing.id}
-                listing={listing}
-                showNumericFloat={platformConfig.show_numeric_float}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-      )}
-
-      {holdingsVisible && (
-      <section>
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
-            Collection ({shownCollection.length})
-          </h2>
-        </div>
-        {shownCollection.length === 0 ? (
-          <EmptyState
-            title="No shoes on display"
-            description="Nothing in the collection right now."
-          />
-        ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {shownCollection.map(({ card, hidden }) => {
-              const ask = livePriceByCardId.get(card.id) ?? null;
-              const oracle = card.sku.market_price_cents ?? null;
-              return (
-                <div key={card.id} className="relative">
-                  {hidden && (
-                    <span className="absolute left-2 top-2 z-10 rounded-md bg-overlay/80 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-muted">
-                      Hidden
-                    </span>
-                  )}
-                  <div className={hidden ? "opacity-60" : undefined}>
-                    <HeldCard
-                      card={card}
-                      statusLabel="In collection"
-                      shownInProfile={!hidden}
-                      showToggle={isOwner}
-                      priceCents={ask ?? oracle}
-                      priceCaption={ask != null ? "Ask" : oracle != null ? "Market" : undefined}
-                    />
+      ) : (
+        <ProfileTabs
+          collectionsCount={visibleLive.length + shownCollection.length}
+          activityCount={tradesVisible ? visibleTrades.length : 0}
+          collections={
+            <>
+              <section>
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                  Live listings ({visibleLive.length})
+                </h2>
+                {visibleLive.length === 0 ? (
+                  <EmptyState
+                    title="Nothing listed"
+                    description="This account has no live listings right now."
+                  />
+                ) : (
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                    {visibleLive.map((listing) => (
+                      <MarketTile
+                        key={listing.id}
+                        listing={listing}
+                        showNumericFloat={platformConfig.show_numeric_float}
+                      />
+                    ))}
                   </div>
+                )}
+              </section>
+              <section>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
+                    Collection ({shownCollection.length})
+                  </h2>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
+                {shownCollection.length === 0 ? (
+                  <EmptyState
+                    title="No shoes on display"
+                    description="Nothing in the collection right now."
+                  />
+                ) : (
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                    {shownCollection.map(({ card, hidden }) => {
+                      const ask = livePriceByCardId.get(card.id) ?? null;
+                      const oracle = card.sku.market_price_cents ?? null;
+                      return (
+                        <div key={card.id} className="relative">
+                          {hidden && (
+                            <span className="absolute left-2 top-2 z-10 rounded-md bg-overlay/80 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-muted">
+                              Hidden
+                            </span>
+                          )}
+                          <div className={hidden ? "opacity-60" : undefined}>
+                            <HeldCard
+                              card={card}
+                              statusLabel="In collection"
+                              shownInProfile={!hidden}
+                              showToggle={isOwner}
+                              priceCents={ask ?? oracle}
+                              priceCaption={ask != null ? "Ask" : oracle != null ? "Market" : undefined}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            </>
+          }
+          activity={
+            tradesVisible ? (
+              <section>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
+                    Trade history ({visibleTrades.length})
+                  </h2>
+                  {/* The toggle only earns its space when there is something to
+                      hide — at zero trades it is clutter with no function. It
+                      returns the moment trades (or a hidden history) exist. */}
+                  {isOwner && (visibleTrades.length > 0 || !profile.show_trade_history) && (
+                    <TradeToggle handle={handle} initial={profile.show_trade_history} />
+                  )}
+                </div>
+                {visibleTrades.length === 0 ? (
+                  <EmptyState
+                    title="No trades yet"
+                    description="This account hasn't acquired or released any cards."
+                  />
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full border border-line bg-overlay text-[11px]">
+                      <thead>
+                        <tr className="border-b border-line text-[9px] uppercase tracking-wide text-muted">
+                          <th className="px-2 py-1.5 text-left">Card</th>
+                          <th className="px-2 py-1.5 text-left">Mint</th>
+                          <th className="px-2 py-1.5 text-left">Acquired</th>
+                          <th className="px-2 py-1.5 text-left">Released</th>
+                          <th className="px-2 py-1.5 text-right">Price</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {visibleTrades.map((trade) => (
+                          <tr key={`${trade.cardId}-${trade.acquiredAt}`} className="border-b border-line last:border-b-0">
+                            <td className="px-2 py-1.5">
+                              <a
+                                href={`/card/${trade.cardId}`}
+                                className="text-accent hover:underline"
+                              >
+                                {trade.cardLabel}
+                              </a>
+                            </td>
+                            <td className="px-2 py-1.5">
+                              #{String(trade.mintNumber).padStart(2, "0")}
+                            </td>
+                            <td className="px-2 py-1.5 text-muted">
+                              {trade.acquiredAt.slice(0, 10)}
+                            </td>
+                            <td className="px-2 py-1.5 text-muted">
+                              {trade.releasedAt ? trade.releasedAt.slice(0, 10) : "—"}
+                            </td>
+                            <td className="px-2 py-1.5 text-right">
+                              {trade.priceCents != null ? formatMyr(trade.priceCents) : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            ) : (
+              <EmptyState
+                title="Trade history is private"
+                description="This seller keeps their trading activity hidden."
+              />
+            )
+          }
+        />
       )}
 
       {isOwner && (
@@ -245,68 +356,6 @@ export default async function ProfilePage({
           visibility={{}}
           visibleTabs={["submissions", "redemptions"]}
         />
-      )}
-
-      {holdingsVisible && tradesVisible && (
-      <section>
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
-            Trade history ({visibleTrades.length})
-          </h2>
-          {/* The toggle only earns its space when there is something to
-              hide — at zero trades it is clutter with no function. It
-              returns the moment trades (or a hidden history) exist. */}
-          {isOwner && (visibleTrades.length > 0 || !profile.show_trade_history) && (
-            <TradeToggle handle={handle} initial={profile.show_trade_history} />
-          )}
-        </div>
-        {visibleTrades.length === 0 ? (
-          <EmptyState
-            title="No trades yet"
-            description="This account hasn't acquired or released any cards."
-          />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border border-line bg-overlay text-[11px]">
-              <thead>
-                <tr className="border-b border-line text-[9px] uppercase tracking-wide text-muted">
-                  <th className="px-2 py-1.5 text-left">Card</th>
-                  <th className="px-2 py-1.5 text-left">Mint</th>
-                  <th className="px-2 py-1.5 text-left">Acquired</th>
-                  <th className="px-2 py-1.5 text-left">Released</th>
-                  <th className="px-2 py-1.5 text-right">Price</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleTrades.map((trade) => (
-                  <tr key={`${trade.cardId}-${trade.acquiredAt}`} className="border-b border-line last:border-b-0">
-                    <td className="px-2 py-1.5">
-                      <a
-                        href={`/card/${trade.cardId}`}
-                        className="text-accent hover:underline"
-                      >
-                        {trade.cardLabel}
-                      </a>
-                    </td>
-                    <td className="px-2 py-1.5">
-                      #{String(trade.mintNumber).padStart(2, "0")}
-                    </td>
-                    <td className="px-2 py-1.5 text-muted">
-                      {trade.acquiredAt.slice(0, 10)}
-                    </td>
-                    <td className="px-2 py-1.5 text-muted">
-                      {trade.releasedAt ? trade.releasedAt.slice(0, 10) : "—"}
-                    </td>
-                    <td className="px-2 py-1.5 text-right">
-                      {trade.priceCents != null ? formatMyr(trade.priceCents) : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
       )}
     </div>
   );
