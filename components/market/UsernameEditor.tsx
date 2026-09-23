@@ -44,11 +44,14 @@ export function UsernameEditor({ initial }: { initial: string }) {
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex gap-2">
+    <div className="flex flex-col gap-1">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+        Username
+      </span>
+      <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
           <Input
-            label="Username"
+            aria-label="Username"
             value={value}
             onChange={(e) => {
               setValue(e.target.value);
@@ -57,20 +60,21 @@ export function UsernameEditor({ initial }: { initial: string }) {
             }}
             disabled={pending}
             autoComplete="off"
-            hint="3–24 characters: lowercase letters, numbers, underscores."
           />
         </div>
-        <div className="flex shrink-0 items-end pb-0.5">
-          <Button
-            type="button"
-            size="md"
-            disabled={pending || !dirty}
-            onClick={save}
-          >
-            {pending ? "Saving…" : "Save"}
-          </Button>
-        </div>
+        <Button
+          type="button"
+          size="md"
+          disabled={pending || !dirty}
+          onClick={save}
+          className="shrink-0"
+        >
+          {pending ? "Saving…" : "Save"}
+        </Button>
       </div>
+      <p className="text-xs text-muted">
+        3–24 characters: lowercase letters, numbers, underscores.
+      </p>
       {error && <Banner tone="error" title={error} />}
       {saved && !error && (
         <p role="status" className="text-xs font-semibold text-accent">

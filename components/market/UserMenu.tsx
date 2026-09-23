@@ -66,7 +66,7 @@ function LogoutIcon() {
   );
 }
 
-export function UserMenu({ handle }: { handle: string }) {
+export function UserMenu({ handle, title }: { handle: string; title?: string | null }) {
   const [open, setOpen] = useState(false);
   const initial = (handle.slice(0, 1) || "?").toUpperCase();
 
@@ -106,7 +106,14 @@ export function UserMenu({ handle }: { handle: string }) {
                 {initial}
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-extrabold">@{handle}</p>
+                <p className="truncate text-sm font-extrabold">
+                  @{handle}
+                  {title && (
+                    <span className="ml-1.5 rounded-md bg-accent/15 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-accent">
+                      {title}
+                    </span>
+                  )}
+                </p>
                 <Link
                   href={`/u/${handle}`}
                   onClick={close}

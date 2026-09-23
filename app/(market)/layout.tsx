@@ -15,7 +15,7 @@ import type { Notification as ContractNotification } from "@/lib/api/contract";
 import type { Json } from "@/lib/db/types";
 import { getUser, listNotifications } from "@/lib/api/contract";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { currentUserId } from "@/app/(market)/queries";
+import { currentUserId, getPublicProfileByHandle } from "@/app/(market)/queries";
 import { MarketSearchBox } from "@/components/market/MarketSearchBox";
 import { MarketSearchPill } from "@/components/market/SearchPageView";
 import { Sidebar, type SidebarItem } from "@/components/market/Sidebar";
@@ -135,6 +135,11 @@ export default async function MarketLayout({
 }) {
   const meId = await currentUserId();
   const me = meId ? await getUser({ id: meId }).catch(() => null) : null;
+  // Rank title for the account drawer (levels table, read live like the
+  // profile page — null falls back to no title, never a guess).
+  const rankName = me
+    ? (await getPublicProfileByHandle(me.handle).catch(() => null))?.rankName ?? null
+    : null;
 
   // Per-account Terms state (047): null when signed out (device flag rules),
   // true/false when signed in (account rules, across devices).
@@ -230,7 +235,7 @@ export default async function MarketLayout({
                     <span className="hidden text-xs font-semibold text-muted sm:inline">
                       LV {me.level}
                     </span>
-                    <UserMenu handle={me.handle} />
+                    <UserMenu handle={me.handle} title={rankName} />
                     <FiatSelect />
                   </>
                 ) : (
@@ -263,7 +268,7 @@ export default async function MarketLayout({
           <Sidebar items={sidebarItems} />
           <MobileNav
             items={sidebarItems}
-            account={me ? <UserMenu handle={me.handle} /> : undefined}
+            account={me ? <UserMenu handle={me.handle} title={rankName} /> : undefined}
             wallet={me ? <WalletMenu /> : undefined}
           />
           <div className="flex min-w-0 flex-1 flex-col">
