@@ -39,6 +39,172 @@ function appId(): string | null {
   return key ? key : null;
 }
 
+/** Cert ID (client secret) for the OAuth client-credentials grant. */
+function certId(): string | null {
+  const secret = process.env.EBAY_CERT_ID?.trim();
+  return secret ? secret : null;
+}
+
+/** OAuth scope gating item_sales/search. Granted via Application Growth Check. */
+const INSIGHTS_SCOPE = 'https://api.ebay.com/oauth/api_scope/buy.marketplace.insights';
+
+interface EbayAppToken {
+  token: string;
+  expiresAtMs: number;
+}
+
+let cachedToken: EbayAppToken | null = null;
+let cachedCategories: { ids: string[]; expiresAtMs: number } | null = null;
+
+/** Test hook: drop the module caches between cases. */
+export function clearEbayCaches(): void {
+  cachedToken = null;
+  cachedCategories = null;
+}
+
+/**
+ * OAuth application token (client-credentials grant), cached until near
+ * expiry. Null when unconfigured or refused — callers fall back, never
+ * throw, so a missing EBAY_CERT_ID or a denied scope reads as "no comps".
+ */
+export async function getEbayAppToken(
+  fetchImpl: typeof fetch = fetch,
+): Promise<string | null> {
+  if (cachedToken && cachedToken.expiresAtMs > Date.now() + 60_000) {
+    return cachedToken.token;
+  }
+  const id = appId();
+  const secret = certId();
+  if (!id || !secret) return null;
+  try {
+    const credentials =
+      typeof btoa === 'function'
+        ? btoa(`${id}:${secret}`)
+        : Buffer.from(`${id}:${secret}`).toString('base64');
+    const res = await fetchImpl('https://api.ebay.com/identity/v1/oauth2/token', {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${credentials}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: `grant_type=client_credentials&scope=${encodeURIComponent(INSIGHTS_SCOPE)}`,
+    });
+    if (!res.ok) {
+      cachedToken = null;
+      return null;
+    }
+    const body = (await res.json()) as {
+      access_token?: string;
+      expires_in?: number;
+    };
+    if (typeof body.access_token !== 'string' || !body.access_token) return null;
+    const ttlMs =
+      typeof body.expires_in === 'number' && body.expires_in > 0
+        ? body.expires_in * 1000
+        : 3600_000;
+    cachedToken = { token: body.access_token, expiresAtMs: Date.now() + ttlMs };
+    return cachedToken.token;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Athletic-footwear category ids, resolved live through the Taxonomy API
+ * (no hardcoded ids to rot) and cached 24h. Empty when unresolvable —
+ * item_sales/search requires ≥1 category, so callers skip the model.
+ */
+export async function sneakerCategoryIds(
+  token: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string[]> {
+  if (cachedCategories && cachedCategories.expiresAtMs > Date.now()) {
+    return cachedCategories.ids;
+  }
+  try {
+    const res = await fetchImpl(
+      'https://api.ebay.com/commerce/taxonomy/v1/category_tree/0/get_category_suggestions?q=sneakers',
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!res.ok) return [];
+    const body = (await res.json()) as {
+      categorySuggestions?: {
+        categoryTreeNode?: Array<{
+          category?: { categoryId?: string; categoryName?: string };
+        }>;
+      };
+    };
+    const nodes = body?.categorySuggestions?.categoryTreeNode ?? [];
+    const ids = nodes
+      .filter((n) => /athletic/i.test(n?.category?.categoryName ?? ''))
+      .map((n) => n?.category?.categoryId)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      .slice(0, 4);
+    if (ids.length > 0) {
+      cachedCategories = { ids, expiresAtMs: Date.now() + 24 * 3600_000 };
+    }
+    return ids;
+  } catch {
+    return [];
+  }
+}
+
+interface InsightsSale {
+  lastSoldPrice?: { value?: string; currency?: string };
+  price?: { value?: string; currency?: string };
+  lastSoldDate?: string;
+  itemEndDate?: string;
+  soldDate?: string;
+}
+
+/**
+ * Recent solds via Marketplace Insights item_sales/search (90-day window).
+ * Returns [] (never throws) when unapproved/unconfigured/erroring — the
+ * cron skips the model and reports it, same contract as the Finding path.
+ */
+export async function fetchInsightsSolds(
+  keywords: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<EbaySold[]> {
+  const token = await getEbayAppToken(fetchImpl);
+  if (!token) return [];
+  const categoryIds = await sneakerCategoryIds(token, fetchImpl);
+  if (categoryIds.length === 0) return [];
+  try {
+    const url =
+      'https://api.ebay.com/buy/marketplace_insights/v1_beta/item_sales/search' +
+      `?q=${encodeURIComponent(keywords)}` +
+      `&category_ids=${categoryIds.join(',')}` +
+      '&limit=25';
+    const res = await fetchImpl(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
+      },
+    });
+    if (!res.ok) return [];
+    const body = (await res.json()) as { itemSales?: InsightsSale[] };
+    const sales = Array.isArray(body?.itemSales) ? body.itemSales : [];
+    const solds: EbaySold[] = [];
+    for (const item of sales) {
+      const priceRaw = item.lastSoldPrice ?? item.price;
+      const price = Number(priceRaw?.value);
+      const currency =
+        typeof priceRaw?.currency === 'string' && priceRaw.currency
+          ? priceRaw.currency
+          : 'USD';
+      const endedAt =
+        item.lastSoldDate ?? item.itemEndDate ?? item.soldDate ?? null;
+      if (Number.isFinite(price) && price > 0 && endedAt) {
+        solds.push({ price, currency, endedAt });
+      }
+    }
+    return solds;
+  } catch {
+    return [];
+  }
+}
+
 /** Median of sold prices in MYR sen. Trims top/bottom 10% at 10+ samples. */
 export function medianSen(pricesSen: readonly number[]): number | null {
   if (pricesSen.length === 0) return null;
@@ -99,11 +265,28 @@ interface FindingItem {
 }
 
 /**
- * Recent solds for a keyword query. Returns [] (never throws) when the key
- * is missing, eBay errors, or the shape is unexpected — the cron skips the
- * model and reports it, rather than aborting the batch.
+ * Recent solds for a keyword query. Insights first (OAuth item_sales,
+ * the supported sold-data API), Finding as fallback where it still
+ * answers. Returns [] (never throws) when both are unavailable — the cron
+ * skips the model and reports it, rather than aborting the batch.
  */
 export async function fetchEbaySolds(
+  keywords: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<EbaySold[]> {
+  if (certId()) {
+    const viaInsights = await fetchInsightsSolds(keywords, fetchImpl);
+    if (viaInsights.length > 0) return viaInsights;
+  }
+  return fetchFindingSolds(keywords, fetchImpl);
+}
+
+/**
+ * Legacy Finding API path: app-key GET, JSON REST payload. Kept as the
+ * fallback — deprecated upstream and edge-blocked (empty 418) from our
+ * egress, but costs nothing to attempt where it answers.
+ */
+export async function fetchFindingSolds(
   keywords: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<EbaySold[]> {
