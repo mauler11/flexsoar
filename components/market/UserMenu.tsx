@@ -12,7 +12,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { signOut } from "@/app/(auth)/actions";
 
-function RowIcon({ d }: { d: string }) {
+function RowIcon({ children }: { children: React.ReactNode }) {
   return (
     <svg
       className="h-4 w-4 shrink-0 text-muted"
@@ -24,8 +24,45 @@ function RowIcon({ d }: { d: string }) {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <path d={d} />
+      {children}
     </svg>
+  );
+}
+
+function TruckIcon() {
+  return (
+    <RowIcon>
+      <rect x="1" y="4" width="14" height="11" rx="1" />
+      <path d="M15 8h4l3 3v4h-7V8z" />
+      <circle cx="5.5" cy="18.5" r="2" />
+      <circle cx="17.5" cy="18.5" r="2" />
+    </RowIcon>
+  );
+}
+
+function SupportIcon() {
+  return (
+    <RowIcon>
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </RowIcon>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <RowIcon>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" />
+    </RowIcon>
+  );
+}
+
+function LogoutIcon() {
+  return (
+    <RowIcon>
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="M16 17l5-5-5-5M21 12H9" />
+    </RowIcon>
   );
 }
 
@@ -88,16 +125,16 @@ export function UserMenu({ handle }: { handle: string }) {
               </button>
             </div>
 
-            <Link href={`/u/${handle}`} onClick={close} className={row}>
-              <RowIcon d="M4 7h16M4 12h16M4 17h10" />
+            <Link href="/shipments" onClick={close} className={row}>
+              <TruckIcon />
               Shipments
             </Link>
             <Link href="/contact" onClick={close} className={row}>
-              <RowIcon d="M4 6h16v12H4z M4 7l8 6 8-6" />
+              <SupportIcon />
               Support
             </Link>
             <Link href="/settings" onClick={close} className={row}>
-              <RowIcon d="M4 8h16M4 16h16" />
+              <SettingsIcon />
               Settings
             </Link>
             <form action={signOut}>
@@ -106,7 +143,7 @@ export function UserMenu({ handle }: { handle: string }) {
                 className="w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-muted transition hover:bg-background hover:text-foreground"
               >
                 <span className="flex items-center gap-3">
-                  <RowIcon d="M9 21H6a2 2 0 01-2-2V5a2 2 0 012-2h3M16 17l5-5-5-5M21 12H9" />
+                  <LogoutIcon />
                   Log Out
                 </span>
               </button>

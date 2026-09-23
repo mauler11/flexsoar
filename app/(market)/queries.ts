@@ -318,8 +318,7 @@ export interface VaultIntakeStatus {
  * consignor, or an admin), which is exactly who the card page's pending_vault
  * banner is for. A stranger gets null, same as "no intake" would.
  */
-export async function getVaultIntakeForCard(cardId: UUID): Promise<VaultIntakeStatus | null> {
-  const supabase = await createServerSupabase();
+export async function getVaultIntakeForCard(cardId: UUID): Promise<VaultIntakeStatus | null> {  const supabase = await createServerSupabase();
 
   const result = await supabase
     .from('vault_intakes')
@@ -349,6 +348,75 @@ export async function getVaultIntakeForCard(cardId: UUID): Promise<VaultIntakeSt
     trackingNumber: row.tracking_number,
     shippedAt: row.shipped_at,
   };
+}
+
+export interface ShipmentIntake {
+  id: UUID;
+  cardId: UUID;
+  cardLabel: string;
+  /** seller duty vs buyer arrival, from the caller's side of the row. */
+  role: 'seller' | 'buyer';
+  status: VaultIntakeStatus['status'];
+  dueBy: Timestamptz;
+  carrier: string | null;
+  trackingNumber: string | null;
+  shippedAt: string | null;
+}
+
+interface ShipmentIntakeRow {
+  id: UUID;
+  card_id: UUID;
+  status: ShipmentIntake['status'];
+  due_by: Timestamptz;
+  carrier: string | null;
+  tracking_number: string | null;
+  shipped_at: string | null;
+  consignor_id: UUID;
+  card: {
+    sku: { brand: string; model: string; colorway: string } | null;
+  } | null;
+}
+
+/**
+ * Every vault intake the caller is a party to, newest first — the
+ * shipments surface. Same RLS as getVaultIntakeForCard (023c):
+ * consignor_id = self OR buyer_id = self OR admin. Server-only,
+ * session client, never `users`.
+ */
+export async function getMyShipmentIntakes(): Promise<ShipmentIntake[]> {
+  const supabase = await createServerSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+  const me = await getUser({ authId: user.id }).catch(() => null);
+  if (!me) return [];
+
+  const result = await supabase
+    .from('vault_intakes')
+    .select(
+      'id, card_id, status, due_by, carrier, tracking_number, shipped_at, consignor_id, ' +
+        'card:cards(id, sku:skus(brand, model, colorway))',
+    )
+    .or(`consignor_id.eq.${me.id},buyer_id.eq.${me.id}`)
+    .order('created_at', { ascending: false });
+
+  if (result.error) throw new Error(result.error.message.trim() || 'vault_intakes read failed');
+
+  return ((result.data as ShipmentIntakeRow[] | null) ?? []).map((row) => {
+    const sku = row.card?.sku ?? null;
+    return {
+      id: row.id,
+      cardId: row.card_id,
+      cardLabel: sku ? `${sku.brand} ${sku.model} — ${sku.colorway}` : 'card',
+      role: row.consignor_id === me.id ? 'seller' : 'buyer',
+      status: row.status,
+      dueBy: row.due_by,
+      carrier: row.carrier,
+      trackingNumber: row.tracking_number,
+      shippedAt: row.shipped_at,
+    };
+  });
 }
 
 export async function getTradeHistory(ownerId: UUID): Promise<TradeEvent[]> {
