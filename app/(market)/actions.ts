@@ -43,6 +43,7 @@ import type { ShippingAddress } from '@/lib/api/contract';
 import type { UUID } from '@/lib/db/types';
 import { createServerSupabase } from '@/lib/supabase/server';
 import { sendRedemptionRequestedEmail } from '@/lib/email/send';
+import { isCleanUsername } from '@/lib/auth/handle';
 import { safeNextPath } from '@/app/(auth)/paths';
 import { currentUserId, currentUserLevel } from '@/app/(market)/queries';
 import { isValidCountryCode } from '@/components/market/intake/intake-config';
@@ -810,6 +811,43 @@ export async function toggleTradeHistoryAction(
   }
   revalidatePath(safeNextPath(next) || '/dashboard');
   return { ok: true };
+}
+
+/**
+ * Changes the caller's own username. Format + uniqueness are enforced by
+ * the database (007's shape check, case-insensitive unique index); this
+ * pre-checks the same rules client-predictably via lib/auth/handle so the
+ * error reads like guidance, not a Postgres refusal. Returns the new
+ * handle for navigation — the profile URL moves with it.
+ */
+export async function updateHandleAction(
+  rawHandle: string,
+): Promise<{ ok: boolean; handle?: string; message?: string }> {
+  const me = await currentUserId();
+  if (!me) return { ok: false, message: 'Sign in to change your username.' };
+  const handle = rawHandle.trim();
+  if (!isCleanUsername(handle)) {
+    return {
+      ok: false,
+      message: 'Usernames are 3–24 characters: lowercase letters, numbers, underscores — exactly as typed.',
+    };
+  }
+  const supabase = await createServerSupabase();
+  const current = await getUser({ id: me }).catch(() => null);
+  const { error } = await supabase
+    .from('users')
+    .update({ handle })
+    .eq('id', me);
+  if (error) {
+    if ((error as { code?: string }).code === '23505') {
+      return { ok: false, message: 'That username is taken — try another.' };
+    }
+    return { ok: false, message: error.message.trim() || 'username update failed' };
+  }
+  const oldHandle = current?.handle ?? null;
+  if (oldHandle && oldHandle !== handle) revalidatePath(`/u/${oldHandle}`);
+  revalidatePath(`/u/${handle}`);
+  return { ok: true, handle };
 }
 
 /**
