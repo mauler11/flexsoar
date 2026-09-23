@@ -129,10 +129,14 @@ export function IntakeWizard({
       case 1: return photos.filter((p) => p.url.startsWith("https://")).length >= REQUIRED_PHOTO_COUNT;
       case 2: return declaredFloat != null;
       case 3:
+        // Cash-only launch: a non-cash preview (anything but 'cash') can
+        // never proceed, even with a price already typed — the seller must
+        // pick a supported country first. FSC is gone; there is no credit
+        // leg to fall back to.
         return (
           priceCents != null &&
           priceCents > 0 &&
-          derivedPayout != null &&
+          derivedPayout === "cash" &&
           isValidCountryCode(countryCode)
         );
       default: return true;

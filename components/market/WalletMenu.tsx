@@ -161,6 +161,10 @@ function DepositTab({
         controls={false}
       />
       <FundingOptions address={wallet} />
+      <p className="text-[11px] leading-snug text-muted">
+        No USDC? You can still pay by card at checkout — funding first is
+        optional, not required.
+      </p>
       {!isPrivyCheckoutEnabled() && (
         <div className="flex flex-col gap-1">
           <span className="text-[11px] text-muted">

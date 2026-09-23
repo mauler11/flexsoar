@@ -69,6 +69,16 @@ export function ListForm({
   const belowOracle =
     cents != null && oracleValueCents != null && cents < oracleValueCents * 0.85;
 
+  // Cash-only launch gate. sellerPayoutMethod is the on-file SQL truth;
+  // selectedCountry covers the not-yet-saved pick (null country reads as
+  // credit server-side, so an unsaved non-MY pick must block too). The MY
+  // mirror below reflects cash_payout_countries as of launch — a temporary
+  // UI guardrail until the submit path itself refuses non-cash sellers
+  // (data lane); the database remains the real enforcer.
+  const blocked =
+    sellerPayoutMethod === "credit" ||
+    (needsCountry && selectedCountry !== "" && selectedCountry !== "MY");
+
   function submit() {
     const value = toCents(price);
     if (value == null) {
@@ -89,11 +99,10 @@ export function ListForm({
 
   return (
     <div className="flex flex-col gap-2 border border-line bg-overlay p-3">
-      {sellerPayoutMethod === "credit" && (
-        <Banner tone="info" title="You'll be paid in FSC">
-          Your account routes to FSC payout, not cash — determined by your
-          country, not a choice made here. Find that out now, not after this
-          sells.
+      {blocked && (
+        <Banner tone="error" title="Selling isn't available in your country yet">
+          FlexSoar pays sellers in cash to bank, Malaysia-only at launch.
+          There is no store credit and no other payout route.
         </Banner>
       )}
       {sellerPayoutMethod === "cash" && (
@@ -127,13 +136,13 @@ export function ListForm({
             ))}
           </select>
           <span className="text-[10px] tracking-tight text-muted">
-            No country on file yet — decides whether this sale pays you in
-            cash or FSC. Required to list.
+            No country on file yet — Malaysia sellers are paid cash to
+            bank, and selling is Malaysia-only at launch. Required to list.
           </span>
         </div>
       )}
 
-      {oracleValueCents != null && (
+      {oracleValueCents != null && !blocked && (
         <div className="flex items-baseline justify-between text-[10px] uppercase tracking-tight text-muted">
           <span>Fair Market Price</span>
           <span className="text-foreground">
@@ -142,6 +151,7 @@ export function ListForm({
         </div>
       )}
 
+      {!blocked && (
       <Input
         type="text"
         inputMode="decimal"
@@ -154,8 +164,9 @@ export function ListForm({
         disabled={pending}
         aria-label="Ask price in ringgit"
       />
+      )}
 
-      {belowOracle && (
+      {belowOracle && !blocked && (
         <Banner tone="warn" title="15% below Fair Market Price">
           Buyers compare every ask to the Fair Market Price — a below-fair list sells
           the fastest. This is a warning, not a block.
@@ -167,18 +178,20 @@ export function ListForm({
         <p className="text-[9px] uppercase tracking-tight text-muted">
           Listing goes public immediately
         </p>
-        <Button
-          type="button"
-          size="sm"
-          disabled={
-            pending ||
-            cents == null ||
-            (needsCountry && !isValidCountryCode(selectedCountry))
-          }
-          onClick={submit}
-        >
-          {pending ? "Listing…" : "List card"}
-        </Button>
+        {!blocked && (
+          <Button
+            type="button"
+            size="sm"
+            disabled={
+              pending ||
+              cents == null ||
+              (needsCountry && !isValidCountryCode(selectedCountry))
+            }
+            onClick={submit}
+          >
+            {pending ? "Listing…" : "List card"}
+          </Button>
+        )}
       </div>
     </div>
   );

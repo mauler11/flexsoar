@@ -80,7 +80,8 @@ export default async function PayoutsPage() {
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight">Payouts</h1>
           <p className="text-sm text-muted">
-            Where your sale proceeds go
+            Where your sale proceeds go — released after the 7-day clearing
+            hold once the vault confirms receipt.
           </p>
         </div>
       </div>

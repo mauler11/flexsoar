@@ -19,14 +19,13 @@
  * a Stripe corridor fact now, not something a fulfilment history unlocks.
  *
  * Country: `fn_payout_method_for_user` resolves a null `users.country_code`
- * to 'credit' with no error — a real signup produces exactly that null, so a
- * seller who never sets a country is silently paid FSC instead of cash. This
- * step is the first place payout is actually disclosed, so it is where the
- * country is asked for. The disclosure banner below reacts to whichever
- * country is currently selected, via `cashPayoutCountryCodes` (a live read of
- * `cash_payout_countries`, not a hardcoded guess), so a seller sees the real
- * outcome before submitting — not `sellerPayoutMethod`, which only reflects
- * whatever is already saved and does not move as they pick a country here.
+ * to 'credit' with no error — a real signup produces exactly that null, so
+ * this step requires an explicit country pick and blocks anything outside
+ * the cash corridor before a price can even be entered. Cash-only launch:
+ * there is no credit leg anymore, so a non-cash preview is a hard stop,
+ * not a disclosure. The disclosure reacts to whichever country is
+ * currently selected, via `cashPayoutCountryCodes` (a live read of
+ * `cash_payout_countries`, not a hardcoded guess).
  *
  * Country persistence: `app/(market)/list/actions.ts`'s
  * `submitListingIntakeAction` calls `setCountry()` (025's `fn_set_country`)
@@ -172,18 +171,18 @@ export function PricePayout({
           ))}
         </select>
         <span className="text-[10px] tracking-tight text-muted">
-          Decides whether this sale pays you in cash or FSC. Required to
-          submit.
+          Malaysia sellers are paid cash to bank. Selling is Malaysia-only
+          at launch — other countries can&apos;t be paid out yet. Required
+          to submit.
         </span>
       </div>
 
       {previewedPayoutMethod === "credit" && (
-        <Banner tone="info" title="You'll be paid in FSC, not cash">
-          FSC is store credit — 1 FSC = RM1, earned by selling, spendable on
-          FlexSoar. It cannot be cashed out to a bank. Your country is outside
-          the Stripe corridor this platform can settle cash through, so a sale
-          here pays out in FSC, not cash. Know that now, before you list, not
-          after this sells.
+        <Banner tone="error" title="Selling isn't available in your country yet">
+          FlexSoar pays sellers in cash to bank, Malaysia-only at launch.
+          There is no store credit and no other payout route, so a listing
+          from outside Malaysia could never pay you. Pick Malaysia above to
+          continue, if that&apos;s where you live.
         </Banner>
       )}
       {previewedPayoutMethod === "cash" && (
@@ -216,6 +215,7 @@ export function PricePayout({
         )}
       </div>
 
+      {previewedPayoutMethod !== "credit" && (
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <PriceRinggitInput priceCents={priceCents} onPriceChange={onPriceChange} />
         <div className="flex flex-col gap-1">
@@ -233,13 +233,14 @@ export function PricePayout({
           </div>
         </div>
       </div>
+      )}
 
       <div className="rounded-xl border border-dashed border-line-strong bg-raised px-3 py-2 text-[10px] leading-relaxed tracking-tight text-muted">
         {previewedPayoutMethod === "credit"
-          ? "Credit lands on your FlexSoar balance the moment the sale settles — usable in checkout immediately."
+          ? "Blocked above: pick a supported country to continue."
           : previewedPayoutMethod === "cash"
             ? "Cash is a bank payout after the sale clears, released after the platform's hold window. Proof of possession protects against an unproven seller, not a fulfilment count."
-            : "Select your country above to see how you'll be paid — it's decided by geography, not a choice you make here."}
+            : "Select your country above to see how you'll be paid — Malaysia routes to a cash bank payout."}
       </div>
     </div>
   );

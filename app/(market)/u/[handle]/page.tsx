@@ -231,7 +231,10 @@ export default async function ProfilePage({
           <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
             Trade history ({visibleTrades.length})
           </h2>
-          {isOwner && (
+          {/* The toggle only earns its space when there is something to
+              hide — at zero trades it is clutter with no function. It
+              returns the moment trades (or a hidden history) exist. */}
+          {isOwner && (visibleTrades.length > 0 || !profile.show_trade_history) && (
             <TradeToggle handle={handle} initial={profile.show_trade_history} />
           )}
         </div>

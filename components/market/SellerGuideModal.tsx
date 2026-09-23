@@ -28,7 +28,7 @@ const STEPS: ReadonlyArray<{ title: string; body: string }> = [
   },
   {
     title: "4. Get paid after the hold clears",
-    body: "Payout is your price minus the flat 5% platform fee, released after the 7-day clearing hold once the vault confirms receipt. Malaysian sellers are paid cash to bank; everyone else earns FSC credit.",
+    body: "Payout is your price minus the flat 5% platform fee, released after the 7-day clearing hold once the vault confirms receipt. Selling is Malaysia-only at launch — Malaysian sellers are paid cash to bank.",
   },
   {
     title: "5. One fee for everyone",

@@ -143,7 +143,7 @@ export function CheckoutModal({ listing, onClose }: { listing: BuyPanelListing; 
               >
                 {method === "card" && <span className="h-2 w-2 rounded-full bg-accent" />}
               </span>
-              Card
+              Card (Stripe)
             </button>
             <button
               type="button"
@@ -162,7 +162,7 @@ export function CheckoutModal({ listing, onClose }: { listing: BuyPanelListing; 
               >
                 {method === "wallet" && <span className="h-2 w-2 rounded-full bg-accent" />}
               </span>
-              <span className="flex-1">FlexSoar Wallet</span>
+              <span className="flex-1">Wallet (USDC)</span>
               <span className="tabular-nums text-muted">
                 {wallet ? `${formatUsdc(wallet.usdcUnits)} USDC` : "—"}
               </span>

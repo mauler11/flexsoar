@@ -68,6 +68,8 @@ export function WalletBalance({
 
   const chip = (
     <span
+      role="img"
+      aria-label={`Wallet balance: ${text}`}
       title={
         estimated
           ? `Estimate · exact ${formatUsdc(balance.usdcUnits)} USDC · ${formatSol(balance.solLamports)} SOL for fees`
