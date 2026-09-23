@@ -10,7 +10,13 @@
  *
  * Plain fetch module (no next/headers, no Supabase) so tests drive it with
  * an injected fetch. The cron route supplies the real one.
+ *
+ * The one exception is ebayChallengeResponse(), which uses node:crypto —
+ * it only ever runs in the deletion-webhook route and in tests, both
+ * Node. Never import this module from a client component.
  */
+
+import { createHash } from 'node:crypto';
 
 export interface EbaySold {
   /** Sold price in the listing's own currency. */
@@ -141,8 +147,7 @@ export async function fetchEbaySolds(
  * One model's daily comp: median of recent eBay solds in MYR sen.
  * Minimum 3 solds or the model is skipped (a median of 1–2 is noise, not
  * data). Non-USD solds convert through the same USD-base table via USD.
- */
-export async function compForModel(
+ */export async function compForModel(
   brand: string,
   model: string,
   colorway: string,
@@ -173,4 +178,25 @@ export async function compForModel(
     sampleSize: solds.length,
     fxUsed: rates.MYR,
   };
+}
+
+export const EBAY_DELETION_ENDPOINT_DEFAULT =
+  'https://flexsoar.net/api/webhooks/ebay-deletion';
+
+/**
+ * Marketplace Account Deletion challenge response: SHA-256 hex of
+ * challengeCode + verificationToken + endpoint, concatenated in exactly
+ * that order (eBay rejects any other order). Node runtime only — the
+ * route handler and tests both run server-side.
+ */
+export function ebayChallengeResponse(
+  challengeCode: string,
+  verificationToken: string,
+  endpoint: string,
+): string {
+  const hash = createHash('sha256');
+  hash.update(challengeCode);
+  hash.update(verificationToken);
+  hash.update(endpoint);
+  return hash.digest('hex');
 }
