@@ -111,22 +111,66 @@ const pickGender = (p) => {
 const pickTitle = (p) => String(p.variantTitle ?? p.title ?? p.name ?? '').trim();
 
 /**
- * Split a KicksCrew variantTitle ("Air Force 1 Low '07 'Triple White'",
- * sometimes with a trailing style code) into model + colorway. Heuristic
- * by necessity — every row prints in dry-run for eyeballing, and the
- * admin model editor renames stragglers.
+ * Split a KicksCrew variantTitle into model + colorway. Handles:
+ * - leading "(GS)/(WMNS)/…" tags and brand prefix,
+ * - trailing style code and 4-digit year ("…2026"),
+ * - year shorthand fragments ('07, '26),
+ * - interior apostrophes ("Valentine's Day"): the colorway spans from the
+ *   first kept opening quote to the last closing quote, preserving them.
+ * Heuristic by necessity — every row prints in dry-run for eyeballing,
+ * and the admin model editor renames stragglers.
  */
 function splitTitle(variantTitle, brand, styleCode) {
-  let rest = String(variantTitle ?? '').trim().replace(new RegExp(`^${brand}\\s+`, 'i'), '').trim();
+  let rest = String(variantTitle ?? '').trim();
+  rest = rest.replace(/^(\([^)]+\)\s*)+/, '').trim();
+  rest = rest.replace(new RegExp(`^${brand}\\s+`, 'i'), '').trim();
   if (styleCode) {
     const esc = styleCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     rest = rest.replace(new RegExp(`\\s*${esc}\\s*$`, 'i'), '').trim();
   }
-  const quoted = rest.match(/'([^']+)'\s*$/);
-  if (quoted) {
-    return { model: rest.slice(0, quoted.index).trim() || rest, colorway: quoted[1].trim() };
+  rest = rest.replace(/\s*\b(19|20)\d{2}\s*$/, '').trim();
+  const idx = [...rest.matchAll(/'/g)].map((m) => m.index);
+  if (idx.length === 0) return { model: rest, colorway: '' };
+  let open;
+  let close;
+  if (idx.length === 2) {
+    // A lone year fragment ('07) is model, not colorway.
+    if (/^'\d{2}$/.test(rest.slice(idx[0], idx[1] + 1))) {
+      return { model: rest, colorway: '' };
+    }
+    open = idx[0];
+    close = idx[1];
+  } else if (idx.length % 2 === 1) {
+    // Interior apostrophe ("Valentine's Day"): span first to last.
+    open = idx[0];
+    close = idx[idx.length - 1];
+  } else {
+    // 4+: pair left to right, drop leading year fragments, take last span.
+    const spans = [];
+    for (let i = 0; i < idx.length; i += 2) spans.push([idx[i], idx[i + 1]]);
+    while (spans.length > 1 && /^'\d{2}$/.test(rest.slice(spans[0][0], spans[0][1] + 1))) {
+      spans.shift();
+    }
+    const last = spans[spans.length - 1];
+    open = last[0];
+    close = last[1];
   }
-  return { model: rest, colorway: '' };
+  const colorway = rest.slice(open + 1, close).trim();
+  const model = rest.slice(0, open).trim() || rest;
+  return { model, colorway };
+}
+
+/** Youth sizes don't map to our men's size run — skip them outright. */
+function isYouthTitle(variantTitle) {
+  return /\((GS|PS|TD|BC|INFANT|TODDLER|YOUTH|KIDS)\)/i.test(String(variantTitle ?? ''));
+}
+
+/** Sneakers only for launch: our intake, grading, and sizing are shoe-shaped. */
+function isSneakerProduct(p) {
+  if (!p || typeof p !== 'object') return false;
+  const sub = String(p.product_sub_type ?? '').toLowerCase();
+  if (sub) return sub.includes('sneaker') || sub.includes('shoe');
+  return true; // field absent — keep the row rather than guess wrong
 }
 
 async function main() {
@@ -212,6 +256,14 @@ async function main() {
     for (const p of items) {
         if (seen.products >= opts.limit) break;
         seen.products++;
+        // Launch scope: sneakers, adult sizes. Youth rows would mint
+        // men's-run variants that don't exist; apparel needs its own
+        // intake. Both skip loudly here, counted below.
+        if (isYouthTitle(p.variantTitle ?? p.title) || pickGender(p) === 'kids') {
+          seen.skipped++;
+          continue;
+        }
+        if (!isSneakerProduct(p)) { seen.skipped++; continue; }
         const brandName = String(p.brand ?? '').trim();
         const styleCode = pickStyle(p);
         const { model: silhouette, colorway } = splitTitle(p.variantTitle ?? p.title, brandName, styleCode);
