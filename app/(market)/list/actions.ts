@@ -274,6 +274,8 @@ export interface SkuModelSearchResult {
     brand: string;
     model: string;
     colorway: string;
+    /** Brand style code (DQ7580-001…) when the catalog carries one. */
+    styleCode: string | null;
     basePriceCents: number | null;
     artUrl: string | null;
     variantCount: number;
@@ -306,6 +308,80 @@ export async function searchSkuModelsAction(
     const nBrand = norm(brand);
     const nModel = norm(model);
     const nColorway = norm(colorway ?? "");
+    const cleanLike = (s: string) => s.replace(/[\\%,_]/g, "");
+
+    // Style-code direct match (Novelship parity): a code-ish token searches
+    // sku_models.style_code straight up. Exact code hits outrank everything.
+    // Tolerates the pre-migration schema (missing column) by catching and
+    // falling back to text results alone.
+    interface CodeHit {
+      id: string;
+      brand: string;
+      model: string;
+      colorway: string;
+      styleCode: string;
+      basePriceCents: number | null;
+      artUrl: string | null;
+    }
+    let codeHits: CodeHit[] = [];
+    const tokens = searchTerm.split(/\s+/).filter((t) => /^[A-Za-z0-9-]{3,}$/.test(t));
+    if (tokens.length > 0) {
+      try {
+        const supabase = await createServerSupabase();
+        const ors = tokens.map((t) => `style_code.ilike.%${cleanLike(t)}%`).join(',');
+        const direct = await supabase
+          .from('sku_models')
+          .select('id,brand,model,colorway,base_price_cents,art_url,style_code')
+          .or(ors)
+          .limit(10);
+        if (!direct.error) {
+          codeHits = ((direct.data ?? []) as Array<Record<string, unknown>>)
+            .filter((r) => typeof r['style_code'] === 'string' && (r['style_code'] as string).length > 0)
+            .map((r) => ({
+              id: String(r['id']),
+              brand: String(r['brand'] ?? ''),
+              model: String(r['model'] ?? ''),
+              colorway: String(r['colorway'] ?? ''),
+              styleCode: String(r['style_code']),
+              basePriceCents: (r['base_price_cents'] as number | null) ?? null,
+              artUrl: (r['art_url'] as string | null) ?? null,
+            }));
+        }
+      } catch {
+        // Pre-migration or RLS surprise — text results still serve.
+      }
+    }
+
+    // Exact counts for code hits (batched, two queries, RLS-consistent).
+    const codeIds = codeHits.map((h) => h.id);
+    const variantCountByModel = new Map<string, number>();
+    const cardCountByModel = new Map<string, number>();
+    if (codeIds.length > 0) {
+      const supabase = await createServerSupabase();
+      const variants = await supabase
+        .from('skus')
+        .select('id,model_id')
+        .in('model_id', codeIds);
+      const variantIds: string[] = [];
+      for (const v of ((variants.data ?? []) as Array<{ id: string; model_id: string }>)) {
+        variantCountByModel.set(v.model_id, (variantCountByModel.get(v.model_id) ?? 0) + 1);
+        variantIds.push(v.id);
+      }
+      if (variantIds.length > 0) {
+        const cards = await supabase
+          .from('cards')
+          .select('sku_id')
+          .in('sku_id', variantIds.slice(0, 200));
+        const modelByVariant = new Map<string, string>();
+        for (const v of ((variants.data ?? []) as Array<{ id: string; model_id: string }>)) {
+          modelByVariant.set(v.id, v.model_id);
+        }
+        for (const c of ((cards.data ?? []) as Array<{ sku_id: string }>)) {
+          const mid = modelByVariant.get(c.sku_id);
+          if (mid) cardCountByModel.set(mid, (cardCountByModel.get(mid) ?? 0) + 1);
+        }
+      }
+    }
 
     const scored = models.map((m) => {
       let score = 0;
@@ -325,6 +401,7 @@ export async function searchSkuModelsAction(
         brand: m.brand,
         model: m.model,
         colorway: m.colorway,
+        styleCode: null,
         basePriceCents: m.base_price_cents,
         artUrl: m.art_url ?? null,
         variantCount: m.variant_count,
@@ -333,11 +410,37 @@ export async function searchSkuModelsAction(
       };
     });
 
-    scored.sort((a, b) => b.score - a.score);
+    // Code hits outrank text: exact code +60, prefix +30. Dedupe against
+    // the text list so one model never shows twice.
+    const seen = new Set(scored.map((s) => s.id));
+    const codeScored = codeHits
+      .filter((h) => !seen.has(h.id))
+      .map((h) => {
+        const code = h.styleCode.toLowerCase();
+        const exact = tokens.some((t) => code === t.toLowerCase());
+        const prefix = tokens.some(
+          (t) => code.startsWith(t.toLowerCase()) || t.toLowerCase().startsWith(code),
+        );
+        return {
+          id: h.id,
+          brand: h.brand,
+          model: h.model,
+          colorway: h.colorway,
+          styleCode: h.styleCode,
+          basePriceCents: h.basePriceCents,
+          artUrl: h.artUrl,
+          variantCount: variantCountByModel.get(h.id) ?? 0,
+          cardCount: cardCountByModel.get(h.id) ?? 0,
+          score: exact ? 60 : prefix ? 30 : 15,
+        };
+      });
+
+    const all = [...codeScored, ...scored];
+    all.sort((a, b) => b.score - a.score);
 
     return {
       ok: true,
-      models: scored.slice(0, 5).map(({ score, ...rest }) => rest),
+      models: all.slice(0, 5).map(({ score, ...rest }) => rest),
     };
   } catch (thrown) {
     return {

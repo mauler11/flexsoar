@@ -18,6 +18,7 @@ interface ModelHit {
   brand: string;
   model: string;
   colorway: string;
+  styleCode: string | null;
   basePriceCents: number | null;
   artUrl: string | null;
   variantCount: number;
@@ -116,6 +117,11 @@ export function ListSearch() {
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-bold">
                     {hit.brand} {hit.model}
+                    {hit.styleCode ? (
+                      <span className="ml-1.5 font-mono text-[11px] font-semibold text-muted">
+                        {hit.styleCode}
+                      </span>
+                    ) : null}
                   </span>
                   <span className="block truncate text-xs text-muted">
                     {hit.colorway}

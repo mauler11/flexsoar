@@ -49,6 +49,7 @@ interface ModelMatch {
   brand: string;
   model: string;
   colorway: string;
+  styleCode: string | null;
   basePriceCents: number | null;
   variantCount: number;
   cardCount: number;
@@ -213,6 +214,11 @@ export function SkuModelFinder({
                 <span className="min-w-0">
                   <span className="block truncate font-bold">
                     {m.brand} {m.model}
+                    {m.styleCode ? (
+                      <span className="ml-1.5 font-mono text-[11px] font-semibold text-muted">
+                        {m.styleCode}
+                      </span>
+                    ) : null}
                   </span>
                   <span className="block truncate text-muted">
                     {m.colorway} · {m.variantCount} sizes · {m.cardCount} cards
