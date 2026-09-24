@@ -175,20 +175,22 @@ function isYouthTitle(variantTitle) {
 const APPAREL_WORDS = [
   't-shirt', 'tshirt', 'tee', 'hoodie', 'jersey', 'sweatshirt', 'jacket',
   'pants', 'trousers', 'blazer', 'shorts', 'socks', 'hat', 'cap', 'beanie',
-  'bag', 'backpack', 'sandal', 'slide', 'clog', 'croc', 'dress', 'skirt',
-  'bra', 'leggings', 'bodysuit', 'underwear', 'tracksuit', 'sweatpants', 'polo',
+  'bag', 'backpack', 'bodysuit', 'skirt', 'bra', 'leggings', 'underwear',
+  'tracksuit', 'sweatpants', 'polo',
 ];
+// Never sneakers, no matter what the tags claim — unconditional exclusion.
+const NEVER_FOOTWEAR_WORDS = ['sandal', 'slide', 'clog', 'croc'];
+const wordHit = (title, words) =>
+  words.some((w) => new RegExp(`\\b${w.replace(/-/g, '[-\\s]')}\\b`, 'i').test(title));
 function isSneakerProduct(p) {
   if (!p || typeof p !== 'object') return false;
+  const title = String(p.variantTitle ?? p.title ?? '');
+  if (wordHit(title, NEVER_FOOTWEAR_WORDS)) return false;
   const sub = String(p.product_sub_type ?? '').toLowerCase();
   if (sub) return sub.includes('sneaker') || sub.includes('shoe');
   const tags = Array.isArray(p.tags) ? p.tags.map((t) => String(t).toLowerCase()) : [];
   const taggedFootwear = tags.some((t) => t.includes('shoe') || t.includes('sneaker') || t.includes('footwear'));
-  const title = String(p.variantTitle ?? p.title ?? '').toLowerCase();
-  const wordHit = APPAREL_WORDS.some((w) =>
-    new RegExp(`\\b${w.replace(/-/g, '[-\\s]')}\\b`).test(title),
-  );
-  if (wordHit && !taggedFootwear) return false;
+  if (wordHit(title, APPAREL_WORDS) && !taggedFootwear) return false;
   return true;
 }
 
