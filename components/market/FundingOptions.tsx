@@ -1,18 +1,15 @@
 /**
  * components/market/FundingOptions.tsx
  *
- * PARKED Privy funding rails: card + crypto deposit methods in one
- * `useAddFunds` flow, Courtyard-arranged. Renders NOTHING unless
- * NEXT_PUBLIC_ENABLE_PRIVY_CHECKOUT === '1' — the live deposit view
- * (address display, embedded link) stays exactly as-is until funding
- * proves in sandbox. Deliberately narrower than the reference screenshot:
- * no Exchange / Cash App rows (provider- and region-specific; Cash App is
- * US-only), no promo rows. What renders is what can actually run.
+ * Privy funding rails: card + crypto deposit methods in one `useAddFunds`
+ * flow, Courtyard-arranged. Always live — the wallet-only decision made
+ * funding the front door, so there is no flag gate. Deliberately narrower
+ * than the reference screenshot: no Exchange / Cash App rows (provider-
+ * and region-specific; Cash App is US-only), no promo rows. What renders
+ * is what can actually run.
  *
  * Honest sequencing: card/crypto funding lands IN the wallet first
- * (minutes, provider-dependent), then the user buys with Balance. There
- * is no atomic direct-card-purchase here — the current "Buy with Card"
- * (Stripe) remains the only true one-step card payment.
+ * (minutes, provider-dependent), then the user buys with Balance.
  */
 "use client";
 
@@ -25,13 +22,9 @@ import {
   FUNDING_ENV,
   FUNDING_FIAT_ASSETS,
   FUNDING_USDC_MINT,
-  isPrivyCheckoutEnabled,
 } from "@/lib/solana/privy";
 
 export function FundingOptions({ address }: { address: string }) {
-  // Hooks never run gated-off: the inner component only mounts past the
-  // flag, exactly like the PrivyBuyBridge pattern.
-  if (!isPrivyCheckoutEnabled()) return null;
   return <FundingOptionsInner address={address} />;
 }
 
@@ -44,21 +37,17 @@ function FundingOptionsInner({ address }: { address: string }) {
 
   if (!ready) {
     return (
-      <div className="flex flex-col gap-2 rounded-xl border border-line bg-background p-3">
-        <span className="text-xs font-semibold">More deposit options</span>
-        <p className="text-[11px] leading-snug text-muted">Preparing funding…</p>
-      </div>
+      <p className="text-[11px] leading-snug text-muted">Preparing funding…</p>
     );
   }
 
   if (!authenticated) {
     return (
-      <div className="flex flex-col gap-2 rounded-xl border border-line bg-background p-3">
-        <span className="text-xs font-semibold">More deposit options</span>
+      <div className="flex flex-col gap-2">
         <p className="text-[11px] leading-snug text-muted">
-          Card or crypto through Privy providers. Log in with email to set up
-          your payment method — funds land in this wallet first, then you buy
-          with Balance.
+          Card or crypto through Privy providers. Log in with email to set
+          up your payment method — funds land here first, then you spend
+          from your balance.
         </p>
         <Button
           type="button"
@@ -113,11 +102,9 @@ function FundingOptionsInner({ address }: { address: string }) {
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-line bg-background p-3">
-      <span className="text-xs font-semibold">More deposit options</span>
+    <div className="flex flex-col gap-2">
       <p className="text-[11px] leading-snug text-muted">
-        Card or crypto through Privy providers. Funds land in this wallet
-        first — buying happens after, with Balance.
+        Funds land here first — then you spend from your balance.
       </p>
       <Button
         type="button"

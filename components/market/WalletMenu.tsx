@@ -3,13 +3,11 @@
  *
  * Header wallet button + modal: balance hero up top, then a deposit
  * method list (Courtyard-arranged — one row per real rail, expanding
- * inline). Rows are honest: only rails that actually run render.
- * Transfer Crypto is the plain deposit address (USDC on Solana is what
- * the backend settles); Deposit with Card is the Privy funding flow
- * (flag-gated — the row hides with the flag). No QR code (no QR dep
- * installed; the address + copy covers it), no exchange/cash-app rows
- * (region-specific), no promo rows. Every number shown is REAL
- * (GET /api/solana/balances); nothing here is mocked.
+ * inline). Transfer Crypto is the plain deposit address (USDC on Solana
+ * is what the backend settles); Deposit with Card is the Privy funding
+ * flow. No QR code (no QR dep installed; the address + copy covers it),
+ * no exchange/cash-app rows (region-specific), no promo rows. Every
+ * number shown is REAL (GET /api/solana/balances); nothing here is mocked.
  */
 "use client";
 
@@ -22,7 +20,6 @@ import { FundingOptions } from "@/components/market/FundingOptions";
 import { SendDialog } from "@/components/market/SendDialog";
 import { Modal } from "@/components/market/Modal";
 import { useFiat } from "@/components/market/Fiat";
-import { isPrivyCheckoutEnabled } from "@/lib/solana/privy";
 
 interface BalancesResponse {
   wallet: string;
@@ -140,7 +137,6 @@ function DepositTab({
 }) {
   const [openRow, setOpenRow] = useState<"crypto" | "card" | null>(null);
   const [copied, setCopied] = useState(false);
-  const cardRailLive = isPrivyCheckoutEnabled();
 
   async function copy() {
     try {
@@ -205,8 +201,7 @@ function DepositTab({
           {openRow === "crypto" && (
             <div className="flex flex-col gap-2 border-t border-line px-3 py-3">
               <span className="text-[11px] text-muted">
-                Send USDC on Solana to this address from any wallet or
-                exchange. USDC only — anything else gets stuck.
+                Send USDC on Solana here. Anything else gets stuck.
               </span>
               <div className="flex items-stretch gap-2">
                 <span className="min-w-0 flex-1 break-all rounded-xl border border-line-strong bg-raised px-3 py-2 font-mono text-xs">
@@ -224,48 +219,42 @@ function DepositTab({
           )}
         </div>
 
-        {cardRailLive && (
-          <div className="overflow-hidden rounded-2xl border border-line bg-background">
-            <button
-              type="button"
-              onClick={() => toggle("card")}
-              aria-expanded={openRow === "card"}
-              className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-raised/60"
+        <div className="overflow-hidden rounded-2xl border border-line bg-background">
+          <button
+            type="button"
+            onClick={() => toggle("card")}
+            aria-expanded={openRow === "card"}
+            className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-raised/60"
+          >
+            <span
+              aria-hidden
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent"
             >
-              <span
-                aria-hidden
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="2" y="5" width="20" height="14" rx="2" />
-                  <path d="M2 10h20" />
-                </svg>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="5" width="20" height="14" rx="2" />
+                <path d="M2 10h20" />
+              </svg>
+            </span>
+            <span className="flex flex-1 flex-col">
+              <span className="text-sm font-semibold">Deposit with Card</span>
+              <span className="text-[11px] text-muted">
+                Visa · Mastercard · lands as USDC
               </span>
-              <span className="flex flex-1 flex-col">
-                <span className="text-sm font-semibold">Deposit with Card</span>
-                <span className="text-[11px] text-muted">
-                  Visa · Mastercard · lands as USDC
-                </span>
-              </span>
-              <span
-                aria-hidden
-                className={`text-muted transition-transform ${openRow === "card" ? "rotate-90" : ""}`}
-              >
-                ›
-              </span>
-            </button>
-            {openRow === "card" && (
-              <div className="border-t border-line px-3 py-3">
-                <FundingOptions address={wallet} />
-              </div>
-            )}
-          </div>
-        )}
+            </span>
+            <span
+              aria-hidden
+              className={`text-muted transition-transform ${openRow === "card" ? "rotate-90" : ""}`}
+            >
+              ›
+            </span>
+          </button>
+          {openRow === "card" && (
+            <div className="border-t border-line px-3 py-3">
+              <FundingOptions address={wallet} />
+            </div>
+          )}
+        </div>
       </div>
-      <p className="text-[11px] leading-snug text-muted">
-        Card buys land in this wallet first (minutes, provider-dependent) —
-        then you buy with your balance.
-      </p>
     </>
   );
 }
@@ -308,26 +297,29 @@ export function WalletMenu() {
       {open && (
         <Modal onClose={close} closeLabel="Close wallet" panelClassName="max-w-sm">
           <div className="flex flex-col gap-4 p-5">
-            <div className="flex items-center justify-between">
+            <div className="relative flex items-center justify-center">
               <h2 className="text-base font-bold tracking-tight">Wallet</h2>
               <button
                 type="button"
                 onClick={close}
                 aria-label="Close"
-                className="text-lg leading-none text-muted transition hover:text-foreground"
+                className="absolute right-0 text-lg leading-none text-muted transition hover:text-foreground"
               >
                 ×
               </button>
             </div>
 
-            <div className="grid grid-cols-3 gap-1 rounded-xl bg-background p-1 text-sm font-semibold">
+            <div className="grid grid-cols-3 gap-1 rounded-2xl border border-line bg-raised p-1 text-sm font-semibold">
               {(["deposit", "withdraw", "settings"] as const).map((t) => (
                 <button
                   key={t}
                   type="button"
                   onClick={() => setTab(t)}
-                  className={`rounded-lg px-3 py-1.5 capitalize transition ${
-                    tab === t ? "bg-[#2E2E2E] text-foreground" : "text-muted hover:text-foreground"
+                  aria-pressed={tab === t}
+                  className={`rounded-xl px-3 py-2 capitalize transition ${
+                    tab === t
+                      ? "bg-accent/15 font-bold text-accent shadow-[0_0_24px_-8px_rgba(53,240,122,0.45)]"
+                      : "text-muted hover:text-foreground"
                   }`}
                 >
                   {t}

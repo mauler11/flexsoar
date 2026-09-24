@@ -22,7 +22,6 @@ import { EmbeddedLinkButton } from "@/components/market/EmbeddedWalletSection";
 import { FundingOptions } from "@/components/market/FundingOptions";
 import { FiatAmount, useFiat } from "@/components/market/Fiat";
 import { formatUsdc } from "@/lib/solana/balances";
-import { isPrivyCheckoutEnabled } from "@/lib/solana/privy";
 import type { BuyPanelListing } from "./BuyPanel";
 
 export interface BuyModalProps {
@@ -150,17 +149,7 @@ export function CheckoutModal({ listing, onClose }: { listing: BuyPanelListing; 
                   This purchase needs {formatUsdc(totalUnits ?? 0)} USDC — you
                   hold {formatUsdc(wallet.usdcUnits)}. Top up, then buy.
                 </Banner>
-                {isPrivyCheckoutEnabled() ? (
-                  <FundingOptions address={wallet.wallet} />
-                ) : (
-                  <p className="text-[11px] leading-snug text-muted">
-                    Send USDC on Solana to{" "}
-                    <span className="font-mono">
-                      {wallet.wallet.slice(0, 6)}…{wallet.wallet.slice(-4)}
-                    </span>{" "}
-                    from any wallet or exchange, then retry.
-                  </p>
-                )}
+                <FundingOptions address={wallet.wallet} />
               </div>
             ) : (
               <SolanaBuyPanelRoot listingId={listing.id} priceCents={listing.priceCents} />
