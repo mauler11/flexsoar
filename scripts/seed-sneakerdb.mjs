@@ -60,9 +60,14 @@ function requireEnv(name) {
 
 function args() {
   const out = { brand: null, limit: 50, dryRun: false, skipImages: false };
-  for (const a of process.argv.slice(2)) {
+  const raw = process.argv.slice(2);
+  for (let i = 0; i < raw.length; i++) {
+    const a = raw[i];
+    const next = raw[i + 1];
     if (a === '--dry-run') out.dryRun = true;
     else if (a === '--skip-images') out.skipImages = true;
+    else if (a === '--brand' && next && !next.startsWith('--')) { out.brand = next; i++; }
+    else if (a === '--limit' && next && !next.startsWith('--')) { out.limit = Math.max(1, Number(next) | 0); i++; }
     else if (a.startsWith('--brand=')) out.brand = a.slice(8);
     else if (a.startsWith('--limit=')) out.limit = Math.max(1, Number(a.slice(8)) | 0);
     else throw new Error(`unknown arg: ${a}`);
