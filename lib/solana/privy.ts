@@ -13,8 +13,20 @@
 
 import { base58Decode } from './base58';
 
-/** Target chain for embedded sends. Devnet until mainnet launch. */
-export const SOLANA_CHAIN = 'solana:devnet';
+/**
+ * Buy chain is `solana:devnet` until the mainnet checklist flips it —
+ * same single place as the program's feature flag.
+ *
+ * Env-driven so local dev stays on devnet while prod signs mainnet:
+ * set NEXT_PUBLIC_SOLANA_CHAIN=solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp
+ * (CAIP-2 mainnet id, same value as FUNDING_CHAIN) in Vercel.
+ *
+ * MUST agree with server-side SOLANA_CLUSTER (config.ts): devnet const
+ * with a mainnet cluster (or vice versa) means the wallet signs for one
+ * chain while quote/settle verify the other — every buy fails, or worse.
+ */
+export const SOLANA_CHAIN =
+  process.env.NEXT_PUBLIC_SOLANA_CHAIN?.trim() || 'solana:devnet';
 
 /**
  * Parked Privy funding rails (method-picker deposits + card on-ramp).
