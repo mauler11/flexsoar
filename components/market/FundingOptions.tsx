@@ -44,7 +44,7 @@ function destinationFor(address: string) {
 /** User bailed out of Privy's modal — not an error worth a banner. */
 function isCancel(thrown: unknown): boolean {
   const msg = thrown instanceof Error ? thrown.message : String(thrown ?? "");
-  return /cancell|dismiss|user closed/i.test(msg);
+  return /cancell|dismiss|user closed|exited flow|user exited|modal closed/i.test(msg);
 }
 
 /**
