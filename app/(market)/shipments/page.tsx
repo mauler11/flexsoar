@@ -64,7 +64,7 @@ export default async function ShipmentsPage() {
           href="/market"
           className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong px-3 py-2 text-[13px] font-bold transition hover:border-muted"
         >
-          <span aria-hidden="true">📦</span> Shop sneakers
+          Shop sneakers
         </Link>
       </div>
 
