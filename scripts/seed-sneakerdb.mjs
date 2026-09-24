@@ -1,16 +1,21 @@
 /**
  * scripts/seed-sneakerdb.mjs
  *
- * Catalog importer: TheSneakerDatabase (RapidAPI, free tier) -> sku_models
+ * Catalog importer: KicksCrew Sneakers Data (RapidAPI) -> sku_models
  * + skus variants -> product art mirrored to our R2.
  *
- *   node scripts/seed-sneakerdb.mjs --brand Nike --limit 100 --dry-run
+ *   node scripts/seed-sneakerdb.mjs --brand Nike --limit 5 --dry-run
  *   node scripts/seed-sneakerdb.mjs --brand Nike,Jordan --limit 400
  *   node scripts/seed-sneakerdb.mjs --brand Adidas --limit 200 --skip-images
  *
+ * (History: first written against TheSneakerDatabase, whose provider went
+ * dark — KicksCrew is the live source. Filename kept so docs stay valid.)
+ *
  * Env (reads .env.local in repo root when present; real env wins):
- *   SNEAKERDB_API_KEY      RapidAPI key (free tier is enough to start)
- *   SNEAKERDB_HOST         default the-sneaker-database.p.rapidapi.com
+ *   SNEAKERDB_API_KEY      RapidAPI key subscribed to the KicksCrew Sneakers
+ *                          Data API (Basic free = 40 req/month — a few broad
+ *                          brand searches cover a launch catalog).
+ *   SNEAKERDB_HOST         default kickscrew-sneakers-data.p.rapidapi.com
  *   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
  *   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET,
  *   R2_PUBLIC_URL (images only; skipped gracefully when absent)
@@ -22,9 +27,10 @@
  *   rows are skipped, never duplicated or overwritten. Reruns only add.
  * - Art is set on INSERT only (015's guard blocks art_url UPDATEs anyway);
  *   models that already exist keep whatever art they have.
- * - Oracle honesty: base_price_cents = USD retail x live USDMYR at seed
- *   time (rate printed in the summary). Missing retail -> NULL (unpriced:
- *   cannot mint until an admin prices it). No invented precision.
+ * - Oracle honesty: base_price_cents = KicksCrew's live USD ask x live
+ *   USDMYR at seed time (rate printed in the summary). Missing price ->
+ *   NULL (unpriced: cannot mint until an admin prices it). No invented
+ *   precision; the market tape takes over from here.
  * - 300ms between API calls (free-tier 5 req/s ceiling).
  * - A row without a usable name/brand is skipped, never guessed.
  */
@@ -35,8 +41,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const SIZE_RUN = Array.from({ length: 21 }, (_, i) => 3 + i * 0.5);
-const API_SLEEP_MS = 300;
-const HOST_DEFAULT = 'the-sneaker-database.p.rapidapi.com';
+const API_SLEEP_MS = 1000; // KicksCrew free quota is monthly-capped; be gentle.
+const HOST_DEFAULT = 'kickscrew-sneakers-data.p.rapidapi.com';
 
 function loadLocalEnv() {
   try {
@@ -79,22 +85,49 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const slugify = (s) =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'product';
 
-// Defensive field picks — the v2 shape is documented but versioned;
-// a renamed field must skip the row, never corrupt it.
-const pickStyle = (p) => p.styleId ?? p.styleID ?? p.style_id ?? null;
-const pickImage = (p) => {
-  const im = p.image;
-  if (typeof im === 'string') return im;
-  return im?.original ?? im?.small ?? im?.thumbnail ?? null;
+// Defensive field picks — provider shapes drift; a renamed field must skip
+// the row, never corrupt it.
+const pickStyle = (p) => {
+  const raw = p.model_no ?? p.modelNo ?? null;
+  return typeof raw === 'string' && raw.trim() ? raw.trim().toUpperCase() : null;
 };
-const pickRetailUsd = (p) => {
-  const n = Number(p.retailPrice ?? p.retail_price);
+const pickImage = (p) => {
+  const urls = Array.isArray(p.image_urls) ? p.image_urls : [];
+  const first = urls.find((u) => typeof u === 'string' && u.startsWith('https://'));
+  return first ?? null;
+};
+const pickPriceUsd = (p) => {
+  const n = Number(p.lowest_price ?? p.price);
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 const pickGender = (p) => {
   const g = String(p.gender ?? '').toLowerCase();
-  return ['men', 'women', 'kids', 'unisex', 'youth'].includes(g) ? g : null;
+  if (g.startsWith('men')) return 'men';
+  if (g.startsWith('women')) return 'women';
+  if (g.startsWith('kid') || g.startsWith('youth') || g.startsWith('child')) return 'kids';
+  if (g.startsWith('unisex')) return 'unisex';
+  return null;
 };
+const pickTitle = (p) => String(p.variantTitle ?? p.title ?? p.name ?? '').trim();
+
+/**
+ * Split a KicksCrew variantTitle ("Air Force 1 Low '07 'Triple White'",
+ * sometimes with a trailing style code) into model + colorway. Heuristic
+ * by necessity — every row prints in dry-run for eyeballing, and the
+ * admin model editor renames stragglers.
+ */
+function splitTitle(variantTitle, brand, styleCode) {
+  let rest = String(variantTitle ?? '').trim().replace(new RegExp(`^${brand}\\s+`, 'i'), '').trim();
+  if (styleCode) {
+    const esc = styleCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    rest = rest.replace(new RegExp(`\\s*${esc}\\s*$`, 'i'), '').trim();
+  }
+  const quoted = rest.match(/'([^']+)'\s*$/);
+  if (quoted) {
+    return { model: rest.slice(0, quoted.index).trim() || rest, colorway: quoted[1].trim() };
+  }
+  return { model: rest, colorway: '' };
+}
 
 async function main() {
   loadLocalEnv();
@@ -146,7 +179,7 @@ async function main() {
       rateLive = true;
     }
   } catch { /* pinned fallback below */ }
-  console.log(`USDMYR for retail bootstrap: ${usdMyr}${rateLive ? ' (live)' : ' (PINNED FALLBACK — verify)'}`);
+  console.log(`USDMYR for ask bootstrap: ${usdMyr}${rateLive ? ' (live)' : ' (PINNED FALLBACK — verify)'}`);
 
   const headers = { 'x-rapidapi-key': apiKey, 'x-rapidapi-host': host };
   const seen = { products: 0, models: 0, variants: 0, images: 0, skipped: 0, unpriced: 0 };
@@ -166,35 +199,34 @@ async function main() {
 
   const brands = (opts.brand ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   const seenIdentities = new Set();
-  let page = 1;
-  outer: for (;;) {
-    let pageNew = 0;
-    for (const brand of brands.length ? brands : ['']) {
-      const q = new URLSearchParams({ limit: '100', page: String(page) });
-      if (brand) q.set('brand', brand);
-      const res = await fetch(`https://${host}/v2/sneakers?${q}`, { headers });
-      await sleep(API_SLEEP_MS);
-      if (!res.ok) throw new Error(`SneakerDB ${res.status} on page ${page} (brand '${brand || 'all'}')`);
-      const body = await res.json();
-      const items = body?.results ?? body?.data ?? (Array.isArray(body) ? body : []);
-      if (!Array.isArray(items) || items.length === 0) break outer;
-      for (const p of items) {
-        if (seen.products >= opts.limit) break outer;
+  // KicksCrew: one broad query per brand term returns the whole shelf —
+  // no paging contract documented, so single shot per term.
+  for (const brand of brands.length ? brands : ['sneakers']) {
+    const q = new URLSearchParams({ query: brand });
+    const res = await fetch(`https://${host}/search?${q}`, { headers });
+    await sleep(API_SLEEP_MS);
+    if (!res.ok) throw new Error(`KicksCrew ${res.status} on query '${brand}'`);
+    const body = await res.json();
+    const items = body?.products ?? (Array.isArray(body) ? body : []);
+    if (!Array.isArray(items) || items.length === 0) continue;
+    for (const p of items) {
+        if (seen.products >= opts.limit) break;
         seen.products++;
         const brandName = String(p.brand ?? '').trim();
-        const silhouette = String(p.shoe ?? p.model ?? '').trim();
-        const colorway = String(p.colorway ?? '').trim();
-        if (!brandName || !silhouette || !colorway) { seen.skipped++; continue; }
-        const styleCode = pickStyle(p) ? String(pickStyle(p)).trim().toUpperCase() : null;
-        const identity = `${brandName}|${silhouette}|${colorway}`.toLowerCase();
+        const styleCode = pickStyle(p);
+        const { model: silhouette, colorway } = splitTitle(p.variantTitle ?? p.title, brandName, styleCode);
+        if (!brandName || !silhouette) { seen.skipped++; continue; }
+        const color = colorway || 'Unknown';
+        const identity = `${brandName}|${silhouette}|${color}`.toLowerCase();
         if ((styleCode && existingCodes.has(styleCode)) || seenIdentities.has(identity)) {
           seen.skipped++;
           continue;
         }
         seenIdentities.add(identity);
 
-        const retailUsd = pickRetailUsd(p);
-        const baseCents = retailUsd != null ? Math.round(retailUsd * usdMyr * 100) : null;
+        // Oracle bootstrap: KicksCrew's live market ask, USD -> MYR.
+        const priceUsd = pickPriceUsd(p);
+        const baseCents = priceUsd != null ? Math.round(priceUsd * usdMyr * 100) : null;
         if (baseCents == null) seen.unpriced++;
 
         let artUrl = null;
@@ -205,7 +237,7 @@ async function main() {
             if (!img.ok) throw new Error(`image ${img.status}`);
             const mime = (img.headers.get('content-type') || '').split(';')[0].trim();
             const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
-            const key = `catalog/${slugify(styleCode ?? `${brandName}-${silhouette}-${colorway}`)}.${ext}`;
+            const key = `catalog/${slugify(styleCode ?? `${brandName}-${silhouette}-${color}`)}.${ext}`;
             const buf = Buffer.from(await img.arrayBuffer());
             await s3.send(new PutObjectCommand({
               Bucket: r2vals[3], Key: key, Body: buf,
@@ -218,17 +250,16 @@ async function main() {
           }
         }
 
-        console.log(`${opts.dryRun ? '[dry] ' : ''}+ ${brandName} ${silhouette} | ${colorway} | ${styleCode ?? 'no-code'} | retail ${retailUsd != null ? `$${retailUsd}` : 'n/a'}${artUrl ? ' | art' : ''}`);
-        pageNew++;
+        console.log(`${opts.dryRun ? '[dry] ' : ''}+ ${brandName} ${silhouette} | ${color} | ${styleCode ?? 'no-code'} | ask $${priceUsd ?? 'n/a'}${artUrl ? ' | art' : ''}`);
         if (opts.dryRun) continue;
 
         const modelRow = {
-          brand: brandName, model: silhouette, colorway,
+          brand: brandName, model: silhouette, colorway: color,
           base_price_cents: baseCents,
           art_url: artUrl,
           style_code: styleCode,
-          source: 'sneakerdb',
-          external_id: p.id != null ? String(p.id) : null,
+          source: 'kickscrew',
+          external_id: p._id != null ? String(p._id) : null,
           gender: pickGender(p),
         };
         const ins = await supabase.from('sku_models').insert(modelRow).select('id').single();
@@ -237,17 +268,13 @@ async function main() {
         seen.models++;
 
         const variants = SIZE_RUN.map((size_us) => ({
-          model_id: ins.data.id, brand: brandName, model: silhouette, colorway,
+          model_id: ins.data.id, brand: brandName, model: silhouette, colorway: color,
           size_us, retail_price_cents: baseCents,
         }));
         const vins = await supabase.from('skus').insert(variants);
         if (vins.error) console.log(`  VARIANT INSERT FAILED: ${vins.error.message}`);
         else seen.variants += variants.length;
-      }
     }
-    page++;
-    if (pageNew === 0) break; // API ignores paging (or catalog exhausted) — same rows would repeat.
-    if (page > 50) break; // sanity ceiling
   }
 
   console.log(`\ndone: ${seen.products} products seen, ${seen.models} models, ${seen.variants} variants, ${seen.images} images, ${seen.skipped} skipped, ${seen.unpriced} unpriced${opts.dryRun ? ' (DRY RUN — nothing written)' : ''}`);
