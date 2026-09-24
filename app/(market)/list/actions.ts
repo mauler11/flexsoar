@@ -368,17 +368,22 @@ export async function searchSkuModelsAction(
         variantIds.push(v.id);
       }
       if (variantIds.length > 0) {
-        const cards = await supabase
-          .from('cards')
-          .select('sku_id')
-          .in('sku_id', variantIds.slice(0, 200));
+        // Chunked: one giant .in() blows past the gateway URL limit (the
+        // same 400 that took down /admin/skus at catalog scale). 100 ids ≈
+        // 4KB, safely under.
         const modelByVariant = new Map<string, string>();
         for (const v of ((variants.data ?? []) as Array<{ id: string; model_id: string }>)) {
           modelByVariant.set(v.id, v.model_id);
         }
-        for (const c of ((cards.data ?? []) as Array<{ sku_id: string }>)) {
-          const mid = modelByVariant.get(c.sku_id);
-          if (mid) cardCountByModel.set(mid, (cardCountByModel.get(mid) ?? 0) + 1);
+        for (let i = 0; i < variantIds.length; i += 100) {
+          const cards = await supabase
+            .from('cards')
+            .select('sku_id')
+            .in('sku_id', variantIds.slice(i, i + 100));
+          for (const c of ((cards.data ?? []) as Array<{ sku_id: string }>)) {
+            const mid = modelByVariant.get(c.sku_id);
+            if (mid) cardCountByModel.set(mid, (cardCountByModel.get(mid) ?? 0) + 1);
+          }
         }
       }
     }
