@@ -20,6 +20,9 @@ export interface PayoutSetupProps {
   payoutsEnabled: boolean;
   isConsignor: boolean;
   countryCode: string | null;
+  /** Overrides the setup button label (e.g. "Cash out RM 120.00" when
+      proceeds are waiting). Defaults to "Set Up Payouts". */
+  ctaLabel?: string;
 }
 
 export function PayoutSetup({
@@ -27,6 +30,7 @@ export function PayoutSetup({
   payoutsEnabled,
   isConsignor,
   countryCode,
+  ctaLabel,
 }: PayoutSetupProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -99,7 +103,7 @@ export function PayoutSetup({
           disabled={isLoading}
           className="rounded-lg"
         >
-          {isLoading ? "Opening Stripe…" : "Set Up Payouts"}
+          {isLoading ? "Opening Stripe…" : (ctaLabel ?? "Set Up Payouts")}
         </Button>
       </div>
       {!isConsignor && (
@@ -126,8 +130,8 @@ export function PayoutSetup({
         </p>
       )}
       <p className="mt-2 text-[9px] text-muted">
-        Connect your Stripe account to receive payouts. Payout method (cash
-        vs credit) is determined by your country — see{" "}
+        Cash payouts go to your bank via Stripe — a one-time verification,
+        only needed before your first withdrawal. See{" "}
         <Link href="/terms" className="text-accent hover:underline">
           Getting paid
         </Link>
