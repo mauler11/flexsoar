@@ -2847,9 +2847,12 @@ export async function listSkuModels(
 
   const cardCounts = new Map<UUID, number>();
   const variantIds = variantRows.map((v) => v.id);
-  if (variantIds.length > 0) {
+  // Chunked: a single .in() with thousands of ids blows past the gateway's
+  // URL limit (400 Bad Request — this killed /admin/skus at catalog scale).
+  // 100 ids ≈ 4KB, safely under.
+  for (let i = 0; i < variantIds.length; i += 100) {
     const cardRows = (unwrap(
-      await supabase.from('cards').select('sku_id').in('sku_id', variantIds),
+      await supabase.from('cards').select('sku_id').in('sku_id', variantIds.slice(i, i + 100)),
       'cards',
     ) ?? []) as { sku_id: UUID }[];
 
