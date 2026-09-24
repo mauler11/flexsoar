@@ -159,7 +159,7 @@ export function Sidebar({ items }: SidebarProps) {
   return (
     <nav
       aria-label="Primary"
-      className="sticky top-16 hidden h-[calc(100vh-4rem)] w-16 shrink-0 flex-col gap-1 self-start overflow-y-auto border-r border-line bg-gradient-to-b from-raised/60 via-raised/40 to-transparent px-2 py-4 lg:flex lg:w-52 lg:px-3"
+      className="sticky top-16 hidden h-[calc(100vh-4rem)] w-16 shrink-0 flex-col gap-1 self-start overflow-y-auto border-r border-line bg-gradient-to-b from-raised/60 via-raised/40 to-transparent px-2 py-4 lg:flex lg:m-3 lg:h-[calc(100vh-6rem)] lg:w-52 lg:rounded-2xl lg:border lg:border-line lg:px-3 lg:shadow-[0_8px_40px_-16px_rgba(0,0,0,0.7)]"
     >
       {groups.map((group, gi) => (
         <div key={gi} className="flex flex-col gap-1">

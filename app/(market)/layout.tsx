@@ -266,7 +266,15 @@ export default async function MarketLayout({
           </div>
         </header>
 
-        <div className="flex flex-1">
+        <div className="relative flex flex-1">
+          {/* Ambient finish: a faint accent wash low-left plus a whisper of
+              top light, fixed behind everything. Pure decoration — pointer
+              events off, no layout effect. Token-level version (exact
+              opacity/stops) belongs to track/design in globals.css. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(60%_40%_at_15%_100%,rgba(53,240,122,0.05),transparent_70%),radial-gradient(40%_30%_at_85%_0%,rgba(255,255,255,0.03),transparent_70%)]"
+          />
           <Sidebar items={sidebarItems} />
           <MobileNav
             items={sidebarItems}
@@ -274,7 +282,7 @@ export default async function MarketLayout({
             wallet={me ? <WalletMenu /> : undefined}
           />
           <div className="flex min-w-0 flex-1 flex-col">
-            <main className="mx-auto w-full max-w-6xl flex-1 px-0.5 py-6">
+            <main className="mx-auto w-full max-w-6xl flex-1 px-3 py-6 sm:px-4">
               {children}
             </main>
 
