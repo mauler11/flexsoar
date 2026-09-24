@@ -131,7 +131,11 @@ function splitTitle(variantTitle, brand, styleCode) {
   rest = rest.replace(/\s*\b(19|20)\d{2}\s*$/, '').trim();
   // Curly apostrophes (’, ‘) break quote pairing — normalize first.
   rest = rest.replace(/[‘’‚‛]/g, "'");
-  const idx = [...rest.matchAll(/'/g)].map((m) => m.index);
+  // A lone year abbreviation ('07 with no closing quote) is literal text,
+  // not a span boundary — drop such quotes from pairing, keep them in situ.
+  const idx = [...rest.matchAll(/'/g)]
+    .map((m) => m.index)
+    .filter((i) => !/^'\d\d(\s|$)/.test(rest.slice(i, i + 4)));
   if (idx.length === 0) return { model: rest, colorway: '' };
   let open;
   let close;
