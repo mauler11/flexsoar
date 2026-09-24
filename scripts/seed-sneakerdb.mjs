@@ -85,6 +85,49 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const slugify = (s) =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'product';
 
+/**
+ * Canonical brand display. Sources disagree on casing ("adidas" vs "Nike"
+ * vs "ASICS") and the market's brand pills filter on exact match — unmapped
+ * casing strands listings under the wrong pill (or "Other"). Unknown
+ * brands fall back to title case.
+ */
+const BRAND_CANONICAL = new Map(
+  Object.entries({
+    nike: 'Nike',
+    jordan: 'Jordan',
+    adidas: 'Adidas',
+    'new balance': 'New Balance',
+    asics: 'Asics',
+    puma: 'Puma',
+    converse: 'Converse',
+    vans: 'Vans',
+    reebok: 'Reebok',
+    yeezy: 'Yeezy',
+    crocs: 'Crocs',
+    salomon: 'Salomon',
+    saucony: 'Saucony',
+    hoka: 'Hoka',
+    mizuno: 'Mizuno',
+    'under armour': 'Under Armour',
+    anta: 'Anta',
+    'li-ning': 'Li-Ning',
+    on: 'On',
+    brooks: 'Brooks',
+    fila: 'Fila',
+    timberland: 'Timberland',
+  }),
+);
+
+function canonicalBrand(raw) {
+  const key = String(raw ?? '').trim().toLowerCase();
+  if (BRAND_CANONICAL.has(key)) return BRAND_CANONICAL.get(key);
+  return key
+    .split(/[\s-]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
 // Defensive field picks — provider shapes drift; a renamed field must skip
 // the row, never corrupt it.
 const pickStyle = (p) => {
@@ -291,7 +334,7 @@ async function main() {
           continue;
         }
         if (!isSneakerProduct(p)) { seen.skipped++; skipWhy.apparel++; continue; }
-        const brandName = String(p.brand ?? '').trim();
+        const brandName = canonicalBrand(p.brand);
         const styleCode = pickStyle(p);
         const { model: silhouette, colorway } = splitTitle(p.variantTitle ?? p.title, brandName, styleCode);
         if (!brandName || !silhouette) { seen.skipped++; skipWhy.nofields++; continue; }
