@@ -1,12 +1,19 @@
 /**
  * components/market/FundingOptions.tsx
  *
- * Privy funding rails: card + crypto deposit methods in one `useAddFunds`
- * flow, Courtyard-arranged. Always live — the wallet-only decision made
- * funding the front door, so there is no flag gate. Deliberately narrower
- * than the reference screenshot: no Exchange / Cash App rows (provider-
- * and region-specific; Cash App is US-only), no promo rows. What renders
- * is what can actually run.
+ * Privy funding rails via `useAddFunds`. Three entry points sharing one
+ * hook (`useFundRail`):
+ *
+ *   - combined (checkout shortfall): destination + fiat + crypto legs, so
+ *     Privy opens its own "Select method" screen;
+ *   - fiat-only (Deposit with Card row): opens straight at Buy crypto;
+ *   - crypto-only (Transfer Crypto row): opens straight at Add funds,
+ *     with conversion/routing handled by Relay.
+ *
+ * Always live — the wallet-only decision made funding the front door.
+ * Deliberately narrower than the reference screenshots: no Exchange /
+ * Cash App rows (provider- and region-specific; Cash App is US-only), no
+ * promo rows. What renders is what can actually run.
  *
  * Honest sequencing: card/crypto funding lands IN the wallet first
  * (minutes, provider-dependent), then the user buys with Balance.
@@ -24,24 +31,103 @@ import {
   FUNDING_USDC_MINT,
 } from "@/lib/solana/privy";
 
-export function FundingOptions({ address }: { address: string }) {
-  return <FundingOptionsInner address={address} />;
+export type FundMode = "all" | "fiat" | "crypto";
+
+function destinationFor(address: string) {
+  return {
+    address,
+    chain: FUNDING_CHAIN as `${string}:${string}`,
+    asset: FUNDING_USDC_MINT,
+  };
 }
 
-function FundingOptionsInner({ address }: { address: string }) {
+/** User bailed out of Privy's modal — not an error worth a banner. */
+function isCancel(thrown: unknown): boolean {
+  const msg = thrown instanceof Error ? thrown.message : String(thrown ?? "");
+  return /cancell|dismiss|user closed/i.test(msg);
+}
+
+/**
+ * Shared funding runner. `start("fiat")` opens Buy crypto, `start("crypto")`
+ * opens Add funds, `start("all")` opens Privy's method picker. When the
+ * user isn't logged in yet, call `login()` first — one tap, then funding.
+ */
+export function useFundRail(address: string) {
   const { ready, authenticated, login } = usePrivy();
   const { addFunds } = useAddFunds();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  if (!ready) {
+  async function start(mode: FundMode) {
+    if (!ready || busy) return;
+    if (!authenticated) {
+      login();
+      return;
+    }
+    setBusy(true);
+    setNotice(null);
+    setError(null);
+    try {
+      // One literal per mode — the SDK types addFunds as a union and
+      // reject conditionally-spread optional legs.
+      const dest = destinationFor(address);
+      const fiatLeg = {
+        fiat: {
+          source: {
+            assets: [...FUNDING_FIAT_ASSETS],
+            defaultAsset: "usd" as const,
+          },
+          environment: FUNDING_ENV as "sandbox" | "production",
+          defaultAmount: "50",
+        },
+      };
+      const cryptoLeg = { crypto: { slippageBps: 100 } };
+      const result =
+        mode === "fiat"
+          ? await addFunds({ destination: dest, ...fiatLeg })
+          : mode === "crypto"
+            ? await addFunds({ destination: dest, ...cryptoLeg })
+            : await addFunds({ destination: dest, ...fiatLeg, ...cryptoLeg });
+      if (result.method === "fiat") {
+        setNotice(
+          result.status === "confirmed"
+            ? "Card purchase confirmed — funds arrive shortly, then spend from your balance."
+            : "Card purchase submitted — it finalizes with the provider, then spend from your balance.",
+        );
+      } else {
+        setNotice("Crypto deposit started — complete it in the flow, then spend from your balance.");
+      }
+    } catch (thrown) {
+      if (!isCancel(thrown)) {
+        setError(thrown instanceof Error ? thrown.message : "Funding flow failed.");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return {
+    ready,
+    needsLogin: ready && !authenticated,
+    login,
+    busy,
+    notice,
+    error,
+    start,
+  };
+}
+
+export function FundingOptions({ address }: { address: string }) {
+  const rail = useFundRail(address);
+
+  if (!rail.ready) {
     return (
       <p className="text-[11px] leading-snug text-muted">Preparing funding…</p>
     );
   }
 
-  if (!authenticated) {
+  if (rail.needsLogin) {
     return (
       <div className="flex flex-col gap-2">
         <p className="text-[11px] leading-snug text-muted">
@@ -53,52 +139,13 @@ function FundingOptionsInner({ address }: { address: string }) {
           type="button"
           variant="primary"
           size="md"
-          onClick={() => login()}
+          onClick={() => rail.login()}
           className="rounded-lg px-4 py-2.5 text-sm"
         >
           Continue with email
         </Button>
       </div>
     );
-  }
-
-  async function fund() {
-    setBusy(true);
-    setNotice(null);
-    setError(null);
-    try {
-      const result = await addFunds({
-        destination: {
-          address,
-          chain: FUNDING_CHAIN,
-          asset: FUNDING_USDC_MINT,
-        },
-        fiat: {
-          source: {
-            assets: [...FUNDING_FIAT_ASSETS],
-            defaultAsset: "usd",
-          },
-          environment: FUNDING_ENV,
-          defaultAmount: "50",
-        },
-        crypto: {
-          slippageBps: 100,
-        },
-      });
-      if (result.method === "fiat") {
-        setNotice(
-          result.status === "confirmed"
-            ? "Card purchase confirmed — funds arrive shortly, then buy with Balance."
-            : "Card purchase submitted — it finalizes with the provider, then buy with Balance.",
-        );
-      } else {
-        setNotice("Crypto deposit started — complete it in the flow, then buy with Balance.");
-      }
-    } catch (thrown) {
-      setError(thrown instanceof Error ? thrown.message : "Funding flow failed.");
-    } finally {
-      setBusy(false);
-    }
   }
 
   return (
@@ -110,20 +157,20 @@ function FundingOptionsInner({ address }: { address: string }) {
         type="button"
         variant="primary"
         size="md"
-        disabled={busy}
-        onClick={fund}
+        disabled={rail.busy}
+        onClick={() => rail.start("all")}
         className="rounded-lg px-4 py-2.5 text-sm"
       >
-        {busy ? "Opening funding…" : "Add Funds"}
+        {rail.busy ? "Opening funding…" : "Add Funds"}
       </Button>
-      {notice && (
+      {rail.notice && (
         <Banner tone="success" title="Funding underway">
-          {notice}
+          {rail.notice}
         </Banner>
       )}
-      {error && (
+      {rail.error && (
         <Banner tone="error" title="Funding didn't start">
-          {error}
+          {rail.error}
         </Banner>
       )}
     </div>

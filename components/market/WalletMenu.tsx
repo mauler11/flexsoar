@@ -12,11 +12,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { Banner } from "@/components/market/Banner";
 import { FIAT_CURRENCIES, formatFiatFromUsd, formatSol, formatUsdc } from "@/lib/solana/balances";
 import { EmbeddedLinkButton } from "@/components/market/EmbeddedWalletSection";
-import { FundingOptions } from "@/components/market/FundingOptions";
+import { useFundRail } from "@/components/market/FundingOptions";
 import { SendDialog } from "@/components/market/SendDialog";
 import { Modal } from "@/components/market/Modal";
 import { useFiat } from "@/components/market/Fiat";
@@ -119,10 +120,11 @@ function FiatBalance({
 }
 
 /**
- * Deposit tab: balance hero plus a Courtyard-style method list — one row
- * per rail that actually runs, expanding inline. Transfer Crypto is the
- * deposit address; Deposit with Card is the Privy funding flow (the row
- * only renders past the funding flag, so a dead row never shows).
+ * Deposit tab: balance hero plus two rails that open Privy's native flows
+ * directly — Transfer Crypto lands on Add funds (Relay converts and
+ * routes), Deposit with Card lands on Buy crypto. One tap each, no nested
+ * expansion. Unauthenticated taps start the email login first; funding
+ * follows on the next tap.
  */
 function DepositTab({
   wallet,
@@ -135,21 +137,42 @@ function DepositTab({
   solLamports: number;
   fx: Record<string, number> | null;
 }) {
-  const [openRow, setOpenRow] = useState<"crypto" | "card" | null>(null);
-  const [copied, setCopied] = useState(false);
+  const rail = useFundRail(wallet);
+  const locked = !rail.ready || rail.busy;
 
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(wallet);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard unavailable — address stays visible for manual copy.
-    }
-  }
-
-  function toggle(row: "crypto" | "card") {
-    setOpenRow((cur) => (cur === row ? null : row));
+  function railRow({
+    mode,
+    title,
+    subtitle,
+    icon,
+  }: {
+    mode: "crypto" | "fiat";
+    title: string;
+    subtitle: string;
+    icon: ReactNode;
+  }) {
+    return (
+      <button
+        type="button"
+        onClick={() => rail.start(mode)}
+        disabled={locked}
+        className="flex w-full items-center gap-3 rounded-2xl border border-line bg-background px-3 py-2.5 text-left transition hover:bg-raised/60 disabled:opacity-70"
+      >
+        <span
+          aria-hidden
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent"
+        >
+          {icon}
+        </span>
+        <span className="flex flex-1 flex-col">
+          <span className="text-sm font-semibold">{title}</span>
+          <span className="text-[11px] text-muted">{subtitle}</span>
+        </span>
+        <span aria-hidden className="text-muted">
+          {rail.busy ? "…" : "›"}
+        </span>
+      </button>
+    );
   }
 
   return (
@@ -164,96 +187,52 @@ function DepositTab({
         <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
           Add funds
         </span>
-
-        <div className="overflow-hidden rounded-2xl border border-line bg-background">
-          <button
-            type="button"
-            onClick={() => toggle("crypto")}
-            aria-expanded={openRow === "crypto"}
-            className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-raised/60"
-          >
-            <span
-              aria-hidden
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M7 16V4" />
-                <path d="M7 4 3 8" />
-                <path d="M7 4l4 4" />
-                <path d="M17 8v12" />
-                <path d="M17 20l4-4" />
-                <path d="M17 20l-4-4" />
-              </svg>
+        {railRow({
+          mode: "crypto",
+          title: "Transfer Crypto",
+          subtitle: "Any token · auto-converts to USDC",
+          icon: (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M7 16V4" />
+              <path d="M7 4 3 8" />
+              <path d="M7 4l4 4" />
+              <path d="M17 8v12" />
+              <path d="M17 20l4-4" />
+              <path d="M17 20l-4-4" />
+            </svg>
+          ),
+        })}
+        {railRow({
+          mode: "fiat",
+          title: "Deposit with Card",
+          subtitle: "Visa · Mastercard · lands as USDC",
+          icon: (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="5" width="20" height="14" rx="2" />
+              <path d="M2 10h20" />
+            </svg>
+          ),
+        })}
+        {rail.needsLogin && (
+          <p className="text-[11px] leading-snug text-muted">
+            Log in with email once — then funding is one tap.
+          </p>
+        )}
+        {rail.notice && (
+          <Banner tone="success" title="Funding underway">
+            {rail.notice}
+          </Banner>
+        )}
+        {rail.error && (
+          <Banner tone="error" title="Funding didn't start">
+            {rail.error}
+            <span className="mt-1 block">
+              Card quotes come from Privy&apos;s providers — if this
+              persists, the provider doesn&apos;t serve your region or
+              currency yet.
             </span>
-            <span className="flex flex-1 flex-col">
-              <span className="text-sm font-semibold">Transfer Crypto</span>
-              <span className="text-[11px] text-muted">
-                USDC on Solana · No limit · Instant
-              </span>
-            </span>
-            <span
-              aria-hidden
-              className={`text-muted transition-transform ${openRow === "crypto" ? "rotate-90" : ""}`}
-            >
-              ›
-            </span>
-          </button>
-          {openRow === "crypto" && (
-            <div className="flex flex-col gap-2 border-t border-line px-3 py-3">
-              <span className="text-[11px] text-muted">
-                Send USDC on Solana here. Anything else gets stuck.
-              </span>
-              <div className="flex items-stretch gap-2">
-                <span className="min-w-0 flex-1 break-all rounded-xl border border-line-strong bg-raised px-3 py-2 font-mono text-xs">
-                  {wallet}
-                </span>
-                <button
-                  type="button"
-                  onClick={copy}
-                  className="shrink-0 rounded-xl border border-line-strong bg-raised px-3 text-xs font-semibold transition hover:border-muted"
-                >
-                  {copied ? "Copied" : "Copy"}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="overflow-hidden rounded-2xl border border-line bg-background">
-          <button
-            type="button"
-            onClick={() => toggle("card")}
-            aria-expanded={openRow === "card"}
-            className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-raised/60"
-          >
-            <span
-              aria-hidden
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="5" width="20" height="14" rx="2" />
-                <path d="M2 10h20" />
-              </svg>
-            </span>
-            <span className="flex flex-1 flex-col">
-              <span className="text-sm font-semibold">Deposit with Card</span>
-              <span className="text-[11px] text-muted">
-                Visa · Mastercard · lands as USDC
-              </span>
-            </span>
-            <span
-              aria-hidden
-              className={`text-muted transition-transform ${openRow === "card" ? "rotate-90" : ""}`}
-            >
-              ›
-            </span>
-          </button>
-          {openRow === "card" && (
-            <div className="border-t border-line px-3 py-3">
-              <FundingOptions address={wallet} />
-            </div>
-          )}
-        </div>
+          </Banner>
+        )}
       </div>
     </>
   );
