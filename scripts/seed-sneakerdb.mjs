@@ -165,12 +165,29 @@ function isYouthTitle(variantTitle) {
   return /\((GS|PS|TD|BC|INFANT|TODDLER|YOUTH|KIDS)\)/i.test(String(variantTitle ?? ''));
 }
 
-/** Sneakers only for launch: our intake, grading, and sizing are shoe-shaped. */
+/**
+ * Apparel / non-sneaker footwear exclusion. Authoritative signals first
+ * (sub-type, tags); title keywords only when those are absent — a "Dress-Up"
+ * sneaker with shoe tags must survive while a tagless hoodie must not.
+ */
+const APPAREL_WORDS = [
+  't-shirt', 'tshirt', 'tee', 'hoodie', 'jersey', 'sweatshirt', 'jacket',
+  'pants', 'trousers', 'blazer', 'shorts', 'socks', 'hat', 'cap', 'beanie',
+  'bag', 'backpack', 'sandal', 'slide', 'clog', 'croc', 'dress', 'skirt',
+  'bra', 'leggings', 'bodysuit', 'underwear', 'tracksuit', 'sweatpants', 'polo',
+];
 function isSneakerProduct(p) {
   if (!p || typeof p !== 'object') return false;
   const sub = String(p.product_sub_type ?? '').toLowerCase();
   if (sub) return sub.includes('sneaker') || sub.includes('shoe');
-  return true; // field absent — keep the row rather than guess wrong
+  const tags = Array.isArray(p.tags) ? p.tags.map((t) => String(t).toLowerCase()) : [];
+  const taggedFootwear = tags.some((t) => t.includes('shoe') || t.includes('sneaker') || t.includes('footwear'));
+  const title = String(p.variantTitle ?? p.title ?? '').toLowerCase();
+  const wordHit = APPAREL_WORDS.some((w) =>
+    new RegExp(`\\b${w.replace(/-/g, '[-\\s]')}\\b`).test(title),
+  );
+  if (wordHit && !taggedFootwear) return false;
+  return true;
 }
 
 async function main() {
@@ -227,6 +244,7 @@ async function main() {
 
   const headers = { 'x-rapidapi-key': apiKey, 'x-rapidapi-host': host };
   const seen = { products: 0, models: 0, variants: 0, images: 0, skipped: 0, unpriced: 0 };
+  const skipWhy = { duplicate: 0, youth: 0, apparel: 0, nofields: 0 };
 
   const existingCodes = new Set();
   {
@@ -261,17 +279,19 @@ async function main() {
         // intake. Both skip loudly here, counted below.
         if (isYouthTitle(p.variantTitle ?? p.title) || pickGender(p) === 'kids') {
           seen.skipped++;
+          skipWhy.youth++;
           continue;
         }
-        if (!isSneakerProduct(p)) { seen.skipped++; continue; }
+        if (!isSneakerProduct(p)) { seen.skipped++; skipWhy.apparel++; continue; }
         const brandName = String(p.brand ?? '').trim();
         const styleCode = pickStyle(p);
         const { model: silhouette, colorway } = splitTitle(p.variantTitle ?? p.title, brandName, styleCode);
-        if (!brandName || !silhouette) { seen.skipped++; continue; }
+        if (!brandName || !silhouette) { seen.skipped++; skipWhy.nofields++; continue; }
         const color = colorway || 'Unknown';
         const identity = `${brandName}|${silhouette}|${color}`.toLowerCase();
         if ((styleCode && existingCodes.has(styleCode)) || seenIdentities.has(identity)) {
           seen.skipped++;
+          skipWhy.duplicate++;
           continue;
         }
         seenIdentities.add(identity);
@@ -329,7 +349,7 @@ async function main() {
     }
   }
 
-  console.log(`\ndone: ${seen.products} products seen, ${seen.models} models, ${seen.variants} variants, ${seen.images} images, ${seen.skipped} skipped, ${seen.unpriced} unpriced${opts.dryRun ? ' (DRY RUN — nothing written)' : ''}`);
+  console.log(`\ndone: ${seen.products} products seen, ${seen.models} models, ${seen.variants} variants, ${seen.images} images, ${seen.skipped} skipped (dup ${skipWhy.duplicate}, youth ${skipWhy.youth}, apparel ${skipWhy.apparel}, nofields ${skipWhy.nofields}), ${seen.unpriced} unpriced${opts.dryRun ? ' (DRY RUN — nothing written)' : ''}`);
 }
 
 main().catch((e) => { console.error(`seed failed: ${e.message}`); process.exit(1); });
