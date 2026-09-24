@@ -9,6 +9,10 @@ import { AuthForm } from "@/components/auth/AuthForm";
 import { safeNextPath } from "@/app/(auth)/paths";
 import PageProps from "next";
 
+export const metadata = {
+  title: "Create Account — FlexSoar",
+};
+
 function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }

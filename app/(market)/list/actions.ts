@@ -444,7 +444,7 @@ function submitErrorMessage(code: string, detail: string): string {
       // this call — but fn_submit_listing (019c) also calls
       // fn_payout_method_for_user directly, so this is a real code it can
       // raise, not a hypothetical one.
-      return "Select your country before submitting — it decides whether you're paid in cash or FSC.";
+      return "Select your country before submitting — selling is Malaysia-only at launch.";
     default:
       return detail || "submission failed";
   }
@@ -530,14 +530,15 @@ export async function submitListingIntakeAction(
   const payoutMethod = payoutRaw as PayoutMethod;
 
   // Capture country before a consignor can list — fn_payout_method_for_user
-  // resolves a null users.country_code to 'credit' with no error anywhere, so
-  // a seller who skips this is silently paid FSC instead of cash. Refused
+  // resolves a null users.country_code to 'credit' with no error anywhere,
+  // and credit settlement is disabled, so an unknown country must refuse
+  // here rather than sail into an unsettlable listing. Refused
   // server-side; the wizard's own required-field UI is convenience only.
   if (!isValidCountryCode(countryRaw)) {
     return {
       ok: false,
       code: "COUNTRY_REQUIRED",
-      message: "Select your country before submitting — it decides whether you're paid in cash or FSC.",
+      message: "Select your country before submitting — selling is Malaysia-only at launch.",
     };
   }
 

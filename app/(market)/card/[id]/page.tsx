@@ -8,7 +8,7 @@
  */
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getCard, getListing, getItem, getCreditAvailable, getPayoutMethodForUser, getUser, listSkuModels, getPriceHistory, getModelRetail } from "@/lib/api/contract";
+import { getCard, getListing, getItem, getPayoutMethodForUser, getUser, listSkuModels, getPriceHistory, getModelRetail } from "@/lib/api/contract";
 import type { CardStatus } from "@/lib/db/types";
 import {
   currentUserId,
@@ -111,10 +111,9 @@ export default async function CardPage({
   // Buyer-only reads. Skipped entirely for the owner and for signed-out
   // visitors — neither can buy this listing, so there's nothing to fetch.
   const isBuyerViewing = !isOwner && listing != null;
-  const [availableCreditCents, itemCustody] = await Promise.all([
-    isBuyerViewing && meId != null ? getCreditAvailable().catch(() => null) : null,
-    isBuyerViewing ? getItem(detail.item.id).catch(() => null) : null,
-  ]);
+  const itemCustody = isBuyerViewing
+    ? await getItem(detail.item.id).catch(() => null)
+    : null;
   const firstSalePending = itemCustody?.custody === "seller";
 
   // Seller-only read: how THEY will be paid, before they commit to listing.
@@ -308,7 +307,6 @@ export default async function CardPage({
                 sellerId: listing.seller_id,
               }}
               checkoutActive={sp.order === listing.id}
-              availableCreditCents={availableCreditCents}
               firstSalePending={firstSalePending}
             />
           ) : (

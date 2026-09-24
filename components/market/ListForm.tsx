@@ -86,7 +86,7 @@ export function ListForm({
       return;
     }
     if (needsCountry && !isValidCountryCode(selectedCountry)) {
-      setError("Select your country before listing — it decides whether you're paid in cash or FSC.");
+      setError("Select your country before listing — selling is Malaysia-only at launch.");
       return;
     }
     setError(null);

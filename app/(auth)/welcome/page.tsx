@@ -14,6 +14,10 @@ import { safeNextPath } from "@/app/(auth)/paths";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { WelcomeForm } from "@/components/auth/WelcomeForm";
 
+export const metadata = {
+  title: "Choose your username — FlexSoar",
+};
+
 function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }

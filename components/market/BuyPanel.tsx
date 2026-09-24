@@ -34,12 +34,6 @@ export interface BuyPanelProps {
   /** The listing this page returned from checkout for; poll it to settle. */
   checkoutActive: boolean;
   /**
-   * The viewer's spendable FSC (fn_credit_available, NOT the raw ledger
-   * balance — AGENT_RULES.md §5). Null when signed out; the field below is
-   * hidden in that case since there's nothing to spend yet.
-   */
-  availableCreditCents: number | null;
-  /**
    * True when the underlying item is still in the consignor's own custody
    * (items.custody = 'seller') — a first sale that hasn't reached the vault
    * yet. Buying this listing freezes the card until the shoe physically

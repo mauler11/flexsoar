@@ -1,7 +1,7 @@
 /**
  * components/market/SolanaBuyPanel.tsx
  *
- * Devnet USDC buy path: the server builds the unsigned `buy` transaction
+ * USDC buy path: the server builds the unsigned `buy` transaction
  * (GET /api/solana/build-tx — quote + ATAs + blockhash), the buyer's
  * embedded FlexSoar wallet signs AND broadcasts it, then POST
  * /api/solana/settle verifies balance deltas via Helius and records the

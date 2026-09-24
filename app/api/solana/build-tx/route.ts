@@ -2,7 +2,7 @@
  * app/api/solana/build-tx/route.ts — GET /api/solana/build-tx?listingId=
  *
  * One call that hands an injected wallet everything it needs to execute a
- * devnet buy: the HMAC quote (the number settle demands to the unit), the
+ * buy on the configured cluster: the HMAC quote (the number settle demands to the unit), the
  * deterministic ATAs, the config PDA, a fresh blockhash, and the UNSIGNED
  * buy transaction (base64) for the wallet to sign and send.
  *
