@@ -26,7 +26,9 @@ import { cn } from "@/components/ui/cn";
 export interface SidebarItem {
   href: string;
   label: string;
-  icon: "market" | "list" | "dashboard" | "payouts" | "profile" | "admin";
+  icon: "market" | "list" | "dashboard" | "payouts" | "profile" | "admin" | "shipments" | "settings";
+  /** Rail section label. Items render under their section's tiny header. */
+  section?: string;
 }
 
 export interface SidebarProps {
@@ -94,43 +96,84 @@ function Icon({ icon }: { icon: SidebarItem["icon"] }) {
           <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z" />
         </svg>
       );
+    case "shipments":
+      return (
+        <svg {...props}>
+          <rect x="1" y="5" width="14" height="10" rx="1.5" />
+          <path d="M15 9h4l3 3v3h-7V9z" />
+          <circle cx="5.5" cy="18" r="1.8" />
+          <circle cx="17.5" cy="18" r="1.8" />
+        </svg>
+      );
+    case "settings":
+      return (
+        <svg {...props}>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" />
+        </svg>
+      );
   }
 }
 
 export function Sidebar({ items }: SidebarProps) {
   const pathname = usePathname();
 
+  function renderItem(item: SidebarItem) {
+    const active = isActive(pathname, item.href);
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        aria-current={active ? "page" : undefined}
+        title={item.label}
+        className={cn(
+          "relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all",
+          active
+            ? "bg-gradient-to-r from-accent/20 via-accent/5 to-transparent font-semibold text-accent shadow-[0_0_24px_-8px_rgba(53,240,122,0.45)]"
+            : "text-muted hover:translate-x-px hover:bg-overlay hover:text-foreground",
+        )}
+      >
+        {active && (
+          <span
+            aria-hidden="true"
+            className="absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-accent shadow-[0_0_8px_1px_rgba(53,240,122,0.6)]"
+          />
+        )}
+        <Icon icon={item.icon} />
+        <span className="hidden lg:inline">{item.label}</span>
+      </Link>
+    );
+  }
+
+  // Consecutive items sharing a section render under one tiny header.
+  const groups: Array<{ section: string | null; items: SidebarItem[] }> = [];
+  for (const item of items) {
+    const last = groups[groups.length - 1];
+    if (last && last.section === (item.section ?? null)) {
+      last.items.push(item);
+    } else {
+      groups.push({ section: item.section ?? null, items: [item] });
+    }
+  }
+
   return (
     <nav
       aria-label="Primary"
-      className="sticky top-16 hidden h-[calc(100vh-4rem)] w-16 shrink-0 flex-col gap-1 self-start overflow-y-auto border-r border-line bg-raised/40 px-2 py-4 lg:flex lg:w-52 lg:px-3"
+      className="sticky top-16 hidden h-[calc(100vh-4rem)] w-16 shrink-0 flex-col gap-1 self-start overflow-y-auto border-r border-line bg-gradient-to-b from-raised/60 via-raised/40 to-transparent px-2 py-4 lg:flex lg:w-52 lg:px-3"
     >
-      {items.map((item) => {
-        const active = isActive(pathname, item.href);
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            aria-current={active ? "page" : undefined}
-            title={item.label}
-            className={cn(
-              "relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
-              active
-                ? "bg-gradient-to-r from-accent/20 via-accent/5 to-transparent font-semibold text-accent"
-                : "text-muted hover:bg-overlay hover:text-foreground",
-            )}
-          >
-            {active && (
-              <span
-                aria-hidden="true"
-                className="absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-accent"
-              />
-            )}
-            <Icon icon={item.icon} />
-            <span className="hidden lg:inline">{item.label}</span>
-          </Link>
-        );
-      })}
+      {groups.map((group, gi) => (
+        <div key={gi} className="flex flex-col gap-1">
+          {group.section && (
+            <span
+              aria-hidden="true"
+              className="hidden px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-[0.14em] text-muted/70 lg:block"
+            >
+              {group.section}
+            </span>
+          )}
+          {group.items.map(renderItem)}
+        </div>
+      ))}
 
       <ClubCard />
     </nav>

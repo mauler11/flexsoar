@@ -210,31 +210,13 @@ export default async function ProfilePage({
         />
       ) : (
         <ProfileTabs
-          collectionsCount={visibleLive.length + shownCollection.length}
-          activityCount={tradesVisible ? visibleTrades.length : 0}
-          collections={
-            <>
-              <section>
-                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-                  Live listings ({visibleLive.length})
-                </h2>
-                {visibleLive.length === 0 ? (
-                  <EmptyState
-                    title="Nothing listed"
-                    description="This account has no live listings right now."
-                  />
-                ) : (
-                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-                    {visibleLive.map((listing) => (
-                      <MarketTile
-                        key={listing.id}
-                        listing={listing}
-                        showNumericFloat={platformConfig.show_numeric_float}
-                      />
-                    ))}
-                  </div>
-                )}
-              </section>
+          tabs={[
+            {
+              id: "collections",
+              label: "Collections",
+              count: shownCollection.length,
+              content: (
+                <>
               <section>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">
@@ -274,9 +256,44 @@ export default async function ProfilePage({
                   </div>
                 )}
               </section>
-            </>
-          }
-          activity={
+                </>
+              ),
+            },
+            {
+              id: "listings",
+              label: "Listings",
+              count: visibleLive.length,
+              content: (
+                <>
+                  <section>
+                    <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                      Live listings ({visibleLive.length})
+                    </h2>
+                    {visibleLive.length === 0 ? (
+                      <EmptyState
+                        title="Nothing listed"
+                        description="This account has no live listings right now."
+                      />
+                    ) : (
+                      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                        {visibleLive.map((listing) => (
+                          <MarketTile
+                            key={listing.id}
+                            listing={listing}
+                            showNumericFloat={platformConfig.show_numeric_float}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                </>
+              ),
+            },
+            {
+              id: "activity",
+              label: "Activity",
+              count: tradesVisible ? visibleTrades.length : 0,
+              content: (
             tradesVisible ? (
               <section>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -342,8 +359,9 @@ export default async function ProfilePage({
                 title="Trade history is private"
                 description="This seller keeps their trading activity hidden."
               />
-            )
-          }
+              )),
+            },
+          ]}
         />
       )}
 

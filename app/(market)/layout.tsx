@@ -158,14 +158,16 @@ export default async function MarketLayout({
   }
 
   const sidebarItems: SidebarItem[] = [
-    { href: "/market", label: "Market", icon: "market" },
-    { href: "/list", label: "List", icon: "list" },
-    { href: "/payouts", label: "Payouts", icon: "payouts" },
+    { href: "/market", label: "Market", icon: "market", section: "Trade" },
+    { href: "/list", label: "List", icon: "list", section: "Trade" },
+    { href: "/shipments", label: "Shipments", icon: "shipments", section: "Trade" },
+    { href: "/payouts", label: "Payouts", icon: "payouts", section: "Money" },
     ...(me
-      ? [{ href: `/u/${me.handle}`, label: "Profile", icon: "profile" as const }]
-      : [{ href: "/sign-in", label: "Profile", icon: "profile" as const }]),
+      ? [{ href: `/u/${me.handle}`, label: "Profile", icon: "profile" as const, section: "You" }]
+      : [{ href: "/sign-in", label: "Profile", icon: "profile" as const, section: "You" }]),
+    { href: "/settings", label: "Settings", icon: "settings", section: "You" },
     ...(me?.is_admin
-      ? [{ href: "/admin", label: "Admin", icon: "admin" as const }]
+      ? [{ href: "/admin", label: "Admin", icon: "admin" as const, section: "Ops" }]
       : []),
   ];
 
