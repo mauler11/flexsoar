@@ -153,14 +153,13 @@ You may redeem any active Card you hold. Redemption destroys the Card permanentl
 When your Card sells, your proceeds — the sale price less our commission and any accrued storage fee — become an amount owed to you by FlexSoar.
 
 - Proceeds are shown as owed to you, with the date they will be sent
-- They are not a balance, not credit, and cannot be spent on FlexSoar. To buy something, you pay for it like any other buyer
 - Payment is held for 7 days after the sale, so that a cancelled or disputed transaction can be unwound before money leaves
-- After that, we send payment on our regular payout schedule
-- Payment is made by our payment provider
+- After that, we send payment automatically in USDC on Solana, to the wallet you linked. Your wallet signs nothing for this — it is a straight transfer to your address
+- Once paid, the funds are yours: keep them, move them, or spend them on FlexSoar like any other buyer
+
+Bank payouts to a bank account are not currently offered. If we bring them back, we will ask you to complete a one-time verification before your first withdrawal — selling and buying never require it.
 
 **We can only pay sellers in countries our payout provider supports.** If we cannot pay you, you cannot list or sell — we will tell you before you try, not after. This is a limitation of international payment infrastructure, not a choice about who we want as sellers, and we are working to widen it.
-
-We do not hold funds for you, we do not offer an account balance, and there is no withdrawal request — money owed to you is sent automatically.
 
 ## 11. Grading and authentication
 

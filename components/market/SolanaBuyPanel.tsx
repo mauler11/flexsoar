@@ -176,7 +176,7 @@ export function SolanaBuyPanel({
               ? "Confirm in wallet…"
               : phase === "settling"
                 ? "Settling…"
-                : "Buy with Balance"}
+                : "Buy"}
         </Button>
       )}
       {error && (

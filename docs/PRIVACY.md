@@ -31,7 +31,7 @@ This notice explains what we collect, why, who we share it with, and what you ca
 
 **When you buy or sell**
 - Transaction records: what, when, how much
-- Payment status. We never see or store your card number — payments are handled by our payment provider and card details go directly to them
+- Payment status. Purchases settle in USDC on the Solana blockchain — there are no card payments right now, and we never see or store card numbers
 - Amounts we owe you and payment records
 - If you link a crypto wallet for payouts, your public wallet address. Sale proceeds can be paid in USDC to that address; the address is stored with your account, and transfers on the Solana blockchain are public by design
 
@@ -82,7 +82,7 @@ We use these services, and your data passes through them:
 | Supabase | Account and transaction data — our database and sign-in | Singapore |
 | Vercel | Site hosting; technical request data | Global |
 | Cloudflare R2 | Photographs you upload | Global |
-| Stripe | Payment data for purchases | Global |
+| Stripe | Dormant while card checkout is paused — no payment data flows through it | Global |
 | Solana blockchain | Wallet addresses and USDC payout transfers — this is a public ledger, visible to anyone by design | Global |
 | Resend | Email address and message content, to send you service emails | Global |
 | Couriers (J&T, Lalamove, others) | Name, address and contact, to deliver parcels | Malaysia and destination country |
@@ -182,7 +182,7 @@ Notis ini menerangkan apa yang kami kumpulkan, mengapa, dengan siapa kami berkon
 
 **Apabila anda membeli atau menjual**
 - Rekod transaksi: apa, bila, berapa
-- Status pembayaran. Kami tidak pernah melihat atau menyimpan nombor kad anda — pembayaran dikendalikan oleh penyedia pembayaran kami dan butiran kad dihantar terus kepada mereka
+- Status pembayaran. Pembelian diselesaikan dalam USDC di rantaian blok Solana — tiada pembayaran kad buat masa ini, dan kami tidak pernah melihat atau menyimpan nombor kad
 - Jumlah yang kami hutang kepada anda dan rekod pembayaran
 - Jika anda memautkan dompet kripto untuk pembayaran, alamat dompet awam anda. Hasil jualan boleh dibayar dalam USDC ke alamat tersebut; alamat itu disimpan bersama akaun anda, dan pemindahan di rantaian blok Solana bersifat awam mengikut reka bentuknya
 
@@ -233,7 +233,7 @@ Kami menggunakan perkhidmatan berikut, dan data anda melaluinya:
 | Supabase | Data akaun dan transaksi — pangkalan data dan log masuk kami | Singapura |
 | Vercel | Pengehosan laman; data permintaan teknikal | Global |
 | Cloudflare R2 | Gambar yang anda muat naik | Global |
-| Stripe | Data pembayaran bagi pembelian | Global |
+| Stripe | Tidak aktif selagi pembayaran kad digantung — tiada data pembayaran melaluinya | Global |
 | Rantaian blok Solana | Alamat dompet dan pemindahan pembayaran USDC — ini adalah lejar awam yang boleh dilihat oleh sesiapa sahaja mengikut reka bentuknya | Global |
 | Resend | Alamat e-mel dan kandungan mesej, untuk menghantar e-mel perkhidmatan | Global |
 | Kurier (J&T, Lalamove, dan lain-lain) | Nama, alamat dan butiran perhubungan, untuk menghantar bungkusan | Malaysia dan negara destinasi |

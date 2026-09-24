@@ -1,17 +1,15 @@
 /**
  * components/market/WalletMenu.tsx
  *
- * Header wallet button + modal (frontend prototype of the embedded-wallet
- * UX, Polymarket-arranged, dark theme kept): balance display sits left of
- * the button in the header (WalletBalance); the button opens a modal with
- * Overview / Settings tabs, a Deposit sub-view (currency + network shown
- * as FIXED rows — USDC on Solana is what the backend settles, so a
- * selector would fake a choice that doesn't exist), and no QR code.
- * No "Buy Crypto" on-ramp: there is none, and a dead button is worse than
- * a missing one. Every number shown is REAL (GET /api/solana/balances);
- * nothing here is mocked. Address provisioning for new users (embedded
- * key management) and any SOL-vs-USDC settlement change are backend
- * decisions explicitly out of scope — see docs/handoff/market.md.
+ * Header wallet button + modal: balance hero up top, then a deposit
+ * method list (Courtyard-arranged — one row per real rail, expanding
+ * inline). Rows are honest: only rails that actually run render.
+ * Transfer Crypto is the plain deposit address (USDC on Solana is what
+ * the backend settles); Deposit with Card is the Privy funding flow
+ * (flag-gated — the row hides with the flag). No QR code (no QR dep
+ * installed; the address + copy covers it), no exchange/cash-app rows
+ * (region-specific), no promo rows. Every number shown is REAL
+ * (GET /api/solana/balances); nothing here is mocked.
  */
 "use client";
 
@@ -101,7 +99,7 @@ function FiatBalance({
           ))}
         </select>
       )}
-      <span className="text-2xl font-bold tabular-nums tracking-tight">
+      <span className="text-3xl font-extrabold tabular-nums tracking-tight">
         {fiat ? (
           <>{fiat.text}</>
         ) : (
@@ -124,10 +122,10 @@ function FiatBalance({
 }
 
 /**
- * Deposit tab: balance figure plus one green Add Funds button that opens
- * the funding rails directly — a single button, never a button behind a
- * button. With the rails flag off, FundingOptions renders nothing and the
- * plain transfer address shows instead (same address, zero new machinery).
+ * Deposit tab: balance hero plus a Courtyard-style method list — one row
+ * per rail that actually runs, expanding inline. Transfer Crypto is the
+ * deposit address; Deposit with Card is the Privy funding flow (the row
+ * only renders past the funding flag, so a dead row never shows).
  */
 function DepositTab({
   wallet,
@@ -140,7 +138,9 @@ function DepositTab({
   solLamports: number;
   fx: Record<string, number> | null;
 }) {
+  const [openRow, setOpenRow] = useState<"crypto" | "card" | null>(null);
   const [copied, setCopied] = useState(false);
+  const cardRailLive = isPrivyCheckoutEnabled();
 
   async function copy() {
     try {
@@ -152,6 +152,10 @@ function DepositTab({
     }
   }
 
+  function toggle(row: "crypto" | "card") {
+    setOpenRow((cur) => (cur === row ? null : row));
+  }
+
   return (
     <>
       <FiatBalance
@@ -160,30 +164,108 @@ function DepositTab({
         fx={fx}
         controls={false}
       />
-      <FundingOptions address={wallet} />
-      <p className="text-[11px] leading-snug text-muted">
-        No USDC? You can still pay by card at checkout — funding first is
-        optional, not required.
-      </p>
-      {!isPrivyCheckoutEnabled() && (
-        <div className="flex flex-col gap-1">
-          <span className="text-[11px] text-muted">
-            Or send USDC on Solana to this address from any wallet or exchange.
-          </span>
-          <div className="flex items-stretch gap-2">
-            <span className="min-w-0 flex-1 break-all rounded-xl border border-line-strong bg-background px-3 py-2 font-mono text-xs">
-              {wallet}
+      <div className="flex flex-col gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+          Add funds
+        </span>
+
+        <div className="overflow-hidden rounded-2xl border border-line bg-background">
+          <button
+            type="button"
+            onClick={() => toggle("crypto")}
+            aria-expanded={openRow === "crypto"}
+            className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-raised/60"
+          >
+            <span
+              aria-hidden
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M7 16V4" />
+                <path d="M7 4 3 8" />
+                <path d="M7 4l4 4" />
+                <path d="M17 8v12" />
+                <path d="M17 20l4-4" />
+                <path d="M17 20l-4-4" />
+              </svg>
             </span>
+            <span className="flex flex-1 flex-col">
+              <span className="text-sm font-semibold">Transfer Crypto</span>
+              <span className="text-[11px] text-muted">
+                USDC on Solana · No limit · Instant
+              </span>
+            </span>
+            <span
+              aria-hidden
+              className={`text-muted transition-transform ${openRow === "crypto" ? "rotate-90" : ""}`}
+            >
+              ›
+            </span>
+          </button>
+          {openRow === "crypto" && (
+            <div className="flex flex-col gap-2 border-t border-line px-3 py-3">
+              <span className="text-[11px] text-muted">
+                Send USDC on Solana to this address from any wallet or
+                exchange. USDC only — anything else gets stuck.
+              </span>
+              <div className="flex items-stretch gap-2">
+                <span className="min-w-0 flex-1 break-all rounded-xl border border-line-strong bg-raised px-3 py-2 font-mono text-xs">
+                  {wallet}
+                </span>
+                <button
+                  type="button"
+                  onClick={copy}
+                  className="shrink-0 rounded-xl border border-line-strong bg-raised px-3 text-xs font-semibold transition hover:border-muted"
+                >
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {cardRailLive && (
+          <div className="overflow-hidden rounded-2xl border border-line bg-background">
             <button
               type="button"
-              onClick={copy}
-              className="shrink-0 rounded-xl border border-line-strong bg-background px-3 text-xs font-semibold transition hover:border-muted"
+              onClick={() => toggle("card")}
+              aria-expanded={openRow === "card"}
+              className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-raised/60"
             >
-              {copied ? "Copied" : "Copy"}
+              <span
+                aria-hidden
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="5" width="20" height="14" rx="2" />
+                  <path d="M2 10h20" />
+                </svg>
+              </span>
+              <span className="flex flex-1 flex-col">
+                <span className="text-sm font-semibold">Deposit with Card</span>
+                <span className="text-[11px] text-muted">
+                  Visa · Mastercard · lands as USDC
+                </span>
+              </span>
+              <span
+                aria-hidden
+                className={`text-muted transition-transform ${openRow === "card" ? "rotate-90" : ""}`}
+              >
+                ›
+              </span>
             </button>
+            {openRow === "card" && (
+              <div className="border-t border-line px-3 py-3">
+                <FundingOptions address={wallet} />
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
+      <p className="text-[11px] leading-snug text-muted">
+        Card buys land in this wallet first (minutes, provider-dependent) —
+        then you buy with your balance.
+      </p>
     </>
   );
 }

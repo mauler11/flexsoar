@@ -122,9 +122,14 @@ export default async function PayoutsPage() {
   const overview = await getPayoutOverview(me);
   const connected =
     connectStatus.payoutsEnabled && connectStatus.accountId != null;
+  // Bank cash-out is PAUSED (wallet-only decision): Connect onboarding is a
+  // dead end while no cash can flow, so the setup button stays hidden until
+  // this flips back. Existing connections render as-is, harmless.
+  const cashPayoutsPaused = true;
   // Progressive onboarding: the Connect wall only becomes the hero when
   // there is actually money waiting to cash out.
-  const cashoutReady = !connected && overview.availableCents > 0;
+  const cashoutReady =
+    !cashPayoutsPaused && !connected && overview.availableCents > 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -164,7 +169,7 @@ export default async function PayoutsPage() {
         )}
       </section>
 
-      {/* Connect Payout Setup */}
+      {/* Connect Payout Setup — paused while wallet-only. */}
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-bold tracking-tight text-foreground">
           {connected
@@ -173,40 +178,49 @@ export default async function PayoutsPage() {
               ? `Cash out ${formatRm(overview.availableCents)}`
               : "Cashing out (when you're ready)"}
         </h2>
-        {cashoutReady && (
+        {cashPayoutsPaused && !connected ? (
           <p className="text-[12px] leading-snug text-muted">
-            You have money waiting. Cashing out to a bank needs a one-time
-            Stripe verification (~2 minutes) — after that, payouts are
-            automatic.
+            Bank cash-out is paused — sale proceeds go straight to your
+            linked wallet in USDC. Nothing to set up here.
           </p>
-        )}
-        {!connected && !cashoutReady && (
-          <p className="text-[12px] leading-snug text-muted">
-            Bank payouts need a one-time Stripe verification, and only when
-            you withdraw. Skip it for now —{" "}
-            {connectStatus.isConsignor ? (
-              "it'll be waiting here when you've sold."
-            ) : (
-              <>
-                <Link href="/list" className="text-accent hover:underline">
-                  list your first shoe
-                </Link>{" "}
-                instead.
-              </>
+        ) : (
+          <>
+            {cashoutReady && (
+              <p className="text-[12px] leading-snug text-muted">
+                You have money waiting. Cashing out to a bank needs a
+                one-time Stripe verification (~2 minutes) — after that,
+                payouts are automatic.
+              </p>
             )}
-          </p>
+            {!connected && !cashoutReady && (
+              <p className="text-[12px] leading-snug text-muted">
+                Bank payouts need a one-time Stripe verification, and only
+                when you withdraw. Skip it for now —{" "}
+                {connectStatus.isConsignor ? (
+                  "it'll be waiting here when you've sold."
+                ) : (
+                  <>
+                    <Link href="/list" className="text-accent hover:underline">
+                      list your first shoe
+                    </Link>{" "}
+                    instead.
+                  </>
+                )}
+              </p>
+            )}
+            <PayoutSetup
+              accountId={connectStatus.accountId}
+              payoutsEnabled={connectStatus.payoutsEnabled}
+              isConsignor={connectStatus.isConsignor}
+              countryCode={connectStatus.countryCode}
+              ctaLabel={
+                cashoutReady
+                  ? `Cash out ${formatRm(overview.availableCents)}`
+                  : undefined
+              }
+            />
+          </>
         )}
-        <PayoutSetup
-          accountId={connectStatus.accountId}
-          payoutsEnabled={connectStatus.payoutsEnabled}
-          isConsignor={connectStatus.isConsignor}
-          countryCode={connectStatus.countryCode}
-          ctaLabel={
-            cashoutReady
-              ? `Cash out ${formatRm(overview.availableCents)}`
-              : undefined
-          }
-        />
       </section>
 
       {/* USDC payout wallet — the ONLY seller-side link path. Sellers never

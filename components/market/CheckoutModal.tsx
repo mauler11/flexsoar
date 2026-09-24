@@ -1,22 +1,19 @@
 /**
  * components/market/CheckoutModal.tsx
  *
- * Single-Buy-Now checkout popup (Courtyard-arranged): payment-method radio
- * on the left, order summary with the action on the right. The buyer pays
- * the total, full stop — the platform fee is a seller-side matter (the 5%
- * splits FROM the total on-chain, seller nets 95%) and is deliberately not
- * shown here, so the summary states only what the buyer owes.
+ * Single-Buy-Now checkout popup: order summary with the wallet action on
+ * the right. Wallet-only by decision — the Stripe card path is parked
+ * (backend dormant, re-addable), so there is no payment-method radio. The
+ * buyer pays the total in USDC on Solana, full stop — the platform fee is
+ * a seller-side matter (the 5% splits FROM the total on-chain, seller nets
+ * 95%) and is deliberately not shown here.
  *
- *   - Card → existing Stripe checkout redirect (the only true one-step
- *     card payment; raw PANs never touch our UI — PCI stays with Stripe).
- *   - Wallet → the proven USDC balance flow inline ("Buy with Balance").
- *     Short balance opens top-up instead of dying: the Privy funding rails
- *     (flag-gated) or the plain deposit address otherwise.
+ * Short balance opens top-up instead of dying: the Privy funding rails
+ * (flag-gated) or the plain deposit address otherwise.
  */
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
-import { createCheckoutAction } from "@/app/(market)/actions";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Banner } from "@/components/market/Banner";
 import { Modal } from "@/components/market/Modal";
@@ -31,8 +28,6 @@ import type { BuyPanelListing } from "./BuyPanel";
 export interface BuyModalProps {
   listing: BuyPanelListing;
 }
-
-type Method = "card" | "wallet";
 
 interface WalletState {
   wallet: string;
@@ -51,7 +46,7 @@ export function CheckoutButton({ listing }: BuyModalProps) {
         onClick={() => setOpen(true)}
         className="py-3 text-base"
       >
-        Buy Now
+        Buy
       </Button>
       {open && (
         <Modal onClose={() => setOpen(false)} closeLabel="Close checkout" panelClassName="max-w-2xl">
@@ -63,8 +58,6 @@ export function CheckoutButton({ listing }: BuyModalProps) {
 }
 
 export function CheckoutModal({ listing, onClose }: { listing: BuyPanelListing; onClose: () => void }) {
-  const [method, setMethod] = useState<Method>("wallet");
-  const [pending, startTransition] = useTransition();
   const [wallet, setWallet] = useState<WalletState | null>(null);
   const { rates } = useFiat();
 
@@ -100,10 +93,6 @@ export function CheckoutModal({ listing, onClose }: { listing: BuyPanelListing; 
   const shortfall =
     wallet != null && totalUnits != null && wallet.usdcUnits < totalUnits;
 
-  function checkoutCard() {
-    startTransition(() => createCheckoutAction(listing.id, 0));
-  }
-
   return (
     <div className="flex flex-col gap-4 p-5 sm:p-6">
       <div className="flex items-center justify-between">
@@ -120,57 +109,21 @@ export function CheckoutModal({ listing, onClose }: { listing: BuyPanelListing; 
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="flex flex-col gap-3">
-          <h3 className="text-sm font-bold tracking-tight">Payment Method</h3>
-          <div
-            role="radiogroup"
-            aria-label="Payment method"
-            className="flex flex-col gap-2 rounded-2xl border border-line bg-background p-2"
-          >
-            <button
-              type="button"
-              role="radio"
-              aria-checked={method === "card"}
-              onClick={() => setMethod("card")}
-              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
-                method === "card" ? "bg-raised" : "hover:bg-raised/60"
-              }`}
-            >
-              <span
-                aria-hidden
-                className={`flex h-4 w-4 items-center justify-center rounded-full border-2 ${
-                  method === "card" ? "border-accent" : "border-muted"
-                }`}
-              >
-                {method === "card" && <span className="h-2 w-2 rounded-full bg-accent" />}
+          <h3 className="text-sm font-bold tracking-tight">Payment</h3>
+          <div className="flex items-center gap-3 rounded-2xl border border-line bg-background px-3 py-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-raised text-sm font-extrabold text-accent">
+              $
+            </span>
+            <div className="flex flex-1 flex-col">
+              <span className="text-sm font-semibold">Wallet (USDC)</span>
+              <span className="tabular-nums text-[11px] text-muted">
+                {wallet ? `${formatUsdc(wallet.usdcUnits)} USDC available` : "USDC on Solana"}
               </span>
-              Card (Stripe)
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={method === "wallet"}
-              onClick={() => setMethod("wallet")}
-              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
-                method === "wallet" ? "bg-raised" : "hover:bg-raised/60"
-              }`}
-            >
-              <span
-                aria-hidden
-                className={`flex h-4 w-4 items-center justify-center rounded-full border-2 ${
-                  method === "wallet" ? "border-accent" : "border-muted"
-                }`}
-              >
-                {method === "wallet" && <span className="h-2 w-2 rounded-full bg-accent" />}
-              </span>
-              <span className="flex-1">Wallet (USDC)</span>
-              <span className="tabular-nums text-muted">
-                {wallet ? `${formatUsdc(wallet.usdcUnits)} USDC` : "—"}
-              </span>
-            </button>
+            </div>
           </div>
           <p className="text-[11px] leading-snug text-muted">
-            Card pays by Stripe redirect. Wallet settles USDC on-chain —
-            no card fees, same total either way.
+            Settles USDC on Solana — your wallet signs, FlexSoar never
+            touches the keys. No USDC yet? Top up below, then buy.
           </p>
         </div>
 
@@ -190,17 +143,7 @@ export function CheckoutModal({ listing, onClose }: { listing: BuyPanelListing; 
             </div>
           </div>
 
-          {method === "card" ? (
-            <Button
-              type="button"
-              size="lg"
-              disabled={pending}
-              onClick={checkoutCard}
-              className="py-3 text-base"
-            >
-              {pending ? "Redirecting…" : "Buy now"}
-            </Button>
-          ) : wallet ? (
+          {wallet ? (
             shortfall ? (
               <div className="flex flex-col gap-2">
                 <Banner tone="warn" title="Insufficient balance">
