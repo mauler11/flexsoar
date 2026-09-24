@@ -33,6 +33,7 @@ This notice explains what we collect, why, who we share it with, and what you ca
 - Transaction records: what, when, how much
 - Payment status. We never see or store your card number — payments are handled by our payment provider and card details go directly to them
 - Amounts we owe you and payment records
+- If you link a crypto wallet for payouts, your public wallet address. Sale proceeds can be paid in USDC to that address; the address is stored with your account, and transfers on the Solana blockchain are public by design
 
 **When you redeem a Card**
 - Your shipping address
@@ -82,6 +83,7 @@ We use these services, and your data passes through them:
 | Vercel | Site hosting; technical request data | Global |
 | Cloudflare R2 | Photographs you upload | Global |
 | Stripe | Payment data for purchases | Global |
+| Solana blockchain | Wallet addresses and USDC payout transfers — this is a public ledger, visible to anyone by design | Global |
 | Resend | Email address and message content, to send you service emails | Global |
 | Couriers (J&T, Lalamove, others) | Name, address and contact, to deliver parcels | Malaysia and destination country |
 | Google LLC | Name, email address, and profile picture, but only when you use "Continue with Google" — identity verification for sign-in | Global |
@@ -182,6 +184,7 @@ Notis ini menerangkan apa yang kami kumpulkan, mengapa, dengan siapa kami berkon
 - Rekod transaksi: apa, bila, berapa
 - Status pembayaran. Kami tidak pernah melihat atau menyimpan nombor kad anda — pembayaran dikendalikan oleh penyedia pembayaran kami dan butiran kad dihantar terus kepada mereka
 - Jumlah yang kami hutang kepada anda dan rekod pembayaran
+- Jika anda memautkan dompet kripto untuk pembayaran, alamat dompet awam anda. Hasil jualan boleh dibayar dalam USDC ke alamat tersebut; alamat itu disimpan bersama akaun anda, dan pemindahan di rantaian blok Solana bersifat awam mengikut reka bentuknya
 
 **Apabila anda menebus Kad**
 - Alamat penghantaran anda
@@ -231,6 +234,7 @@ Kami menggunakan perkhidmatan berikut, dan data anda melaluinya:
 | Vercel | Pengehosan laman; data permintaan teknikal | Global |
 | Cloudflare R2 | Gambar yang anda muat naik | Global |
 | Stripe | Data pembayaran bagi pembelian | Global |
+| Rantaian blok Solana | Alamat dompet dan pemindahan pembayaran USDC — ini adalah lejar awam yang boleh dilihat oleh sesiapa sahaja mengikut reka bentuknya | Global |
 | Resend | Alamat e-mel dan kandungan mesej, untuk menghantar e-mel perkhidmatan | Global |
 | Kurier (J&T, Lalamove, dan lain-lain) | Nama, alamat dan butiran perhubungan, untuk menghantar bungkusan | Malaysia dan negara destinasi |
 | Google LLC | Nama, alamat e-mel, dan gambar profil, tetapi hanya apabila anda menggunakan "Continue with Google" — pengesahan identiti untuk log masuk | Global |
