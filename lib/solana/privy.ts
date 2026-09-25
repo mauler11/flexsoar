@@ -29,6 +29,68 @@ export const SOLANA_CHAIN =
   process.env.NEXT_PUBLIC_SOLANA_CHAIN?.trim() || 'solana:devnet';
 
 /**
+ * Public (keyless) RPC for client-side broadcast, derived from the same
+ * chain const above — never the Helius key (server-only). Used only by
+ * the injected-wallet path, which signs locally and must broadcast
+ * itself (Privy's embedded wallets broadcast over their own connection).
+ * Mainnet public RPC is rate-limited; fine for rehearsal-scale buys.
+ */
+export function publicRpcUrl(): string {
+  return SOLANA_CHAIN === 'solana:devnet'
+    ? 'https://api.devnet.solana.com'
+    : 'https://api.mainnet-beta.solana.com';
+}
+
+/**
+ * Injected Solana provider (Phantom and wallet-standard extensions)
+ * narrowed structurally — same unknown-and-narrow discipline as the
+ * Privy adapters above. Only what the buy flow needs: an optional
+ * connect, the current account, and sign-only (we broadcast ourselves
+ * over publicRpcUrl so the transaction lands on OUR cluster even if the
+ * extension is pointed elsewhere).
+ */
+export interface InjectedSolanaSigner {
+  /** Base58 account, or '' when locked / never connected. */
+  publicKeyText: string;
+  connect: () => Promise<unknown>;
+  signTransaction: (tx: unknown) => Promise<unknown>;
+}
+
+export function getInjectedSolana(): unknown {
+  if (typeof window === "undefined") return null;
+  return (window as unknown as Record<string, unknown>)["solana"] ?? null;
+}
+
+export function asInjectedSolanaSigner(candidate: unknown): InjectedSolanaSigner | null {
+  if (typeof candidate !== 'object' || candidate === null) return null;
+  const record = candidate as Record<string, unknown>;
+  if (typeof record['signTransaction'] !== 'function') return null;
+  const pk = record['publicKey'];
+  let text = '';
+  if (typeof pk === 'string' && pk.length > 0) {
+    text = pk;
+  } else if (pk !== null && typeof pk === 'object') {
+    const toBase58 = (pk as Record<string, unknown>)['toBase58'];
+    if (typeof toBase58 === 'function') {
+      try {
+        const out = (toBase58 as () => unknown).call(pk);
+        if (typeof out === 'string') text = out;
+      } catch {
+        text = '';
+      }
+    }
+  }
+  return {
+    publicKeyText: text,
+    connect:
+      typeof record['connect'] === 'function'
+        ? (record['connect'] as () => Promise<unknown>)
+        : async () => {},
+    signTransaction: record['signTransaction'] as (tx: unknown) => Promise<unknown>,
+  };
+}
+
+/**
  * Parked Privy funding rails (method-picker deposits + card on-ramp).
  * Nothing below runs unless NEXT_PUBLIC_ENABLE_PRIVY_CHECKOUT === '1':
  * the current buy/deposit flows stay live until funding proves in sandbox.

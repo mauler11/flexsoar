@@ -14,8 +14,10 @@
  */
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
+import { useCreateWallet as useCreateSolanaWallet } from "@privy-io/react-auth/solana";
 import { Button } from "@/components/ui/Button";
 import { LinkWalletButton } from "./LinkWalletButton";
 import { extractSignatureBytes, firstSolanaWallet } from "@/lib/solana/privy";
@@ -55,8 +57,10 @@ function EmbeddedWalletSectionInner() {
     return (
       <div className="flex flex-col gap-2 rounded-xl border border-line bg-background p-3">
         <p className="text-[11px] leading-snug text-muted">
-          Signed in — minting your embedded wallet, a few seconds…
+          Signed in, but no Solana wallet came with this login — create one
+          now (kept by you, never by FlexSoar).
         </p>
+        <CreateWalletButton />
         <button
           type="button"
           onClick={() => logout()}
@@ -88,6 +92,79 @@ function EmbeddedWalletSectionInner() {
           },
         }}
       />
+    </div>
+  );
+}
+
+/**
+ * One-line session inventory for the stuck case: what Privy actually
+ * returned (chain + client type + truncated address), so a mismatch
+ * between dashboard truth and session truth is visible without devtools.
+ * Unknown shapes render as `unknown` — never throws on new wallet kinds.
+ */
+function describeSessionWallet(candidate: unknown): string {
+  if (typeof candidate !== "object" || candidate === null) return "unknown";
+  const record = candidate as Record<string, unknown>;
+  const chain = typeof record["chainType"] === "string" ? record["chainType"] : "?";
+  const kind =
+    typeof record["walletClientType"] === "string"
+      ? record["walletClientType"]
+      : typeof record["connectorType"] === "string"
+        ? record["connectorType"]
+        : "?";
+  const address =
+    typeof record["address"] === "string" && record["address"].length > 10
+      ? `${record["address"].slice(0, 4)}…${record["address"].slice(-4)}`
+      : "?";
+  return `${chain}/${kind}/${address}`;
+}
+
+/**
+ * Manual embedded-wallet creation for the stuck case: signed in, but
+ * `createOnLogin: users-without-wallets` skipped provisioning (the Privy
+ * user already holds some other wallet). Calls the Solana submodule's
+ * hook — NOT the package root's, which mints Ethereum. Errors if a
+ * Solana embedded wallet already exists, which itself is diagnostic.
+ * The wallets list refreshes through context, so parents flip into the
+ * link flow with no reload.
+ */
+export function CreateWalletButton() {
+  const { createWallet } = useCreateSolanaWallet();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function create() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await createWallet();
+    } catch (thrown) {
+      setError(
+        thrown instanceof Error ? thrown.message : "Wallet creation failed.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Button
+        type="button"
+        variant="secondary"
+        size="md"
+        disabled={busy}
+        onClick={create}
+        className="rounded-lg"
+      >
+        {busy ? "Creating wallet…" : "Create FlexSoar wallet"}
+      </Button>
+      {error && (
+        <p role="alert" className="text-[11px] leading-snug text-[#FF4444]">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -146,9 +223,15 @@ function EmbeddedLinkButtonInner({
   const embedded = firstSolanaWallet(wallets);
   if (!embedded) {
     return (
-      <p className="text-[11px] text-muted">
-        Signed in — minting your wallet, a few seconds…
-      </p>
+      <div className="flex flex-col gap-2">
+        <p className="text-[11px] text-muted">
+          Signed in, but no Solana wallet came with this login.
+        </p>
+        <CreateWalletButton />
+        <p className="font-mono text-[10px] text-muted">
+          session wallets: {wallets.length === 0 ? "none" : wallets.map(describeSessionWallet).join(" · ")}
+        </p>
+      </div>
     );
   }
   return (

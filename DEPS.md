@@ -61,6 +61,23 @@ Still needed for the R2 photo upload (see docs/handoff/admin.md):
   refuses to run without it, since a photo with no public URL can never be
   displayed or saved.
 
+### Outstanding (2026-09-25) — Privy solana submodule peer
+
+Adopted `@privy-io/react-auth/solana` (`useCreateWallet` for manual
+embedded-wallet creation, `components/market/EmbeddedWalletSection.tsx`).
+Its ESM graph imports `@solana-program/memo`, which is not installed —
+dev server fails resolving `solana.mjs` until it exists. Human installs
+(`package.json` untouched per AGENT_RULES.md):
+
+- `@solana-program/memo@0.10.0` — run
+  `npm install @solana-program/memo@0.10.0`, then restart `npm run dev`.
+  Pinned, not `^`: latest (0.15) demands `@solana/kit@^8` and breaks
+  resolution against the tree's kit 5.5.1; 0.10.0 peers kit `^5.0`.
+  (`@solana/kit`, `@solana-program/system`, `@solana-program/token`
+  already resolve; only `memo` is missing.) Must also be in
+  `package.json` before the commit carrying the submodule import is
+  pushed, or Vercel builds fail the same way.
+
 ### Privy embedded wallets (Phase B — Courtyard play, human installs)
 
 Requested package (human installs — `package.json` untouched per AGENT_RULES.md):
