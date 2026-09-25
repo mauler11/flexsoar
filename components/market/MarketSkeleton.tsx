@@ -39,7 +39,7 @@ export function FeaturedSkeleton() {
   return (
     <section
       aria-hidden
-      className="grid overflow-hidden rounded-2xl border border-line-strong bg-black sm:grid-cols-2"
+      className="grid overflow-hidden rounded-2xl border border-line-strong bg-raised sm:grid-cols-2"
     >
       <div className="flex flex-col items-start justify-center gap-2 p-4 sm:p-6">
         <div className="h-5 w-20 animate-pulse rounded-md bg-line" />

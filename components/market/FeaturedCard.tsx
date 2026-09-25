@@ -30,7 +30,7 @@ export function FeaturedCard({ listing }: FeaturedCardProps) {
   return (
     <section
       aria-label="Featured listing"
-      className="grid overflow-hidden rounded-2xl border border-line-strong bg-black sm:grid-cols-2"
+      className="grid overflow-hidden rounded-2xl border border-line-strong bg-raised sm:grid-cols-2"
     >
       <div className="flex flex-col items-start justify-center gap-2 p-4 sm:p-6">
         <span className="rounded-md border border-accent/60 px-2 py-0.5 text-[11px] font-bold uppercase tracking-widest text-accent">
@@ -61,7 +61,7 @@ export function FeaturedCard({ listing }: FeaturedCardProps) {
         </div>
         <Link
           href={`/card/${listing.card_id}`}
-          className="mt-3 inline-flex items-center justify-center rounded-md bg-white px-6 py-3 text-sm font-bold text-black transition hover:bg-white/90"
+          className="mt-3 inline-flex items-center justify-center rounded-md bg-foreground px-6 py-3 text-sm font-bold text-background transition hover:brightness-125"
         >
           View details →
         </Link>

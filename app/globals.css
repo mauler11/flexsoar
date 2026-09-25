@@ -17,6 +17,12 @@
   color-scheme: dark;
   --background: #070a09;
   --foreground: #f2f5f3;
+  --raised: #0e1512;
+  --overlay: #000000;
+  --line: #1c2622;
+  --line-strong: #2b3a33;
+  --muted: #8fa39a;
+  --accent: #4dff88;
 }
 
 /*
@@ -24,9 +30,10 @@
  * the Settings toggle, which sets `.theme-light` on <html> and persists
  * to localStorage. Pure variable override — removing the toggle restores
  * dark-only with zero residue. Utilities reference these vars (see
- * @theme inline below), so flipping values re-themes every token
- * consumer. Hardcoded dark surfaces (photo scrims, modal veils) stay
- * dark on purpose — overlays are supposed to darken.
+ * @theme below — deliberately NOT `inline`, which would bake values at
+ * build time and freeze out runtime re-theming), so flipping values
+ * re-themes every token consumer. Hardcoded dark surfaces (photo scrims,
+ * modal veils) stay dark on purpose — overlays are supposed to darken.
  *
  * Deliberate choices: accent deepens to a readable green (neon #4dff88
  * fails contrast on white for text); dark-on-accent button labels keep
@@ -36,12 +43,12 @@
   color-scheme: light;
   --background: #f2f5f2;
   --foreground: #131915;
-  --color-raised: #ffffff;
-  --color-overlay: #ffffff;
-  --color-line: #dfe6e0;
-  --color-line-strong: #c3cfc6;
-  --color-muted: #5a6e62;
-  --color-accent: #12a150;
+  --raised: #ffffff;
+  --overlay: #ffffff;
+  --line: #dfe6e0;
+  --line-strong: #c3cfc6;
+  --muted: #5a6e62;
+  --accent: #12a150;
 }
 
 /* White wordmark vanishes on white — invert it back to dark in light mode. */
@@ -49,15 +56,15 @@
   filter: invert(1);
 }
 
-@theme inline {
+@theme {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-raised: #0e1512;
-  --color-overlay: #000000;
-  --color-line: #1c2622;
-  --color-line-strong: #2b3a33;
-  --color-muted: #8fa39a;
-  --color-accent: #4dff88;
+  --color-raised: var(--raised);
+  --color-overlay: var(--overlay);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
