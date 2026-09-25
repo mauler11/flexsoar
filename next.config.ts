@@ -14,9 +14,13 @@ import type { NextConfig } from "next";
  *   and wallet RPCs. `frame-ancestors 'none'` + XFO DENY still kill
  *   clickjacking outright, which is what the checklist is really after.
  */
+const isDev = process.env.NODE_ENV !== "production";
+
 const contentSecurityPolicy = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com",
+  // 'unsafe-eval' is dev-only: React's dev reconciler needs eval() for
+  // component stacks. Production bundles never eval — prod stays strict.
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} https://challenges.cloudflare.com`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
