@@ -5,7 +5,6 @@ import { getUser } from "@/lib/api/contract";
 import { currentUserId } from "@/app/(market)/queries";
 import { UsernameEditor } from "@/components/market/UsernameEditor";
 import { FiatSelect } from "@/components/market/Fiat";
-import { ThemeToggle } from "@/components/market/ThemeToggle";
 import { EmptyState } from "@/components/ui/EmptyState";
 
 export const metadata: Metadata = {
@@ -57,16 +56,6 @@ export default async function SettingsPage() {
         </p>
         <div className="w-40">
           <FiatSelect className="w-full rounded-lg border border-line-strong bg-background px-3 py-2 text-sm text-foreground focus:outline-none" />
-        </div>
-      </section>
-
-      <section aria-label="Appearance" className="flex flex-col gap-3 rounded-2xl border border-line bg-raised p-4">
-        <h2 className="text-sm font-extrabold tracking-tight">Appearance</h2>
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-[13px] leading-snug text-muted">
-            Light theme preview. Dark stays the default.
-          </p>
-          <ThemeToggle />
         </div>
       </section>
     </div>
