@@ -75,7 +75,7 @@ export function HeldCard({
       <Link
         href={`/card/${card.id}`}
         aria-label={`${card.sku.brand} ${card.sku.model} ${card.sku.colorway}`}
-        className="group flex flex-1 flex-col overflow-hidden rounded-2xl border-2 bg-[#141d18] transition-all hover:shadow-soft active:scale-[0.995]"
+        className="group flex flex-1 flex-col overflow-hidden rounded-2xl border-2 bg-raised transition-all hover:shadow-soft active:scale-[0.995]"
         style={{ borderColor: `${rarityColor}40` }}
       >
         <div className="px-2 pt-2">

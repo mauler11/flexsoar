@@ -19,6 +19,36 @@
   --foreground: #f2f5f3;
 }
 
+/*
+ * Light preview theme. Off by default (dark is the product); enabled by
+ * the Settings toggle, which sets `.theme-light` on <html> and persists
+ * to localStorage. Pure variable override — removing the toggle restores
+ * dark-only with zero residue. Utilities reference these vars (see
+ * @theme inline below), so flipping values re-themes every token
+ * consumer. Hardcoded dark surfaces (photo scrims, modal veils) stay
+ * dark on purpose — overlays are supposed to darken.
+ *
+ * Deliberate choices: accent deepens to a readable green (neon #4dff88
+ * fails contrast on white for text); dark-on-accent button labels keep
+ * working unchanged.
+ */
+.theme-light {
+  color-scheme: light;
+  --background: #f2f5f2;
+  --foreground: #131915;
+  --color-raised: #ffffff;
+  --color-overlay: #ffffff;
+  --color-line: #dfe6e0;
+  --color-line-strong: #c3cfc6;
+  --color-muted: #5a6e62;
+  --color-accent: #12a150;
+}
+
+/* White wordmark vanishes on white — invert it back to dark in light mode. */
+.theme-light img[src*="logo-white"] {
+  filter: invert(1);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

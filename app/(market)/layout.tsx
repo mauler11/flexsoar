@@ -28,6 +28,7 @@ import { WalletMenu } from "@/components/market/WalletMenu";
 import { FiatProvider, FiatSelect } from "@/components/market/Fiat";
 import { PrivyProviders } from "@/components/market/PrivyProviders";
 import { UserMenu } from "@/components/market/UserMenu";
+import { ThemeBoot } from "@/components/market/ThemeToggle";
 
 interface NotificationPayload {
   sku?: { brand?: string; model?: string; colorway?: string; size_us?: number };
@@ -190,6 +191,7 @@ export default async function MarketLayout({
   return (
     <div className="flex min-h-screen flex-col overflow-x-clip">
       <ToastProvider>
+        <ThemeBoot />
         <OnboardingTour accountAgreed={accountAgreed} />
         <FiatProvider>
         <PrivyProviders>
