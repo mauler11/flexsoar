@@ -693,3 +693,94 @@ configuration. BOTH reported exactly the same THREE TS2749 diagnostics at sign-i
 supplemental adapted comparison, not either worktree's standard command passing.
 No executable defect was confirmed/fixed in this follow-up; only this handoff was
 changed, with no exports added. Standard validation and Rust/DB execution pending.
+
+## Normal dependency/application verification (2026-10-15, after human npm ci)
+
+Starting HEAD d2ebb990601bf092906f854f2b9783fd0aeb905a; correct track, HEAD..main
+empty. Human copied the reviewed dependency pair and ran npm ci. Both files NOW
+match main's working pair exactly by SHA256 (same reviewed source hashes above).
+The uncommitted package.json/package-lock.json changes are HUMAN work and remain
+unstaged/unmodified by this agent. Diff is memo plus reviewed date-fns lock placement;
+no unique prior payment dependency changes were overwritten. No npm audit fix,
+install-script approval, installation or dependency regeneration was run by agent.
+
+Actual normal application commands, using THIS worktree's installed dependencies:
+- First `npx --no-install tsc --noEmit`: exit 1, the three TS2749 diagnostics at
+  sign-in 20, sign-up 20, layout 41, before next-env/route type generation.
+- `npm test`: exit 1, 451 passed / 4 failed / 455 total; 14 test files pass, 1 fails.
+  Two known FSC copy failures at shared invariants 1901/1960; two market rendering
+  expectations at 3180/3186 fail because actual getListings hits the Supabase mock
+  lacking select().in(). No shared assertions or factories were changed.
+- `npx --no-install vitest run tests/purchase-payment.test.ts tests/payment-v2.test.ts
+  --reporter=dot`: exit 0, 91 passed / 91 (two files). Actual production TS modules,
+  with isolated RPC doubles; not database permissions or chain-runtime proof.
+- `npx --no-install next build --webpack`: exit 0, successful compilation, built-in
+  TypeScript step, page generation 40/40 and route/build-trace completion. Warning:
+  Privy optional @farcaster/mini-app-solana unresolved from its ESM dependency.
+  No dependency added to silence it. Stripe-connect module reported missing secret
+  configuration; no webhook/cron/admin invocation or credentials supplied.
+- AFTER that build, `npx --no-install tsc --noEmit`: exit 0, NO diagnostics.
+  Build generated ignored next-env.d.ts and .next route helpers; tracked source and
+  tsconfig unchanged. No ignoreBuildErrors or suppression introduced.
+
+CORRECTION to this handoff's earlier diagnosis: generated route types DID resolve
+all three auth/layout diagnostics without edits. The earlier claim that generated
+helpers could not fix these imports was incorrect. They are NOT a demonstrated
+remaining compile blocker. Privy subpath resolves under normal installed config;
+its earlier adapted wildcard alias error is absent in the actual normal typecheck.
+
+Build safety: checked no .env files in worktree (contents never read); removed
+Supabase/Stripe/Resend/R2/Privy/Solana/Helius/payment/cron/quote/private-key integration
+variables from the BUILD CHILD process and disabled telemetry. Next config has no
+ignoreBuildErrors. No shared database credentials, program signing or fund movement
+was available. Build may fetch public font/FX information; no mutation-capable
+external integrations or application requests were invoked by this task.
+
+Shared test diagnosis/evidence, NOT assertion changes:
+- Shared file defines multiple hoisted factories for contract (253 and 2941) and
+  Supabase (2925 and 2998). These disagree: getListings sometimes reaches real
+  contract code, and both relevant Supabase select mocks lack a direct .in()
+  method (one supplies only eq().in()). Cache->getListings->select().in() throws;
+  browse catches it and renders an error, so empty-state expectations fail.
+- First read-only baseline probe replacing ONLY contract with f777694 source:
+  242 pass / 5 fail in shared file (FSC two, market two, consignment mock case).
+- Second probe overlaying ALL existing changed production TS modules with f777694
+  versions: 245 pass / 2 fail (FSC only). Both use installed Vitest/current config
+  and unchanged tests, virtual source only; supplemental BASELINE probes, not
+  normal npm test or a physical baseline checkout. Duplicate factories and module
+  loading interactions remain unresolved; baseline is not proof the extra current
+  failures are harmless. No real API/DB behavior defect was established by this.
+  Shared test owner must consolidate the mocks in a separately authorized change.
+
+### Ubuntu access now works; exact remaining Rust limitation
+
+The human supplied `Ubuntu` (WSL2). Probe:
+`wsl.exe -d Ubuntu --exec bash -lc 'id; command -v cargo rustc anchor solana solana-test-validator; cargo --version; rustc --version; anchor --version; solana --version'`
+now DOES execute Linux, uid=1000(family). Exit 127; bash reports cargo, rustc,
+anchor and solana "command not found"; command -v finds none of the five tools.
+This supersedes the prior distro-not-found state; do not ask merely to expose Ubuntu.
+
+Executable discovery (NO wallet/config reads): direct ls/find under /home, /opt,
+/usr/local and /usr/bin to depth 7 finds no named tool executables. For family,
+.cargo/bin, .avm/bin and .local/share/solana/install/active_release/bin do not exist.
+/opt and /usr/local/bin are empty. Family cannot list root tool directories
+(permission denied); repeating ONLY those executable-directory existence checks
+as WSL root confirms the same three root paths do not exist either. No root key,
+profile, shell startup file or Solana config/wallet contents were read. Two early
+compound shell discovery attempts failed quoting/syntax; direct executable-argument
+ls/find probes above completed and supplied the actual evidence. No global changes.
+
+Thus Rust/Cargo/Anchor/Solana versions cannot be reported in this Ubuntu runtime;
+compile, seven Rust unit tests, SBF build and local-validator scenarios remain
+NOT RUN. No validator exists at discovered paths; no ephemeral keys/transactions
+were generated. Human next action: run the same command in the founder's actual
+Ubuntu session and supply the existing tools' ABSOLUTE executable locations/user
+(or clarify which distro/filesystem holds the verified installation). Agent must
+not reinstall/upgrade or assume the historical Anchor0.31.1/Solana2.1.0 versions.
+
+No executable defect was confirmed that can be corrected within this verification
+pass. Only this handoff was edited; exports added: none. Human dependency pair
+remains uncommitted/unstaged. Funding still false, no production enablement, SQL,
+DB writes, broadcasts, payments, emails, push or deployment. Missing schema/grant/
+lock tests, signer/authority infrastructure and actual Rust execution remain release
+blockers despite successful TS build. OpenCode not used.
