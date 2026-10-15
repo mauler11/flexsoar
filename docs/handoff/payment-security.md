@@ -784,3 +784,127 @@ remains uncommitted/unstaged. Funding still false, no production enablement, SQL
 DB writes, broadcasts, payments, emails, push or deployment. Missing schema/grant/
 lock tests, signer/authority infrastructure and actual Rust execution remain release
 blockers despite successful TS build. OpenCode not used.
+
+## Authorized WSL toolchain installation and verification (2026-10-15)
+
+Started at 5ed9245b50761767fe67791b92b82d9cb18dd005. Founder now explicitly
+authorizes development-tool installation, superseding the prior no-install rule.
+No project dependency manifest or lockfile was changed for these installations.
+Ubuntu is x86_64, user family; initially Linux / had 955G available and /mnt/c
+141G available. Rechecked existing tools/standard directories before installing.
+No installation was overwritten. No production identity or wallet was loaded.
+
+Official compatibility/source evidence:
+- https://www.anchor-lang.com/docs/updates/release-notes/0-31-1 explicitly recommends
+  Solana 2.1.0 with Anchor 0.31.1 (matches the project's Anchor Rust crates).
+- https://solana.com/docs/intro/installation/dependencies documents Rust via rustup,
+  pinned Agave releases and official Agave GitHub distributions.
+- https://rust-lang.org/tools/install/ documents the official rustup installation.
+- Official release assets were discovered using GitHub release APIs for
+  solana-foundation/anchor v0.31.1 and anza-xyz/agave v2.1.0. GitHub redirects the
+  historical Anchor repository to its current owning organization; no mirror used.
+
+Installed into Ubuntu FAMILY environment, not Windows:
+- /home/family/.cargo/bin/rustc -> rustc 1.85.1 (4eb161250 2025-03-15)
+- /home/family/.cargo/bin/cargo -> cargo 1.85.1 (d73d2caf9 2024-12-31)
+  Official sh.rustup.rs, -y --no-modify-path --profile minimal
+  --default-toolchain 1.85.1. Host version deliberately pinned, not latest;
+  supports the existing lock/config; SBF compiler is separate, below.
+- /home/family/.local/opt/flexsoar-tools/anchor-0.31.1/anchor -> anchor-cli 0.31.1
+  Official pinned prebuilt Linux x86_64 binary; no AVM build prerequisite needed.
+  Binary SHA256 5e5f8fc0f75f2c3dc5cceb082a7f735d09be2207540291ffad370eb5b2dc959b.
+- /home/family/.local/opt/flexsoar-tools/agave-2.1.0/solana-release/bin/solana
+  -> solana-cli 2.1.0 (src:c1080de4; feat:3176011155, client:Agave)
+- Same bin directory: cargo-build-sbf -> solana-cargo-build-sbf 2.1.0;
+  solana-test-validator -> solana-test-validator 2.1.0 (same source/features).
+  Official anza-xyz/agave v2.1.0 solana-release-x86_64-unknown-linux-gnu.tar.bz2;
+  downloaded archive SHA256 7fe66a4fde1c0a905b022c4db3f68c399bcf6294abc9d81bdaf61930b3af90e1.
+  bzip2 was absent; extracted using Ubuntu's existing Python stdlib tarfile,
+  avoiding a system installation or untrusted archive tool.
+- Build tool installed its official platform-tools v1.43 cache and rustup link:
+  /home/family/.cache/solana/v1.43/platform-tools/rust/bin/rustc -> 1.79.0-dev;
+  same directory cargo -> 1.79.0 (8d3d6ef09 2024-08-15).
+  This is the intended SBF version noted by the existing manifest; no silent
+  tools-version override or project lock update to change its compatibility.
+- /home/family/.local/opt/flexsoar-tools/node-22.14.0/bin/node -> v22.14.0,
+  needed to spawn the Linux validator from the JS harness. Official nodejs.org
+  v22.14.0 Linux x64 tarball verified against its official SHASUMS256.txt.
+  No Linux npm install/copy of node_modules or project dependency edits.
+
+PATH was explicit per invoked process, no shell startup/operational Solana config
+was modified. Rustup's new development toolchain state is the authorized install;
+no solana config set, keygen, public deployment, wallet read or broadcast occurred.
+
+### Actual Rust build attempts and the remaining interactive prerequisite
+
+`wsl.exe -d Ubuntu --exec bash -lc 'cd /mnt/c/Users/Family/flexsoar-payment-security/solana && /home/family/.cargo/bin/cargo test --locked --lib'`
+Downloaded the existing locked crates, began compilation, FAILED: linker `cc` not
+found (No such file or directory); serde_core/quote/proc-macro2/libc/serde build
+scripts cannot link. ZERO program unit tests executed; this is not a passing test
+or a confirmed defect in the escrow implementation.
+
+`wsl.exe -d Ubuntu --exec env PATH=/home/family/.cargo/bin:/home/family/.local/opt/flexsoar-tools/agave-2.1.0/solana-release/bin:/usr/local/bin:/usr/bin:/bin cargo-build-sbf --manifest-path /mnt/c/Users/Family/flexsoar-payment-security/solana/programs/flexsoar-settlement/Cargo.toml --sbf-out-dir /home/family/.cache/flexsoar-v2-local-build -- --locked`
+Downloaded/installed pinned platform-tools and began compilation, FAILED at the
+same host build-script linker `cc` not found. Warning: SBF Cargo1.79 does not use
+resolver.incompatible-rust-versions; --locked retained the checked-in graph.
+No .so produced, so validator payment/escrow scenarios NOT RUN. No signatures or
+transactions occurred. No manifest/lock was updated to hide this environment failure.
+
+Ubuntu lacks C compiler/build prerequisites. `sudo -n true` reports
+"sudo: interactive authentication is required". Do NOT bypass with WSL root apt
+or ask for a password. Human must run in Ubuntu:
+
+```bash
+sudo apt-get update
+sudo apt-get install --no-install-recommends build-essential pkg-config libssl-dev libudev-dev clang protobuf-compiler bzip2 xz-utils
+```
+
+Question requesting completion was sent while independent downloads/tests continued.
+After this succeeds, repeat both exact commands above. Use explicit PATH including
+anchor/node paths for the guarded harness, only after a real successful SBF build:
+
+```powershell
+wsl.exe -d Ubuntu --exec env PATH=/home/family/.cargo/bin:/home/family/.local/opt/flexsoar-tools/anchor-0.31.1:/home/family/.local/opt/flexsoar-tools/agave-2.1.0/solana-release/bin:/home/family/.local/opt/flexsoar-tools/node-22.14.0/bin:/usr/local/bin:/usr/bin:/bin node /mnt/c/Users/Family/flexsoar-payment-security/solana/tests/local-v2.mjs --run-local-validator --program-so /home/family/.cache/flexsoar-v2-local-build/flexsoar_settlement.so
+```
+
+### Confirmed harness defect corrected before any validator execution
+
+Actual Agave2.1.0 --help documents default --config as the operator's Solana config
+and default --mint as client keypair. The previous harness did not explicitly
+replace them, so its no-operational-wallet guarantee was incomplete. Changed
+solana/tests/local-v2.mjs to require supported --config/--mint flags and create its
+OWN unique temporary JSON-as-YAML config containing public loopback context and an
+intentionally ABSENT unused-wallet path. Explicit --config, --url=loopback and
+--mint=ephemeral bootstrap PUBLIC address prevent fallback to existing wallet/
+config files. All transaction secret keys remain in memory; validator-local test
+ledger identities are isolated temporary fixtures, never production identities.
+No operational config overwritten. node --check passes. Runtime verification of
+this fix still depends on successful program build and local validator execution.
+
+### Continued market-render investigation
+
+No shared source/assertion changes. Read-only Vitest loader instrumentation showed
+factory2 (shared contract mock near2941) active and its getListings override called
+when both market cases passed. A targeted diagnostic run: 2 passed / 245 skipped.
+Full-file diagnostic runs varied: four failures in one, FSC two only in another;
+in the latter the getListings override was called, not real listing retrieval.
+Instrumentation changes no assertions or production persistence and is diagnostic,
+NOT a standard suite result. The direct failure mechanism remains the real listing
+query reaching an incomplete Supabase mock; duplicate hoisted mock/module loading
+interactions remain the suspected underlying cause, not conclusively fixed.
+
+Latest NORMAL `npm test -- --reporter=dot`: exit1, 453 passed / 2 failed / 455,
+14 files passed/1 failed. Only known FSC-copy failures at1901/1960. Thus the two
+extra market failures are demonstrably intermittent, not a persistent product
+regression; they remain unresolved test-isolation debt, not declared repaired.
+No shared assertions weakened. Earlier standard typecheck (after generated types)
+and webpack build passed; no application TS changed in this continuation, so no
+unnecessary full-build repetition. Dedicated payment tests remain 91/91 in latest
+full suite. Standard build warning optional Farcaster dependency remains recorded.
+
+Cargo.lock SHA256 remained 5E888973FEF604731800D767F42D347180718C95953D1D0785C595CD66FE36BF.
+Human npm pair hashes unchanged and unstaged. Files changed this continuation:
+solana/tests/local-v2.mjs (explicit local configuration/wallet isolation) and this
+handoff (installed versions, real failed builds, evidence and next commands).
+Exports added: none. Funding disabled; no SQL/database writes, production identities,
+public signing/broadcasts, real funds, push or deployment. OpenCode not used.

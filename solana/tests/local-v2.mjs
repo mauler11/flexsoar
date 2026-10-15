@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname, basename } from 'node:path';
 import net from 'node:net';
@@ -19,7 +19,7 @@ const so=args[args.indexOf('--program-so')+1];
 if(!args.includes('--program-so')||!so?.endsWith('.so')||!existsSync(so))throw new Error('Explicit built .so required.');
 const validator='solana-test-validator';
 const help=execFileSync(validator,['--help'],{encoding:'utf8',windowsHide:true});
-for(const flag of ['--upgradeable-program','--bind-address','--ledger','--rpc-port','--faucet-port','--gossip-port','--dynamic-port-range'])if(!help.includes(flag))throw new Error(`Unsupported validator: missing ${flag}`);
+for(const flag of ['--upgradeable-program','--bind-address','--ledger','--rpc-port','--faucet-port','--gossip-port','--dynamic-port-range','--config','--mint'])if(!help.includes(flag))throw new Error(`Unsupported validator: missing ${flag}`);
 const URL_RPC='http://127.0.0.1:18899';
 assert.equal(new URL(URL_RPC).hostname,'127.0.0.1');
 for(const port of [18899,18900,18901])await new Promise((ok,bad)=>{const s=net.createServer();s.once('error',()=>bad(new Error('Local test port occupied; refusing to reuse existing validator.')));s.listen(port,'127.0.0.1',()=>s.close(ok));});
@@ -70,7 +70,11 @@ function governSale(name,p,sale,action,revision=0){return ix(name,[meta(config),
 const governKeys=()=>[meta(config,false,true),meta(gov[0].publicKey,true),meta(gov[1].publicKey,true)];
 const outcome=(p,sale,escrow,revision)=>ix('execute_outcome',[meta(config,false,true),meta(sale,false,true),meta(escrow,false,true),meta(ata(seller.publicKey),false,true),meta(ata(treasury.publicKey),false,true),meta(new PublicKey(p.refundToken),false,true),meta(token),meta(SYSVAR_INSTRUCTIONS_PUBKEY)],u64(revision));
 try {
-  child=spawn(validator,['--bind-address','127.0.0.1','--rpc-port','18899','--faucet-port','18901','--gossip-port','18902','--dynamic-port-range','19000-19020','--ledger',join(root,'ledger'),'--upgradeable-program',program.toBase58(),resolve(so),bootstrap.publicKey.toBase58()],{stdio:'ignore',windowsHide:true});
+  // Never load the operator's default Solana config or client wallet. This
+  // local config contains PUBLIC test context only; its wallet path is absent.
+  const localConfig=join(root,'validator-config.json');
+  writeFileSync(localConfig,JSON.stringify({json_rpc_url:URL_RPC,websocket_url:'ws://127.0.0.1:18900',keypair_path:join(root,'unused-wallet.json'),commitment:'confirmed'}),{flag:'wx',mode:0o600});
+  child=spawn(validator,['--config',localConfig,'--url',URL_RPC,'--mint',bootstrap.publicKey.toBase58(),'--bind-address','127.0.0.1','--rpc-port','18899','--faucet-port','18901','--gossip-port','18902','--dynamic-port-range','19000-19020','--ledger',join(root,'ledger'),'--upgradeable-program',program.toBase58(),resolve(so),bootstrap.publicKey.toBase58()],{stdio:'ignore',windowsHide:true});
   let spawnError;child.on('error',e=>{spawnError=e;});
   connection=new Connection(URL_RPC,'confirmed');
   for(let i=0;;i++){if(spawnError)throw spawnError;if(child.exitCode!==null)throw new Error('Owned local validator exited');try{await connection.getGenesisHash();break;}catch{if(i>=120)throw new Error('Local validator startup timeout');await pause(500);}}
