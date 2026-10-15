@@ -1505,14 +1505,14 @@ export async function listCard(
 ): Promise<UUID> {
   const supabase = await createServerSupabase();
   return unwrap(
-    await supabase.rpc('fn_list_card', {
+    await supabase.rpc('fn_payment_v2_list_card', {
       p_card_id: cardId,
       p_seller_id: sellerId,
       p_price_cents: priceCents,
       p_payout_method: payoutMethod,
       p_fair_price_cents: fairPriceCents,
     }),
-    'fn_list_card',
+    'fn_payment_v2_list_card',
   ) as UUID;
 }
 
@@ -1526,11 +1526,11 @@ export async function listCard(
 export async function cancelListing(listingId: UUID, actorId: UUID): Promise<void> {
   const supabase = await createServerSupabase();
   unwrap(
-    await supabase.rpc('fn_cancel_listing', {
+    await supabase.rpc('fn_payment_v2_request_cancel', {
       p_listing_id: listingId,
       p_actor: actorId,
     }),
-    'fn_cancel_listing',
+    'fn_payment_v2_request_cancel',
   );
 }
 
@@ -1554,17 +1554,7 @@ export async function purchaseCard(
   listingId: UUID,
   buyerId: UUID,
   settlementRef: string,
-): Promise<UUID> {
-  const supabase = createServiceSupabase();
-  return unwrap(
-    await supabase.rpc('fn_purchase_card', {
-      p_listing_id: listingId,
-      p_buyer_id: buyerId,
-      p_settlement_ref: settlementRef,
-    }),
-    'fn_purchase_card',
-  ) as UUID;
-}
+): Promise<UUID> { throw new Error('Reference-only settlement is disabled; use verified v2 evidence or legacy receipt recovery.'); }
 
 /**
  * fn_purchase_card(p_listing_id, p_buyer_id, p_settlement_ref, p_credit_cents, p_hold_id) -> uuid
@@ -1625,29 +1615,7 @@ export async function purchaseCardSplit(
   settlementRef: string | null,
   creditCents: Cents,
   holdId: UUID | null,
-): Promise<UUID> {
-  if (creditCents > 0 && !holdId) {
-    throw new ContractError(
-      'CREDIT_PROVENANCE_REQUIRED',
-      'a webhook settlement with an FSC leg must carry a hold id created ' +
-        'by the buyer\'s own session; service-role has no session to spend ' +
-        'FSC on its own say-so',
-      { listingId, buyerId, creditCents },
-    );
-  }
-
-  const supabase = createServiceSupabase();
-  return unwrap(
-    await supabase.rpc('fn_purchase_card', {
-      p_listing_id: listingId,
-      p_buyer_id: buyerId,
-      p_settlement_ref: settlementRef,
-      p_credit_cents: creditCents,
-      p_hold_id: holdId,
-    }),
-    'fn_purchase_card',
-  ) as UUID;
-}
+): Promise<UUID> { throw new Error('Reference-only settlement is disabled; use verified v2 evidence or legacy receipt recovery.'); }
 
 /**
  * The signed-in caller's `users.id`, or an error. `users.id` equals the
@@ -2038,13 +2006,13 @@ export async function redeemCard(
 ): Promise<UUID> {
   const supabase = await createServerSupabase();
   return unwrap(
-    await supabase.rpc('fn_redeem_card', {
+    await supabase.rpc('fn_payment_v2_redeem_card', {
       p_card_id: cardId,
       p_user_id: userId,
       p_address: address,
       p_fee_cents: feeCents,
     }),
-    'fn_redeem_card',
+    'fn_payment_v2_redeem_card',
   ) as UUID;
 }
 
@@ -4842,6 +4810,10 @@ export async function updateFairMarketCache(
     });
   }
 }
+
+// V2 is additive. These adapters never fall back to legacy reference settlement.
+export { ownPaymentAttempts, recordPaymentDecision, paymentRpc, initiatePaymentAttempt, attachPaymentCandidate, claimPaymentOperations } from '@/lib/db/payment-v2';
+export { reconcilePayments } from '@/lib/db/payment-reconciliation';
 
 // Re-exported so consumers import row types and the contract from one place.
 export type {

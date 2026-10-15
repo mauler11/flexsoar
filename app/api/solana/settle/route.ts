@@ -7,6 +7,7 @@ import { createServerSupabase, createServiceSupabase } from '@/lib/supabase/serv
 import { recoverOrSettlePayment, type PaymentOrder } from '@/lib/db/purchase-payment';
 import { verifyQuoteSignature, type Quote } from '@/lib/solana/quotes';
 import { base58Decode } from '@/lib/solana/base58';
+import { attachPaymentCandidate } from '@/lib/api/contract';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +22,17 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
   if (!input || typeof input !== 'object') return NextResponse.json({ error: 'malformed request' }, { status: 400 });
   const body = input as Record<string, unknown>;
+  if (body.version === 2) {
+    try {
+      if (typeof body.attemptId !== 'string' || typeof body.signature !== 'string') throw new Error('attempt and candidate signature required');
+      // Session RPC must own-check original attempt. Attaching evidence cannot
+      // mark it paid; the independent finalized observer consumes it later.
+      await attachPaymentCandidate(session, body.attemptId, body.signature);
+      return NextResponse.json({pending:true,recoveryRequired:true,retrySettlementOnly:true,attemptId:body.attemptId},{status:202});
+    } catch(e) {
+      return NextResponse.json({error:e instanceof Error?e.message:'Candidate recording unavailable',recoveryRequired:true,retrySettlementOnly:true},{status:503});
+    }
+  }
   const listingId = body.listingId;
   const signature = body.signature;
   const quote = body.quote as Quote | undefined;

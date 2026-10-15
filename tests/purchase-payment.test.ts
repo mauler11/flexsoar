@@ -7,15 +7,19 @@ import { verifyPurchaseTransaction } from '../lib/solana/verify';
 import { issueQuote, verifyQuote, verifyQuoteSignature } from '../lib/solana/quotes';
 import { recoverOrSettlePayment, stripePayoutBlockReason, type PaymentOrder } from '../lib/db/purchase-payment';
 
-const mocks = vi.hoisted(() => ({ query: vi.fn(), stripe: vi.fn(), auth: vi.fn() }));
+const mocks = vi.hoisted(() => ({ query: vi.fn(), stripe: vi.fn(), auth: vi.fn(), rpc: vi.fn() }));
 vi.mock('@/lib/supabase/server', () => ({
   createServiceSupabase: () => ({ from: mocks.query }),
-  createServerSupabase: async () => ({ auth: { getUser: mocks.auth } }),
+  createServerSupabase: async () => ({ auth: { getUser: mocks.auth }, rpc: mocks.rpc, from: mocks.query }),
 }));
 vi.mock('next/server', () => ({ NextResponse: { json: (body: unknown, init?: ResponseInit) => Response.json(body, init) } }));
 vi.mock('stripe', () => ({ default: mocks.stripe }));
-import { checkPayoutEligibility, executePayout } from '../lib/api/contract';
+import { checkPayoutEligibility, executePayout, purchaseCard, purchaseCardSplit } from '../lib/api/contract';
 import { POST } from '../app/api/solana/settle/route';
+import { GET as quoteGET } from '../app/api/solana/quote/route';
+import { GET as buildGET } from '../app/api/solana/build-tx/route';
+import { GET as attemptsGET } from '../app/api/solana/attempts/route';
+import { GET as receiptsGET } from '../app/api/solana/receipts/route';
 
 const signature = base58Encode(new Uint8Array(64).fill(7));
 const programId = 'CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF';
@@ -253,5 +257,42 @@ describe('production Stripe payout containment', () => {
     query({ id: 'o', settlement_ref: 'pi_old' });
     await expect(executePayout('o')).rejects.toThrow('dormant');
     expect(mocks.stripe).not.toHaveBeenCalled();
+  });
+});
+
+describe('production funding gates and durable status while paused',()=>{
+  beforeEach(()=>{mocks.auth.mockReset();mocks.query.mockReset();mocks.rpc.mockReset();});
+  it('refuses legacy issuance before privileged lookup, including authenticated callers',async()=>{
+    mocks.auth.mockResolvedValue({data:{user:{id:'buyer'}}});
+    for(const handler of [quoteGET,buildGET]){const response=await handler();expect(response.status).toBe(503);expect(await response.json()).toMatchObject({code:'FUNDING_DISABLED',retrySettlementOnly:true});}
+    expect(mocks.query).not.toHaveBeenCalled();expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it('does not invoke reference-only settlement from application or dormant Stripe',async()=>{
+    await expect(purchaseCard('listing','buyer','sol:old')).rejects.toThrow('Reference-only');
+    await expect(purchaseCardSplit('listing','buyer','pi_old',0,null)).rejects.toThrow('Reference-only');
+    expect(mocks.query).not.toHaveBeenCalled();expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it('restores authenticated status from session RPC and reports absent schema honestly',async()=>{
+    mocks.auth.mockResolvedValue({data:{user:{id:'buyer'}}});mocks.rpc.mockResolvedValue({data:[],error:null});
+    const request=()=>new Request('https://offline.invalid/api/solana/attempts?listingId=11111111-1111-1111-1111-111111111111');
+    expect((await attemptsGET(request())).status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledWith('fn_payment_v2_own_attempts',{p_listing_id:'11111111-1111-1111-1111-111111111111'});
+    mocks.rpc.mockResolvedValue({data:null,error:{code:'PGRST202',message:'not installed'}});
+    const response=await attemptsGET(request());expect(response.status).toBe(503);expect(await response.json()).toMatchObject({recoveryRequired:true,retrySettlementOnly:true});
+  });
+  it('attaches a v2 candidate as pending, never as verified settlement',async()=>{
+    mocks.auth.mockResolvedValue({data:{user:{id:'buyer'}}});mocks.rpc.mockResolvedValue({data:null,error:null});
+    const response=await POST(new Request('https://offline.invalid',{method:'POST',body:JSON.stringify({version:2,attemptId:'11111111-1111-1111-1111-111111111111',signature})}));
+    expect(response.status).toBe(202);expect(await response.json()).toMatchObject({pending:true,retrySettlementOnly:true});
+    expect(mocks.rpc.mock.calls.map(([name])=>name)).toEqual(['fn_payment_v2_attach_candidate']);expect(mocks.query).not.toHaveBeenCalled();
+  });
+  it('retains buyer-bound Panda-style legacy record lookup without claiming escrow',async()=>{
+    mocks.auth.mockResolvedValue({data:{user:{id:'buyer'}}});
+    const listingId='11111111-1111-1111-1111-111111111111';
+    const builder={select:vi.fn(),eq:vi.fn(),then:(resolve:(value:unknown)=>unknown)=>Promise.resolve({data:[{id:'old-order',listing_id:listingId,buyer_id:'buyer',settlement_ref:`sol:${signature}`,status:'settled'}],error:null}).then(resolve)};
+    builder.select.mockReturnValue(builder);builder.eq.mockReturnValue(builder);mocks.query.mockReturnValue(builder);
+    const response=await receiptsGET(new Request(`https://offline.invalid/api/solana/receipts?listingId=${listingId}`));
+    expect(response.status).toBe(200);expect(await response.json()).toMatchObject({receipts:[{classification:'legacy_record_only',paymentVerified:false,orderId:'old-order'}]});
+    expect(builder.eq).toHaveBeenCalledWith('buyer_id','buyer');
   });
 });

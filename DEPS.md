@@ -147,3 +147,13 @@ Toolchain (not installable from here — needs WSL2/Linux):
 
 - Rust stable + Solana CLI + Anchor 0.31.x, then from `solana/`:
   `anchor build && anchor deploy --provider.cluster devnet`.
+
+Payment security v2 local verification (no installation performed by agent):
+- Human integrates the exact reviewed existing memo manifest/lock pair, then npm ci
+  in flexsoar-payment-security. Do not regenerate either file or copy node_modules.
+- Rust/SBF toolchain compatible with solana/Cargo.lock plus Anchor CLI 0.31.1 and
+  solana-test-validator supporting --upgradeable-program and --bind-address.
+  Use only the explicit owned-loopback solana/tests/local-v2.mjs harness with a
+  reviewed locally built .so. No default production wallets or public devnet.
+- No new npm package is needed by v2 SDK/harness; existing @solana/web3.js suffices.
+  Real Postgres integration awaits HUMAN-authored schema in an isolated project.

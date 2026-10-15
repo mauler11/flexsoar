@@ -551,10 +551,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ received: true, recorded: false }, { status: 200 });
   }
 
-  const session = event.data.object as Stripe.Checkout.Session;
-
-  if (event.type === 'checkout.session.completed') {
-    return handleCheckoutCompleted(stripe, session);
-  }
-  return handleCheckoutExpired(stripe, session);
+  // Do not acknowledge historical payment obligations as processed or invoke
+  // legacy reference-only settlement/hold/email mutations. Provider retains
+  // retries; an operator must review original event/payment evidence.
+  return NextResponse.json({ received:true, recorded:false, eventId:event.id,
+    error:'Stripe is dormant; historical payment requires manual evidence review.' }, {status:503});
 }
