@@ -1,108 +1,98 @@
-/**
- * app/api/solana/settle/route.ts — POST /api/solana/settle
- *
- * Settles a Solana buy into the ledger. Body: { listingId, signature,
- * quote }. Exactly one happy path, in order:
- *
- *   1. Session buyer matches quote.buyerId (no one settles for anyone else).
- *   2. Quote HMAC + expiry verify (tampered or stale quotes fail closed).
- *   3. The transaction verifies on-chain via Helius: buyer debited the
- *      quoted total, seller wallet credited net, treasury credited the fee,
- *      all in the configured USDC mint. Anything else fails closed.
- *   4. purchaseCardSplit() records the card transfer with
- *      settlement_ref = `sol:<signature>`, cash-only (creditCents 0) —
- *      the ledger stays MYR-denominated; chain amounts never enter it.
- *
- * Double-submit safety comes from the ledger, not from here: a replayed
- * signature for an already-sold listing fails inside purchaseCardSplit
- * (WRONG_STATUS), settling nothing twice.
+/** USDC settlement/recovery. No payment is initiated by this endpoint.
+ * Orders are durable completed receipts only; pending-payment durability,
+ * exclusive attempts, and atomic eligibility require the migration handoff.
  */
-
 import { NextResponse } from 'next/server';
-
 import { createServerSupabase, createServiceSupabase } from '@/lib/supabase/server';
-import { getListing, purchaseCardSplit } from '@/lib/api/contract';
-import { verifyQuote, type Quote } from '@/lib/solana/quotes';
+import { purchaseCardSplit } from '@/lib/api/contract';
+import { recoverOrSettlePayment, type PaymentOrder } from '@/lib/db/purchase-payment';
+import { verifyQuoteSignature, type Quote } from '@/lib/solana/quotes';
+import { base58Decode } from '@/lib/solana/base58';
 import { treasuryAddress, usdcMint } from '@/lib/solana/config';
-import { verifyBuyTransaction } from '@/lib/solana/verify';
+import { verifyPurchaseTransaction } from '@/lib/solana/verify';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const supabase = await createServerSupabase();
-  const { data: auth } = await supabase.auth.getUser();
-  const buyerId = auth.user?.id ?? null;
-  if (!buyerId) {
-    return NextResponse.json({ error: 'sign in to settle' }, { status: 401 });
-  }
-
-  let body: { listingId?: string; signature?: string; quote?: Quote };
-  try {
-    body = (await request.json()) as typeof body;
-  } catch {
+  const session = await createServerSupabase();
+  const { data: auth } = await session.auth.getUser();
+  const buyerId = auth.user?.id;
+  if (!buyerId) return NextResponse.json({ error: 'sign in to settle' }, { status: 401 });
+  let input: unknown;
+  try { input = await request.json(); } catch {
     return NextResponse.json({ error: 'malformed request' }, { status: 400 });
   }
-  const { listingId = '', signature = '', quote } = body;
-  if (!/^[0-9a-f-]{36}$/i.test(listingId) || !signature || !quote) {
-    return NextResponse.json(
-      { error: 'listingId, signature and quote are required' },
-      { status: 400 },
-    );
+  if (!input || typeof input !== 'object') return NextResponse.json({ error: 'malformed request' }, { status: 400 });
+  const body = input as Record<string, unknown>;
+  const listingId = body.listingId;
+  const signature = body.signature;
+  const quote = body.quote as Quote | undefined;
+  if (typeof listingId !== 'string' || !/^[0-9a-f-]{36}$/i.test(listingId) ||
+      typeof signature !== 'string' || signature.length < 80 || signature.length > 96 ||
+      !quote || typeof quote !== 'object' || quote.buyerId !== buyerId || quote.listingId !== listingId) {
+    return NextResponse.json({ error: 'invalid payment identity' }, { status: 400 });
   }
-  if (quote.buyerId !== buyerId || quote.listingId !== listingId) {
-    return NextResponse.json({ error: 'quote does not belong to this buyer' }, { status: 400 });
+  try { if (base58Decode(signature).length !== 64) throw new Error(); } catch {
+    return NextResponse.json({ error: 'invalid payment signature' }, { status: 400 });
   }
-  if (!(await verifyQuote(quote))) {
-    return NextResponse.json(
-      { error: 'quote invalid or expired — request a fresh one' },
-      { status: 400 },
-    );
-  }
-
-  const listing = await getListing(listingId).catch(() => null);
-  if (!listing || listing.status !== 'public') {
-    return NextResponse.json({ error: 'listing is not live' }, { status: 409 });
-  }
-
-  const service = await createServiceSupabase();
-  const wallets = await service
-    .from('users')
-    .select('id, solana_address')
-    .in('id', [listing.seller_id, buyerId]);
-  if (wallets.error) {
-    return NextResponse.json({ error: wallets.error.message }, { status: 500 });
-  }
-  const rows = (wallets.data ?? []) as { id: string; solana_address: string | null }[];
-  const sellerWallet = rows.find((r) => r.id === listing.seller_id)?.solana_address ?? null;
-  const buyerWallet = rows.find((r) => r.id === buyerId)?.solana_address ?? null;
-  if (!sellerWallet || !buyerWallet) {
-    return NextResponse.json({ error: 'wallets unlinked mid-trade' }, { status: 409 });
-  }
-  const treasuryWallet = treasuryAddress();
-  if (!treasuryWallet) {
-    return NextResponse.json({ error: 'treasury not configured' }, { status: 500 });
-  }
-
-  const checked = await verifyBuyTransaction(signature, {
-    buyerWallet,
-    sellerWallet,
-    treasuryWallet,
-    usdcMint: usdcMint(),
-    totalUnits: quote.totalUnits,
-    sellerUnits: quote.sellerUnits,
-    feeUnits: quote.feeUnits,
-  });
-  if (!checked.ok) {
-    return NextResponse.json({ error: checked.reason }, { status: 402 });
-  }
-
   try {
-    const orderId = await purchaseCardSplit(listingId, buyerId, `sol:${signature}`, 0, null);
-    return NextResponse.json({ ok: true, orderId, slot: checked.slot }, { status: 200 });
-  } catch (thrown) {
-    return NextResponse.json(
-      { error: thrown instanceof Error ? thrown.message : 'settlement failed' },
-      { status: 409 },
-    );
+    // Authenticate the original quote even after expiry. A previously settled
+    // receipt needs no new signature, live listing, or current wallet link.
+    if (!(await verifyQuoteSignature(quote))) return NextResponse.json({ error: 'invalid quote' }, { status: 400 });
+    const service = createServiceSupabase();
+    const reference = `sol:${signature}`;
+    const findOrder = async (): Promise<PaymentOrder | null> => {
+      const result = await service.from('orders')
+        .select('id, listing_id, buyer_id, settlement_ref, status')
+        .eq('settlement_ref', reference).maybeSingle();
+      if (result.error) throw new Error(result.error.message);
+      return result.data as PaymentOrder | null;
+    };
+    let slot: number | null = null;
+    const orderId = await recoverOrSettlePayment({ buyerId, listingId, reference }, {
+      findOrder,
+      verify: async () => {
+        // Service read deliberately sees sold/cancelled rows for recovery;
+        // session RLS hides them. Never substitute a new live listing.
+        const listingResult = await service.from('listings')
+          .select('id, card_id, seller_id, status').eq('id', listingId).maybeSingle();
+        if (listingResult.error) throw new Error(listingResult.error.message);
+        const listing = listingResult.data;
+        if (!listing || listing.seller_id === buyerId) throw new Error('invalid purchase listing');
+        const wallets = await service.from('users').select('id, solana_address').in('id', [listing.seller_id, buyerId]);
+        if (wallets.error) throw new Error(wallets.error.message);
+        const rows = wallets.data as { id: string; solana_address: string | null }[] | null;
+        const buyerWallet = rows?.find((r) => r.id === buyerId)?.solana_address;
+        const sellerWallet = rows?.find((r) => r.id === listing.seller_id)?.solana_address;
+        const treasuryWallet = treasuryAddress();
+        const programId = process.env['SOLANA_PROGRAM_ID']?.trim();
+        if (!buyerWallet || !sellerWallet || !treasuryWallet || !programId) throw new Error('payment configuration or wallet binding unavailable');
+        const checked = await verifyPurchaseTransaction(signature, {
+          buyerWallet, sellerWallet, treasuryWallet, programId,
+          cardId: listing.card_id, usdcMint: usdcMint(),
+          totalUnits: quote.totalUnits, sellerUnits: quote.sellerUnits,
+          feeUnits: quote.feeUnits, expiresAt: quote.expiresAt,
+        });
+        if (!checked.ok) throw new Error(checked.reason);
+        slot = checked.slot;
+        // These are advisory checks only. The existing SQL does not perform
+        // these invariants under the settlement locks: PUBLIC LAUNCH BLOCKER.
+        const card = await service.from('cards').select('owner_id, status').eq('id', listing.card_id).maybeSingle();
+        if (card.error) throw new Error(card.error.message);
+        if (listing.status !== 'public' || card.data?.owner_id !== listing.seller_id ||
+            !['active', 'locked'].includes(card.data?.status ?? '')) {
+          throw new Error('payment verified but claim unavailable; operator resolution required');
+        }
+      },
+      settle: () => purchaseCardSplit(listingId, buyerId, reference, 0, null),
+    });
+    return NextResponse.json({ ok: true, orderId, slot });
+  } catch (error) {
+    // This does not persist a recovery obligation. It is an API contract for
+    // market's retry-only UI; durable attempts need a human migration.
+    return NextResponse.json({
+      error: error instanceof Error ? error.message : 'settlement unavailable',
+      recoveryRequired: true, retrySettlementOnly: true, signature, listingId,
+    }, { status: 409 });
   }
 }

@@ -168,6 +168,7 @@ import type {
 } from '@/lib/db/types';
 
 import Stripe from 'stripe';
+import { stripePayoutBlockReason } from '@/lib/db/purchase-payment';
 
 // ============================================================
 // ERRORS
@@ -4428,149 +4429,40 @@ export interface PayoutEligibility {
 /**
  * checkPayoutEligibility() -> PayoutEligibility[]
  *
- * Checks all settled orders for payout eligibility. An order is eligible when:
- *   1. payout_hold_days has elapsed since settlement (orders.payout_release_at <= now())
- *   2. Any associated vault_intakes row is 'received' (not awaiting_shipment/in_transit)
- *   3. net_cents has not yet been paid out (orders.paid_out = false)
- *   4. The consignor's Connect account is payout-capable (payouts_enabled = true)
- *
- * This is a READ-ONLY check — the actual payout execution is a separate step.
- * Designed to be called from a pg_cron job (service-role) matching the
- * fn_refresh_levels pattern.
+ * Read-only containment: every outstanding cash-method order is blocked.
+ * USDC has an explicit independent exclusion; historical Stripe transfers
+ * remain dormant. Enabling Stripe again requires a separate reviewed change,
+ * including provider idempotency, durable claims, and authoritative rail data.
  *
  * @returns Array of eligibility results for all settled orders not yet paid out.
  */
 export async function checkPayoutEligibility(): Promise<PayoutEligibility[]> {
   const supabase = createServiceSupabase();
-
-  // Find settled orders not yet paid out where hold has elapsed.
-  // payout_release_at already encodes the hold (settlement + payout_hold_days,
-  // stamped by fn_purchase_card_core), so eligibility is simply release <= now.
-  // (An earlier revision compared against now - 7d, double-counting the hold
-  // into 14 days and contradicting this docstring. The fast-forward test that
-  // exposed it: release set 1h ago stayed ineligible under the old comparison.)
-  const nowIso = new Date().toISOString();
-
-  // Cash-method only: credit (FSC) sellers are paid instantly in-ledger via
-  // credit_sale_net at purchase time — a Stripe transfer on top would pay
-  // them twice. Their payout_release_at is null, which the lte() below also
-  // excludes, but the explicit gate makes the invariant loud, not accidental.
-  const { data: orders, error } = await supabase
-    .from('orders')
-    .select(
-      'id, seller_id, net_cents, payout_release_at, paid_out, credit_cents, cash_cents, seller_payout',
-    )
-    .eq('status', 'settled')
-    .eq('paid_out', false)
-    .eq('seller_payout', 'cash')
-    .lte('payout_release_at', nowIso);
-
+  const { data, error } = await supabase.from('orders')
+    .select('id, seller_id, net_cents, settlement_ref')
+    .eq('status', 'settled').eq('paid_out', false).eq('seller_payout', 'cash');
   if (error) fail(error, 'orders');
-
-  const results: PayoutEligibility[] = [];
-
-  for (const order of orders ?? []) {
-    const consignorId = order.seller_id;
-
-    // Check Connect account
-    const { data: user } = await supabase
-      .from('users')
-      .select('stripe_connect_account_id, stripe_connect_payouts_enabled, country_code')
-      .eq('id', consignorId)
-      .maybeSingle();
-
-    const connectAccountId = user?.stripe_connect_account_id ?? null;
-    const payoutsEnabled = user?.stripe_connect_payouts_enabled ?? false;
-
-    // Check vault intake status (if first sale)
-    const { data: intake } = await supabase
-      .from('vault_intakes')
-      .select('status')
-      .eq('order_id', order.id)
-      .maybeSingle();
-
-    const vaultReceived = !intake || intake.status === 'received';
-
-    let eligible = true;
-    let reason = 'Eligible for payout';
-
-    if (!vaultReceived) {
-      eligible = false;
-      reason = 'Vault intake not yet received (consignor has not shipped)';
-    } else if (!connectAccountId) {
-      eligible = false;
-      reason = 'Consignor has no Stripe Connect account';
-    } else if (!payoutsEnabled) {
-      eligible = false;
-      reason = 'Consignor Connect account not yet payout-capable';
-    }
-
-    results.push({
-      orderId: order.id,
-      eligible,
-      reason,
-      netCents: order.net_cents,
-      consignorId,
-      connectAccountId,
-    });
-  }
-
-  return results;
+  // No provider or Connect calls. Stripe is dormant, including for historical
+  // Stripe orders. Keep USDC's independent exclusion explicit for future work.
+  return (data ?? []).map((order: {
+    id: UUID; seller_id: UUID; net_cents: Cents; settlement_ref: string | null;
+  }) => ({
+    orderId: order.id, eligible: false,
+    reason: stripePayoutBlockReason(order.settlement_ref),
+    netCents: order.net_cents, consignorId: order.seller_id, connectAccountId: null,
+  }));
 }
 
-/**
- * executePayout(orderId) -> { transferId: string }
- *
- * Executes a Stripe Transfer for a single eligible order and marks it paid_out.
- * This should ONLY be called after checkPayoutEligibility() confirms eligibility.
- *
- * @throws if order is not eligible, Connect account not ready, or Stripe API error.
+/** Defense at execution, not merely in a scheduled eligibility query. Never
+ * overload paid_out: it records Stripe transfer creation, not USDC settlement.
  */
 export async function executePayout(orderId: UUID): Promise<{ transferId: string }> {
   const supabase = createServiceSupabase();
-
-  // Re-verify eligibility at execution time
-  const eligibility = await checkPayoutEligibility();
-  const match = eligibility.find((e) => e.orderId === orderId);
-
-  if (!match) {
-    throw new ContractError('NOT_FOUND', 'Order not found or already paid out', { orderId });
-  }
-  if (!match.eligible) {
-    throw new ContractError(
-      'WRONG_STATUS',
-      `Order not eligible for payout: ${match.reason}`,
-      { orderId },
-    );
-  }
-  if (!match.connectAccountId) {
-    throw new ContractError('NOT_FOUND', 'Consignor has no Connect account', { orderId });
-  }
-
-  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-  if (!stripeSecretKey) {
-    throw new Error('STRIPE_SECRET_KEY not configured');
-  }
-
-  const stripe = new Stripe(stripeSecretKey, { apiVersion: '2026-08-26.dahlia' });
-
-  const transfer = await stripe.transfers.create({
-    amount: match.netCents,
-    currency: 'myr',
-    destination: match.connectAccountId,
-    metadata: {
-      order_id: orderId,
-      type: 'consignor_payout',
-    },
-  });
-
-  // Mark order as paid out
-  await supabase
-    .from('orders')
-    .update({ paid_out: true, stripe_transfer_id: transfer.id })
-    .eq('id', orderId);
-
-  return { transferId: transfer.id };
+  const { data, error } = await supabase.from('orders')
+    .select('id, settlement_ref').eq('id', orderId).maybeSingle();
+  if (error) fail(error, 'orders');
+  if (!data) throw new ContractError('NOT_FOUND', 'Order not found', { orderId });
+  throw new ContractError('WRONG_STATUS', stripePayoutBlockReason(data.settlement_ref), { orderId });
 }
 
 /**

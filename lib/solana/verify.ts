@@ -1,13 +1,17 @@
 /**
  * lib/solana/verify.ts
  *
- * Paranoid-first verification of a FlexSoar `buy` transaction. Given a tx
+ * Legacy balance-only diagnostics plus strict purchase verification.
+ * verifyBuyTransaction is retained for existing offline callers/tests; ONLY
+ * verifyPurchaseTransaction may authorize the settlement route.
+ * The legacy helper below does NOT check signers or the program instruction.
+ * Given a tx
  * signature plus the quote the backend issued, this fetches the parsed
  * transaction from Helius and asserts ALL of the following — any failure
  * settles nothing:
  *
  *   1. The transaction succeeded (no `err`) and is confirmed.
- *   2. The fee payer (first signer) is the quoted buyer wallet.
+ *   2. No signer assertion (use the strict verifier for payments).
  *   3. Exactly `quote.totalUnits` of the USDC mint left the buyer.
  *   4. Exactly `quote.sellerUnits` arrived at the seller wallet.
  *   5. Exactly `quote.feeUnits` arrived at the treasury wallet.
@@ -42,6 +46,32 @@ export interface VerifyFailure {
 }
 
 import { rpcUrl } from './config';
+import { inspectPurchaseTransaction, type PurchaseBinding, type PurchaseTransaction } from './purchase-verification';
+
+/** Payment-authorizing verifier. Legacy verifyBuyTransaction below checks only
+ * deltas and MUST NOT authorize settlement. Finalized avoids treating a merely
+ * confirmed fork as a completed payment; pending results are retry-only.
+ */
+export async function verifyPurchaseTransaction(
+  signature: string, expected: PurchaseBinding, fetchImpl: typeof fetch = fetch,
+): Promise<VerifyResult | VerifyFailure> {
+  try {
+    const cluster = process.env['SOLANA_CLUSTER'] ?? 'devnet';
+    if (cluster !== 'devnet' && cluster !== 'mainnet-beta') return { ok: false, reason: 'unsupported payment cluster' };
+    const response = await fetchImpl(rpcUrl(), {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 'purchase-verification', method: 'getTransaction',
+        params: [signature, { encoding: 'jsonParsed', commitment: 'finalized', maxSupportedTransactionVersion: 0 }] }),
+    });
+    if (!response.ok) return { ok: false, reason: 'payment RPC unavailable; retry settlement only' };
+    const body = await response.json() as { result?: PurchaseTransaction | null };
+    if (!body.result) return { ok: false, reason: 'payment not finalized or unavailable; retry settlement only' };
+    const reason = await inspectPurchaseTransaction(body.result, signature, expected);
+    return reason ? { ok: false, reason } : { ok: true, slot: body.result.slot ?? 0 };
+  } catch {
+    return { ok: false, reason: 'payment verification unavailable; retry settlement only' };
+  }
+}
 
 interface TokenBalance {
   accountIndex: number;

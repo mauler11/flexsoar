@@ -102,6 +102,20 @@ export async function issueQuote(input: {
 
 /** True only when the signature matches AND the quote is unexpired. */
 export async function verifyQuote(q: Quote): Promise<boolean> {
+  return (await verifyQuoteSignature(q)) && new Date(q.expiresAt).getTime() > Date.now();
+}
+
+/** Authenticity only: recovery checks chain blockTime against the signed deadline.
+ * Expiry must stop a NEW payment, not retries of a payment already included.
+ */
+export async function verifyQuoteSignature(q: Quote): Promise<boolean> {
+  if (!q || typeof q.sig !== 'string' || !/^[a-f0-9]{64}$/.test(q.sig) ||
+      typeof q.listingId !== 'string' || typeof q.buyerId !== 'string' ||
+      !Number.isSafeInteger(q.totalUnits) || q.totalUnits <= 0 ||
+      !Number.isSafeInteger(q.sellerUnits) || !Number.isSafeInteger(q.feeUnits) ||
+      q.feeUnits !== Math.floor(q.totalUnits * FEE_BPS / 10_000) ||
+      q.sellerUnits !== q.totalUnits - q.feeUnits ||
+      !Number.isFinite(Date.parse(q.expiresAt))) return false;
   const expected = await hmacHex(payload(q));
   if (expected.length !== q.sig.length) return false;
   let diff = 0;
@@ -109,5 +123,5 @@ export async function verifyQuote(q: Quote): Promise<boolean> {
     diff |= expected.charCodeAt(i) ^ q.sig.charCodeAt(i);
   }
   if (diff !== 0) return false;
-  return new Date(q.expiresAt).getTime() > Date.now();
+  return true;
 }
