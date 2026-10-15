@@ -458,3 +458,238 @@ The installed package exports that subpath via dist/dts/solana.d.mts; the generi
 adapted wildcard resolver does not model that export. A preliminary rerun without
 React type aliases produced 349 resolver/cascading diagnostics and is not a useful
 validation result. Neither adapted run replaces the pending standard typecheck.
+
+## Verification follow-up from 44d5682 (2026-10-15)
+
+Funding remains disabled; this follow-up adds no payment features or production
+configuration. Deployment funding calculations are deferred.
+
+### Actual WSL access, not Windows PATH inference
+
+Running as desktop-3s6ohvc\family, C:/Windows/system32/wsl.exe:
+- `wsl.exe --list --verbose`: exit -1, "Windows Subsystem for Linux has no installed distributions."
+- `wsl.exe -d Ubuntu --exec bash -lc 'command -v cargo rustc anchor solana solana-test-validator; cargo --version; anchor --version; solana --version'`:
+  exit -1, "There is no distribution with the supplied name. Error code:
+  Wsl/Service/WSL_E_DISTRO_NOT_FOUND". The Linux shell never started.
+- `wsl.exe --status`: default version 2; reports WSL1 optional-component unavailable.
+
+This contradicts the older environment handoff for THIS account/session. It does
+not prove that the founder's installation was removed or unavailable to another
+Windows user. Human must expose the existing Ubuntu distribution/toolchain to this
+session and provide its exact distro name; do not reinstall/upgrade as a workaround.
+No Rust/Anchor/Solana version or executable location inside Linux could be obtained.
+Cargo build/test, SBF build and validator execution remain NOT RUN, zero runtime
+cases claimed. No keys, global Solana configuration or wallet files were read.
+
+Read the entire local-v2.mjs harness again: RPC fixed to 127.0.0.1:18899, validator
+bind 127.0.0.1, explicit .so/opt-in, supplied RPC/wallet/keypair/devnet/mainnet rejected,
+no operational key loading; ephemeral keys generated only after safety guards.
+No harness execution, key generation or transaction occurred. `node --check` passes
+for both local-v2.mjs and initialize.mjs. Anchor provider remains loopback, with an
+absent explicitly local wallet placeholder. Runtime safety and program semantics
+are still pending actual validator execution, not established by this inspection.
+
+### Exact dependency-pair review / human preparation
+
+The payment pair is byte-hash unchanged from prior verification and its Git blobs
+match local main's committed pair exactly. Copying main's working pair NOW would
+replace no payment-worktree-only manifest/lock changes. Recheck before copying.
+Main's existing uncommitted changes are memo ^0.10.0 (lock resolves 0.10.0), plus
+lockfile date-fns placement: root 2.30.0 -> optional peer 4.4.0 and a nested 2.30.0
+under @metamask/sdk. Do not describe the lock diff as only one memo entry or rewrite
+it. No other root dependency/version changes were present in the reviewed diff.
+
+SHA256 payment originals:
+- package.json: 4F5597C94561D173EA833334301FE6854F0E43F394868A3D049F8AF1DA7C886D
+- package-lock.json: 0C079FE9CB2A79117089A350AB4BBBCF0E114888E9F2C60CF5816C6F4C2B2B36
+SHA256 main working sources:
+- package.json: D98A62F311AF26DA6B39B095B1D19BA9D6C2CDE7843EBA6FB7A82F6A3201EC8A
+- package-lock.json: 1DEC156573D13BFCA04776527634BBDDD3765B6F5AAFB443599FCE70341DA56F
+
+Human-only PowerShell; NOT executed by the agent. Back up outside ALL worktrees,
+check originals and sources before overwriting, then verify backup AND destination:
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$src = 'C:\Users\Family\flexsoar'
+$dst = 'C:\Users\Family\flexsoar-payment-security'
+$backup = Join-Path 'C:\Users\Family' ('flexsoar-payment-deps-backup-' + [guid]::NewGuid().ToString('N'))
+$names = @('package.json', 'package-lock.json')
+$old = @('4F5597C94561D173EA833334301FE6854F0E43F394868A3D049F8AF1DA7C886D', '0C079FE9CB2A79117089A350AB4BBBCF0E114888E9F2C60CF5816C6F4C2B2B36')
+$reviewed = @('D98A62F311AF26DA6B39B095B1D19BA9D6C2CDE7843EBA6FB7A82F6A3201EC8A', '1DEC156573D13BFCA04776527634BBDDD3765B6F5AAFB443599FCE70341DA56F')
+for ($i = 0; $i -lt $names.Count; $i++) {
+  if ((Get-FileHash -LiteralPath (Join-Path $dst $names[$i]) -Algorithm SHA256).Hash -ne $old[$i]) { throw 'Payment dependency pair changed; stop and review.' }
+  if ((Get-FileHash -LiteralPath (Join-Path $src $names[$i]) -Algorithm SHA256).Hash -ne $reviewed[$i]) { throw 'Main dependency pair changed; stop and review.' }
+}
+New-Item -ItemType Directory -Path $backup | Out-Null
+for ($i = 0; $i -lt $names.Count; $i++) {
+  Copy-Item -LiteralPath (Join-Path $dst $names[$i]) -Destination (Join-Path $backup $names[$i])
+  if ((Get-FileHash -LiteralPath (Join-Path $backup $names[$i]) -Algorithm SHA256).Hash -ne $old[$i]) { throw 'Backup hash mismatch.' }
+}
+for ($i = 0; $i -lt $names.Count; $i++) {
+  Copy-Item -LiteralPath (Join-Path $src $names[$i]) -Destination (Join-Path $dst $names[$i])
+  if ((Get-FileHash -LiteralPath (Join-Path $dst $names[$i]) -Algorithm SHA256).Hash -ne $reviewed[$i]) { throw 'Destination hash mismatch.' }
+  if ((Get-FileHash -LiteralPath (Join-Path $src $names[$i]) -Algorithm SHA256).Hash -ne $reviewed[$i]) { throw 'Source changed during copy.' }
+}
+Write-Output "Original pair preserved at $backup"
+Push-Location $dst
+try {
+  npm ci
+  if ($LASTEXITCODE -ne 0) { throw 'npm ci failed; preserve the diagnostic output.' }
+  for ($i = 0; $i -lt $names.Count; $i++) {
+    if ((Get-FileHash -LiteralPath $names[$i] -Algorithm SHA256).Hash -ne $reviewed[$i]) { throw 'Dependency file changed during installation.' }
+  }
+} finally { Pop-Location }
+```
+
+No node_modules/env files/credentials copied. Installation is deliberately left to
+human; source pair and existing worktrees were not changed by this task.
+
+### Application validation and resolver diagnosis
+
+This worktree has no node_modules and no next-env.d.ts. Normal commands
+`npx --no-install tsc --noEmit`, `npm test`, `npx --no-install next build --webpack`
+remain PENDING / NOT RUN until human dependency preparation. Historical adapted
+453/455 and dedicated 91/91 results above are NOT new normal-command results.
+Reviewed package scripts, vitest.config.ts and next.config.ts: no test lifecycle
+script, Vitest @ alias only, no ignoreBuildErrors. Build loads server code and
+uses next/font/google; isolate runtime credentials/outbound side effects before
+build. No env values or shared credentials were read or supplied. Do not interpret
+an isolated missing-config/font-fetch failure as proof of payment logic failure.
+
+Concrete Privy resolution probe using installed TypeScript 5.9.3 and package 3.42.0:
+- Standard Bundler package-exports resolution, with a READ-ONLY virtual node_modules
+  host pointing at main's installed tree, resolves @privy-io/react-auth/solana to
+  dist/dts/solana.d.mts; that declaration exports useCreateWallet.
+- Earlier adapted `paths: {'*': ['.../node_modules/*']}` returns unresolved for the
+  identical specifier: that wildcard file lookup fails the package-export mapping.
+This reproduces the adapted TS2307 cause without changing source or asserting that
+this worktree's future npm ci/build will succeed.
+
+Source defects outside this lane: sign-in/page.tsx:10, sign-up/page.tsx:10 and
+app/layout.tsx:2 default-import Next's VALUE as PageProps/LayoutProps and then use
+it as a type. Installed Next page.md/layout.md document generated GLOBAL helpers,
+not default imports. Missing generated types do not fix these shadowing imports.
+Files are unchanged versus f777694. Auth/layout owner should remove the incorrect
+imports and generate route types with the installed Next toolchain, then verify
+normal commands. This task does not expand into that authentication/layout rewrite.
+
+### Database implementation precision supplement
+
+The table above remains the required RPC inventory; NO functions or grants have
+been applied. Required argument types/results (PostgREST JSON unless stated):
+- Initiate: listing UUID, idempotency UUID, policy version text, policy digest hex64;
+  own_attempts: listing UUID; attach_candidate: attempt UUID, signature base58 text.
+  Callers are the session adapters/routes, not verifier credentials. Initiate is an
+  exported adapter without an enabled funding caller; do not enable it on install.
+- list_card: p_card_id UUID, p_seller_id UUID, p_price_cents bigint MYR sen,
+  p_payout_method text (legacy display input only, never rail/authority),
+  p_fair_price_cents nullable bigint -> UUID. Derive seller from auth.uid and require
+  supplied seller correspondence; ignore client routing policy. Cancel: p_listing_id
+  UUID, p_actor UUID -> void, actor must match session. Redeem: p_card_id UUID,
+  p_user_id UUID, p_address structured JSON, p_fee_cents bigint -> UUID ONLY when a
+  separately reviewed paid-redemption contract exists; currently refuse safely.
+- record_decision: p_decision JSON with fields in PaymentDecision -> operation UUID;
+  action enum is exactly receipt/authentication_pass/authentication_fail/release/
+  refund/dispute. commandId/escrowId UUID; expectedRevision decimal u64 STRING;
+  pairCommitment/evidenceDigest lowercase hex64. Admin session caller must have the
+  enrolled HUMAN action role, independence and approval evidence. An action request
+  cannot invent a governance signature. No second-review/dispute-resolution adapter
+  currently exists; require additive reviewed integration before exposing either.
+- claim_operations: worker UUID, limit int <=10 -> JSON array of id UUID,
+  payloadDigest hex64, expectedRevision decimal u64 STRING, action text. Descriptor
+  alone is NOT a complete signing/execution protocol; fetching immutable payload,
+  submission/unknown-outcome recording and terminal completion remain unimplemented.
+- Scanner parameters genesis/program/attempt are base58 32-byte values; lease/event
+  IDs UUID; slots safe nonnegative integers at current JS boundary; fundedAtSeconds
+  decimal i64 STRING; decisionRevision decimal u64 STRING; permitHex lowercase
+  hex1380. Store full canonical bytes and parsed typed bindings, not lossy numeric
+  JSON. finality must equal finalized. Event kind funded/direct/released/refunded.
+  record_verified_event returns UUID; recovery_binding returns exact immutable
+  permitHex and committed appliedKinds; reconcile_event returns stable order/outcome
+  JSON (currently ignored by orchestrator); finish_scan returns void. Exact order/
+  outcome JSON shape is an outstanding additive consumer contract, not fabricated.
+
+Each RPC is ONE Postgres transaction; never hold DB locks while waiting for chain,
+issuer, email or carrier calls. Lock sorted Item/Card identifiers first, then
+sale/listing, attempt/escrow/verified evidence, intake/decision, then sorted affected
+account rows. Concurrent initiation doesn't reserve a second sale; many buyer
+attempts may refer to ONE shared sale. A DB reservation cannot revoke signed txs.
+Unique sale winner is decided by finalized program consumption. Cancellation/
+repricing is intent until chain revision/revocation is finalized. Funded-first means
+reconcile buyer obligation; revoke-first rejects payment. No lease timeout resets a
+possible/funded payment to unpaid. Avoid scanning-worker lock-order inversion.
+
+Idempotency must compare caller plus ALL immutable context BEFORE returning an
+existing order/event/decision. Unique conflicts are not generic success: reload
+matching key under lock, compare buyer/listing/sale/attempt/domain/program/signature/
+amounts/mode, return same result only for exact retry; conflicting receipt aborts.
+Unique verified events per domain/program/sale/kind; signature uniquely consumes
+ONE purchase per network (terminal events separately classified), order unique by
+sale and winning attempt; terminal release/refund mutually exclusive. Record proof,
+verifier version, finalized slot, original funding interval and immutable wallet
+history. Already consumed funded evidence cannot be reinterpreted as direct/release.
+Persist failed correspondence as a separately audited unresolved obligation, never
+replace ownership or duplicate money. Ledger+owner cache+availability+event-consumed+
+notification outbox commit together, or all roll back. Acknowledgement to chain
+comes only AFTER DB commit; failed acknowledgement leaves generation fenced and
+is retryable without repeating payment. Lost response returns the original result.
+
+Permissions: no PUBLIC/anon execute defaults; session users can initiate/read own/
+attach untrusted candidate only. Action-specific staff can record bounded intents;
+restricted operation worker can lease approved commands, not approve its own.
+Dedicated verifier can read immutable bindings/record verified evidence; restricted
+settler consumes it; notifier cannot mutate balances/claims. Current local route's
+service client does not establish these production privilege boundaries. Harden
+security-definer ownership/search path and underlying table/RLS writes. Revoke
+legacy fn_purchase_card(uuid,uuid,text,bigint,uuid), its core equivalent, and
+fn_purchase_card_with_credit(uuid,uuid), plus ALL actual catalog overloads including
+3/4-argument survivors and default-arity resolution, from untrusted roles. Historical
+service access must be separately reviewed; a settlement-reference string is never
+v2 payment proof. Do not allow a generic service or session path around verifier.
+
+023c_vault_custody.sql: fn_vault_receive currently stamps authentication at 267-268
+and activates Card at 272-273; replace for v2. Receipt only records physical receipt
+and exact pair/current purchase; never auth pass, payout or active Card. The existing
+hold trigger at 174-198 covers awaiting_shipment/in_transit ONLY; broaden the
+invariant to received, inspection/rejection/challenge/dispute, authorized exit,
+unknown outcome and unreconciled funded/released/refunded obligations. Do not infer
+resale eligibility merely because ANY historical intake exists. All 024 trade/
+legacy offer, mint/reject/burn/redeem/list/custody/direct table paths must obey same
+locks and fences. Existing Panda stays legacy direct; do not populate escrow funding
+or replay it. Backfill only from reviewed historical evidence, preserving ledger.
+
+Mandatory ISOLATED Postgres tests after human-authored migrations:
+1. Catalog/grants: anon/session/generic admin cannot fabricate verification or call
+   ANY old overload/default arity; verify service-core restrictions and table RLS.
+2. Two buyers, one sale, both modes; consume the ONE finalized winner, loser gets
+   no order/claim. Replay same evidence concurrently returns same order; conflicting
+   buyer/listing/domain/signature reuse fails without leaking another buyer's data.
+3. Inject failure between each ownership/cache/ledger/event/outbox write: all roll
+   back; retry returns one receipt after lost response. Test actual locks/deadlocks,
+   not sequential mocks. Scan/executor lease expiry and process restart lose no work.
+4. Receipt cannot authenticate/unlock/pay; failed auth stays locked. Exact-pair and
+   current-intake mismatch, same-human different-key inspection/release, stale
+   decision revision and unauthorized refund/dispute approvals are rejected.
+5. Finalized release/refund + failed DB commit stays unresolved/locked, retries only
+   bookkeeping; acceptance alone cannot unlock. Full principal refund and paired
+   reversal occur once; outbox retry never duplicates payment or changes paid_out.
+6. Old offers, direct RPCs and direct row writes cannot trade/redeem/list locked
+   claims. Cancel/reprice orderings reconcile the chain winner; wallet relinking,
+   authority rotation, browser closure and quote expiry preserve original bindings.
+7. Panda/historical receipt remains direct and recoverable; Stripe payout execution
+   remains dormant and never consumes USDC orders. No automatic non-dispatch refund
+   for verified transit; timers enqueue review only.
+
+Missing production identities/providers, governance/Squads verification, isolated
+schema, actual validator evidence and normal dependency validation remain release
+blockers. No feature enablement, schema existence or live protection is claimed.
+
+Equivalent compiler evidence: a read-only virtual node_modules host (NO wildcard
+package aliases, no emitted files, incremental disabled) ran installed TS 5.9.3
+against current 44d5682 and f777694 via virtual source overlays under identical
+configuration. BOTH reported exactly the same THREE TS2749 diagnostics at sign-in
+20, sign-up 20 and layout 41. No Privy or payment-file diagnostic remained. This is
+supplemental adapted comparison, not either worktree's standard command passing.
+No executable defect was confirmed/fixed in this follow-up; only this handoff was
+changed, with no exports added. Standard validation and Rust/DB execution pending.
