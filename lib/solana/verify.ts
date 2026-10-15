@@ -2,8 +2,8 @@
  * lib/solana/verify.ts
  *
  * Legacy balance-only diagnostics plus strict purchase verification.
- * verifyBuyTransaction is retained for existing offline callers/tests; ONLY
- * verifyPurchaseTransaction may authorize the settlement route.
+ * verifyBuyTransaction is retained for existing offline callers/tests.
+ * verifyPurchaseTransaction checks strict evidence, not purchase authorization.
  * The legacy helper below does NOT check signers or the program instruction.
  * Given a tx
  * signature plus the quote the backend issued, this fetches the parsed
@@ -48,9 +48,10 @@ export interface VerifyFailure {
 import { rpcUrl } from './config';
 import { inspectPurchaseTransaction, type PurchaseBinding, type PurchaseTransaction } from './purchase-verification';
 
-/** Payment-authorizing verifier. Legacy verifyBuyTransaction below checks only
- * deltas and MUST NOT authorize settlement. Finalized avoids treating a merely
- * confirmed fork as a completed payment; pending results are retry-only.
+/** Payment-evidence verifier; the legacy ABI has no unique sale authorization.
+ * Even a successful result MUST NOT alone authorize paid database settlement.
+ * Legacy verifyBuyTransaction below checks only deltas. Finalized avoids
+ * treating a confirmed fork as a completed payment; pending is retry-only.
  */
 export async function verifyPurchaseTransaction(
   signature: string, expected: PurchaseBinding, fetchImpl: typeof fetch = fetch,

@@ -71,6 +71,13 @@ describe('production buy ABI verification', () => {
     ['owner', (tx) => { tx.meta!.postTokenBalances![1].owner = 'wrong'; }],
     ['amount', (tx) => { tx.meta!.postTokenBalances![1].uiTokenAmount.amount = '949999'; }],
     ['unrelated matching transfers', (tx) => { tx.meta!.innerInstructions = []; }],
+    ['matching transfers under another invocation', (tx) => {
+      tx.transaction!.message!.instructions!.push({ programId: 'unrelated' });
+      tx.meta!.innerInstructions![0].index = 1;
+    }],
+    ['duplicate settlement invocation', (tx) => {
+      tx.transaction!.message!.instructions!.push({ ...tx.transaction!.message!.instructions![0] });
+    }],
     ['wrong CPI destination', (tx) => { tx.meta!.innerInstructions![0].instructions[0].parsed!.info!.destination = 'wrong'; }],
     ['failed transaction', (tx) => { tx.meta!.err = 'failed'; }],
     ['missing block time', (tx) => { tx.blockTime = null; }],
@@ -154,12 +161,34 @@ describe('actual settlement endpoint receipt authorization', () => {
       const request = () => new Request('https://offline.invalid', { method: 'POST', body: JSON.stringify({ listingId, signature, quote }) });
       const response = await POST(request());
       expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({ orderId: 'order' });
+      expect(await response.json()).toMatchObject({ orderId: 'order', receiptOnly: true, paymentVerified: false });
       expect(mocks.query.mock.calls.map(([table]) => table)).toEqual(['orders']);
       builder.maybeSingle.mockResolvedValue({ data: { ...receipt, buyer_id: 'someone-else' }, error: null });
       const refused = await POST(request());
       expect(refused.status).toBe(409);
       expect(await refused.json()).toMatchObject({ retrySettlementOnly: true, recoveryRequired: true });
+    } finally {
+      if (previous === undefined) delete process.env.SOLANA_QUOTE_SECRET; else process.env.SOLANA_QUOTE_SECRET = previous;
+    }
+  });
+  it.each([300, -1])('refuses unrecorded legacy payment even with an authentic quote (TTL %s)', async (ttlSeconds) => {
+    const previous = process.env.SOLANA_QUOTE_SECRET;
+    process.env.SOLANA_QUOTE_SECRET = 'offline-endpoint-fixture';
+    mocks.auth.mockResolvedValue({ data: { user: { id: 'buyer' } } });
+    try {
+      const quote = await issueQuote({ buyerId: 'buyer', listingId, totalUnits: 1_000_000, ttlSeconds });
+      const builder = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn() };
+      builder.select.mockReturnValue(builder); builder.eq.mockReturnValue(builder);
+      builder.maybeSingle.mockResolvedValue({ data: null, error: null });
+      mocks.query.mockReturnValue(builder);
+      const response = await POST(new Request('https://offline.invalid', { method: 'POST', body: JSON.stringify({ listingId, signature, quote }) }));
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        retrySettlementOnly: true, recoveryRequired: true, signature, listingId,
+        error: expect.stringContaining('do not pay again'),
+      });
+      // No listing/wallet lookup, RPC verification, or settlement RPC is possible.
+      expect(mocks.query.mock.calls.map(([table]) => table)).toEqual(['orders', 'orders']);
     } finally {
       if (previous === undefined) delete process.env.SOLANA_QUOTE_SECRET; else process.env.SOLANA_QUOTE_SECRET = previous;
     }
@@ -190,6 +219,14 @@ describe('production receipt reconciliation (mock persistence, NOT SQL concurren
     const findOrder = async () => ++calls <= 2 ? null : receipt;
     const deps = { findOrder, verify: async () => {}, settle: async () => 'order' };
     expect(await Promise.all([recoverOrSettlePayment(identity, deps), recoverOrSettlePayment(identity, deps)])).toEqual(['order', 'order']);
+  });
+  it('does not hide a conflicting RPC order behind a matching durable receipt', async () => {
+    const findOrder = vi.fn().mockResolvedValueOnce(null).mockResolvedValue(receipt);
+    await expect(recoverOrSettlePayment(identity, { findOrder, verify: async () => {}, settle: async () => 'different-order' })).rejects.toThrow('conflicting order');
+  });
+  it('does not hide a conflicting receipt after a lost response', async () => {
+    const findOrder = vi.fn().mockResolvedValueOnce(null).mockResolvedValue({ ...receipt, listing_id: 'different-listing' });
+    await expect(recoverOrSettlePayment(identity, { findOrder, verify: async () => {}, settle: async () => { throw new Error('lost response'); } })).rejects.toThrow('does not match');
   });
   it('surfaces an explicit unresolved failure; never initiates a replacement payment', async () => {
     await expect(recoverOrSettlePayment(identity, { findOrder: async () => null, verify: async () => {}, settle: async () => { throw new Error('claim unavailable; resolution required'); } })).rejects.toThrow('resolution required');

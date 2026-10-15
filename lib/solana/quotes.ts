@@ -5,9 +5,10 @@
  * in USDC base units, and the number both sides agree on is pinned HERE —
  * HMAC-SHA256 over (listingId, buyerId, totalUnits, sellerUnits,
  * feeUnits, expiresAt) with a server secret. Stateless: no quote table,
- * nothing to clean up. The settle route re-verifies the HMAC and the
- * expiry, then demands the on-chain transfers match the quoted units
- * EXACTLY. A tampered quote fails closed; an expired quote fails closed.
+ * nothing to clean up. This legacy format cannot authorize new settlement:
+ * it lacks an immutable attempt/network/wallet binding. The settle route
+ * authenticates it for receipt lookup only. Payment evidence needs a separate
+ * authoritative authorization before it can transfer a database claim.
  *
  * WebCrypto (subtle) only — no node:crypto import, so this runs in any
  * route runtime. Amounts are integers throughout; the 5% split mirrors
@@ -105,8 +106,9 @@ export async function verifyQuote(q: Quote): Promise<boolean> {
   return (await verifyQuoteSignature(q)) && new Date(q.expiresAt).getTime() > Date.now();
 }
 
-/** Authenticity only: recovery checks chain blockTime against the signed deadline.
- * Expiry must stop a NEW payment, not retries of a payment already included.
+/** Authenticity only, NOT authorization for an unrecorded historical payment.
+ * This quote has no immutable attempt or network/wallet bindings. Expired
+ * quotes may identify existing receipts; new paid settlement is blocked.
  */
 export async function verifyQuoteSignature(q: Quote): Promise<boolean> {
   if (!q || typeof q.sig !== 'string' || !/^[a-f0-9]{64}$/.test(q.sig) ||

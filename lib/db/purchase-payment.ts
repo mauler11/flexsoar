@@ -31,10 +31,14 @@ export async function recoverOrSettlePayment(identity: PaymentIdentity, deps: Pa
     return existing.id;
   }
   let failure: unknown;
-  try { await deps.verify(); await deps.settle(); } catch (error) { failure = error; }
+  let returnedOrderId: string | undefined;
+  try { await deps.verify(); returnedOrderId = await deps.settle(); } catch (error) { failure = error; }
   const recorded = await deps.findOrder();
   if (recorded) {
     if (!authorizedPaymentOrder(recorded, identity)) throw new Error('payment receipt does not match this purchase');
+    if (returnedOrderId !== undefined && returnedOrderId !== recorded.id) {
+      throw new Error('settlement returned a conflicting order; operator resolution required');
+    }
     return recorded.id;
   }
   throw failure instanceof Error ? failure : new Error('payment has no matching settlement receipt; resolution required');
