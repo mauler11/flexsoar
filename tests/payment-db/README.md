@@ -21,9 +21,10 @@ psql -X -v ON_ERROR_STOP=1 -f supabase/migrations/063_payment_v2_permissions_fen
 ```
 
 5. For this disposable test connection only, set `PGOPTIONS` to `-c payment_v2.test_identity=synthetic-payment-v2-only`. This marker is an acknowledgement, not a security boundary or proof of isolation. The guard also checks server-side loopback address, exact database name and explicit psql acknowledgement. No automatic target selection exists.
-6. A HUMAN can then invoke these separately; every main test opens a transaction and rolls back synthetic fixtures. `01_fixtures.sql` is an include, never an independently runnable test. The fixtures synthesize key-shaped bytes, not secret signing keys and not purported chain evidence. Positive calls impersonate a trusted verifier for database contract testing; independent program/verifier tests establish actual chain verification.
+6. A HUMAN must first run03_completion_setup.sql ONCE on the fresh disposable target, before any tests below. It creates private test-only completion records, not application objects. Then invoke the tests separately.10/20/30/71 roll back their synthetic fixtures and only afterward commit an explicit successful checkpoint;35/50 and worker/race scripts deliberately retain their synthetic evidence. `01_fixtures.sql` is an include, never an independently runnable test. The fixtures synthesize key-shaped bytes, not secret signing keys and not purported chain evidence. Positive calls impersonate a trusted verifier for database contract testing; independent program/verifier tests establish actual chain verification.
 
 ```powershell
+psql -X -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -f tests/payment-db/03_completion_setup.sql
 psql -X -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -f tests/payment-db/10_contracts.sql
 psql -X -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -f tests/payment-db/20_outcomes_recovery.sql
 psql -X -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -f tests/payment-db/30_permissions.sql
@@ -159,6 +160,9 @@ while A holds Item/Card/Sale locks; a third isolated administrator may inspect
 pg_stat_activity/pg_locks. Commit A, then commit B. Never use sleeps as synchronization.
 For rollback, explicitly ROLLBACK A, then let B finish and COMMIT. A's returned order
 was provisional; clients may expose a durable receipt only after COMMIT succeeds.
+In the SAME original A backend, after ROLLBACK, include60_rollback_ack.sql. This
+explicitly records the human-observed rollback and its backend identity; it does not
+recreate A's rolled-back financial writes. Final acceptance requires this checkpoint.
 
 Use **interactive psql**, not `psql -f` for51/52: exiting the connection rolls back
 the open transaction. For example, launch A with
@@ -216,3 +220,86 @@ only if run. Single-session fixtures/unit mocks do not establish concurrency saf
 On-chain shared Sale consumption, not a database reservation or lease, prevents two
 buyers funding the same sale. A stale worker can still hold previously signed bytes;
 only the program's terminal/revision fencing prevents a second financial outcome.
+
+## Mandatory final completeness gate — NOT RUN
+
+Incremental46/53 remain useful while executing the suite, but ARE NOT final acceptance.
+03's private completion table records explicit success only after assertions have been
+reached; role-specific checkpoints use actual session_user checks. Workers cannot
+directly write the table, claim another role's checkpoint, or record administrator
+checks. This is trusted disposable-test instrumentation, not financial authorization
+or protection against a malicious migration administrator.
+
+Required order on ONE fresh target:
+
+1. Apply reviewed schema059–063 after baseline, then03 once; run10/20/30.
+2.35,36–40 with five real worker connections,46;45/offline fixture/47 (signed storage).
+3.40_concurrency_setup, then interactive41/42 for BOTH race_mode=0 and1, committing
+both A and B. Use separate backends and retain blocking/receipt evidence. The older
+optional rollback variant does not replace the required dedicated rollback case below.
+4.50 once, then ALL twelve named cases in its README matrix/queue list. Use57 before
+each queue case. For terminal cases58/59 are REQUIRED; sequential56 alone does not
+satisfy final acceptance. For rollback use60 after A rolls back; for each takeover run
+54 and B, then55 under the correct original A worker login. Run53 incrementally.
+5.70 once, wait for its synthetic authorization expiry as instructed, then71.
+6. Run the following exact final acceptance command AS THE SAME isolated setup
+administrator that owns03, with the previously verified PGHOST/PGPORT/PGDATABASE/
+PGOPTIONS. This command is HUMAN-ONLY and has NOT been executed by the agent:
+
+```powershell
+psql -X -v ON_ERROR_STOP=1 -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -f tests/payment-db/90_final_acceptance.sql
+if ($LASTEXITCODE -ne 0) { throw 'Payment database final acceptance FAILED or incomplete' }
+```
+
+90 reruns46/53's financial assertions and requires **34 explicit successful checkpoints**.
+It rejects any missing worker, core, signed-storage, mode-specific duplicate, named
+race, terminal-consumer, expiry, rollback acknowledgement or stale-worker completion.
+It also checks the actual five worker login names and distinct backend PIDs for race,
+duplicate and terminal-consumption sessions. A fixture row, an absent error, or53
+skipping an unfinished case cannot satisfy a missing checkpoint. Only after all checks
+and COMMIT does90 print the durable `final` record and
+`PAYMENT_DB_FINAL_ACCEPTANCE_COMPLETE`. Preserve that row/output plus session transcripts
+and observed lock waits. PID separation does not itself prove temporal overlap; the
+human must execute the documented barriers and retain pg_locks/pg_stat_activity evidence.
+Do not manually insert markers or reuse old test schemas. Fresh-target schemas refuse
+existing objects; rerun failed setup on a NEW disposable target, preserving failed-run
+evidence. The final marker is scoped to this one synthetic database run, not production
+certification or proof of on-chain exclusivity. SQL compilation/execution remains pending.
+
+## Tool inventory and smallest isolated setup step (read-only inspection)
+
+Windows: wsl.exe exists; psql/postgres/initdb/pg_ctl/Supabase CLI/Docker were not on
+PATH. Standard Program Files PostgreSQL/Docker and WinGet Supabase link locations were
+absent. Ubuntu was reached explicitly with `wsl.exe -d Ubuntu -- bash -lc ...`, as
+family, x86_64, about950GiB free. No corresponding Ubuntu executables were found on
+PATH, in /usr/lib/postgresql, /usr/local/bin or family/.local/bin; dpkg inventory
+found no installed postgresql/docker/podman packages. These are bounded discovery
+results, not a claim to have searched every disk. No database connection/service
+probe, container start, package installation or schema command was performed.
+
+The immediate human preparation step is to install a Docker-compatible local runtime
+(for example Docker Desktop with Ubuntu WSL integration), a reviewed standalone
+Supabase CLI, and a Windows psql client on PATH for the exact PowerShell commands
+above. No package.json/lockfile changes are needed. Official
+local-stack prerequisites: https://supabase.com/docs/guides/local-development/cli-workflows
+and https://supabase.com/docs/guides/local-development/cli/getting-started . Pin and
+record the selected CLI/image versions before use; no version was downloaded here.
+
+After separate authorization, bootstrap the official local Supabase stack in a NEW
+directory OUTSIDE every FlexSoar worktree, with empty application migrations, no seed,
+no linked project, distinct project ID, loopback-only published ports and synthetic
+local credentials. Review generated configuration BEFORE starting: start/bootstrap
+executes internal SQL and is NOT authorized in this task. A bare PostgreSQL install
+alone does not provide the required real Supabase auth functions/roles.
+
+Prepare flexsoar_payment_v2_test within that isolated environment with actual local
+Supabase auth schema/functions and required cluster roles/extensions. If the stack's
+bootstrap database is named postgres, the named target must receive a reviewed
+schema-only bootstrap from that FRESH LOCAL empty stack, never a shared/production
+dump or data snapshot. No auth stub should stand in for real grants/functions. Have
+the human review catalog compatibility and historical001–058 application order before
+applying anything; this setup is not yet implemented or tested. Then apply059–063
+and03 explicitly as above. Do not run the repository's migration directory via an
+automatic reset, wildcard runner or default seeds. No database currently exists that
+this session has established as ready, and no single install command alone can prove
+the required isolated schema identity.

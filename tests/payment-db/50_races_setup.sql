@@ -5,7 +5,7 @@ BEGIN;
 \ir 02_attestation_fixture.sql
 CREATE SCHEMA payment_db_races;
 CREATE TABLE payment_db_races.cases(name text PRIMARY KEY,f jsonb NOT NULL);
-CREATE TABLE payment_db_races.observations(name text,side text,payload jsonb NOT NULL,login name NOT NULL DEFAULT session_user,PRIMARY KEY(name,side));
+CREATE TABLE payment_db_races.observations(name text,side text,payload jsonb NOT NULL,login name NOT NULL DEFAULT session_user,backend_pid integer NOT NULL DEFAULT pg_backend_pid(),PRIMARY KEY(name,side));
 CREATE FUNCTION payment_db_races.assert_true(p boolean,label text) RETURNS void LANGUAGE plpgsql SET search_path=pg_catalog AS $$ BEGIN IF p IS DISTINCT FROM true THEN RAISE EXCEPTION 'ASSERT: %',label;END IF;END $$;
 CREATE FUNCTION payment_db_races.expect_error(statement text,fragment text) RETURNS jsonb LANGUAGE plpgsql SET search_path=pg_catalog AS $$
 BEGIN BEGIN EXECUTE statement;EXCEPTION WHEN OTHERS THEN IF strpos(SQLERRM,fragment)=0 THEN RAISE;END IF;RETURN jsonb_build_object('rejected',fragment);END;RAISE EXCEPTION 'expected rejection: %',statement;END $$;

@@ -16,3 +16,6 @@ DO $recovery$ DECLARE f jsonb;a payment_v2.attempts%rowtype;r jsonb;again jsonb;
 END $recovery$;
 SET CONSTRAINTS ALL IMMEDIATE;
 ROLLBACK;
+
+-- Reached only after every assertion and the intentional fixture rollback succeeded.
+SELECT payment_db_acceptance.complete('expiry','{}'::jsonb);

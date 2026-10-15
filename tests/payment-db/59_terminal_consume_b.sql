@@ -9,5 +9,7 @@ INSERT INTO payment_db_races.observations(name,side,payload)
  SELECT name,'consume_b',public.fn_payment_v2_reconcile_event((payload->>'event')::uuid)
  FROM payment_db_races.observations WHERE name=:'race_case' AND side='b'
  RETURNING name,side,payload,login;
+SELECT payment_db_acceptance.assert_true((SELECT count(1)=1 FROM payment_db_races.observations WHERE name=:'race_case' AND side='consume_b'),'actual terminal consumption row required');
+SELECT payment_db_acceptance.complete('terminal:'||:'race_case'||':b','{}'::jsonb);
 SET CONSTRAINTS ALL IMMEDIATE;
 -- HUMAN COMMIT after58 commits and this result returns. Run53 afterward.

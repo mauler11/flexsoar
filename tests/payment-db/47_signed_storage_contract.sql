@@ -16,6 +16,7 @@ SELECT payment_db_workers.assert_true(public.fn_payment_v2_signed_operation(:'op
 SELECT payment_db_workers.expect_error(format('SELECT public.fn_payment_v2_stage_signed_operation(%L,%L,%L::jsonb)',:'operation_id',:'lease_id',(:'signed_envelope_json'::jsonb)||jsonb_build_object('lastValidBlockHeight','999999')),'SIGNED_OPERATION_IMMUTABLE');
 SELECT public.fn_payment_v2_finish_operation(:'operation_id'::uuid,:'lease_id'::uuid,'unknown',(:'signed_envelope_json'::jsonb)->>'signature','synthetic lost send response');
 SELECT payment_db_workers.expect_error('UPDATE payment_v2.signed_operations SET last_valid_block_height=999999','permission denied');
+SELECT payment_db_acceptance.complete('signed_storage','{}'::jsonb);
 SET CONSTRAINTS ALL IMMEDIATE;
 COMMIT;
 -- After expiry/takeover, claim a fresh lease and fn_signed_operation must return the same envelope.

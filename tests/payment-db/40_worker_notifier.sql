@@ -14,5 +14,6 @@ UPDATE payment_db_workers.cases SET f=f||jsonb_build_object('jobs',public.fn_pay
 SELECT payment_db_workers.assert_true(jsonb_array_length(f->'jobs')>0,'outbox was leased') FROM payment_db_workers.cases WHERE name='operations';
 SELECT public.fn_payment_v2_finish_outbox((job->>'id')::uuid,(job->>'leaseId')::uuid,false,'synthetic provider unavailable') FROM payment_db_workers.cases CROSS JOIN LATERAL jsonb_array_elements(f->'jobs') job WHERE name='operations';
 SELECT payment_db_workers.expect_error('SELECT public.fn_payment_v2_claim_operations(gen_random_uuid(),1)','permission denied');
+SELECT payment_db_acceptance.complete('worker:notifier','{}'::jsonb);
 SET CONSTRAINTS ALL IMMEDIATE;
 COMMIT;

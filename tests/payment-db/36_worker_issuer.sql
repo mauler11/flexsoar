@@ -13,5 +13,6 @@ SELECT payment_db_workers.expect_error('INSERT INTO payment_v2.events DEFAULT VA
 SELECT public.fn_payment_v2_prepare_sale((f->>'listing')::uuid,(f->>'network')::uuid,f->'issuerTerms') FROM payment_db_workers.cases WHERE name IN('escrow','direct');
 UPDATE payment_db_workers.cases SET f=f||jsonb_build_object('permit',public.fn_payment_v2_authorize_attempt((f->>'attempt')::uuid)) WHERE name IN('escrow','direct');
 SELECT payment_db_workers.expect_error('SELECT public.fn_payment_v2_reconcile_event(gen_random_uuid())','permission denied');
+SELECT payment_db_acceptance.complete('worker:issuer','{}'::jsonb);
 SET CONSTRAINTS ALL IMMEDIATE;
 COMMIT;

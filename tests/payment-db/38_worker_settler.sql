@@ -14,5 +14,6 @@ SELECT payment_db_workers.expect_error('INSERT INTO payment_v2.events DEFAULT VA
 UPDATE payment_db_workers.cases SET f=f||jsonb_build_object('receipt',public.fn_payment_v2_reconcile_event((f->>'event')::uuid)) WHERE name IN('escrow','direct');
 SELECT payment_db_workers.assert_true(public.fn_payment_v2_reconcile_event((f->>'event')::uuid)=f->'receipt','same original corresponding receipt') FROM payment_db_workers.cases WHERE name IN('escrow','direct');
 SELECT payment_db_workers.expect_error('SELECT public.fn_payment_v2_record_verified_event(''{}'')','permission denied');
+SELECT payment_db_acceptance.complete('worker:settler','{}'::jsonb);
 SET CONSTRAINTS ALL IMMEDIATE;
 COMMIT;

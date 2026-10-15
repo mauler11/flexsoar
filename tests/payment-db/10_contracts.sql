@@ -58,3 +58,6 @@ END $tests$;
 -- Force deferred USDC/card journal constraints now, within this rollback-only fixture transaction.
 SET CONSTRAINTS ALL IMMEDIATE;
 ROLLBACK;
+
+-- Reached only after every assertion and the intentional fixture rollback succeeded.
+SELECT payment_db_acceptance.complete('core:10','{}'::jsonb);

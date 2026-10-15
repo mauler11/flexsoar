@@ -1698,3 +1698,130 @@ Additional authored terminal-consumption barrier files:
   the identical canonical receipt.53 checks both receipts and exact financial counts.
 Use58/59 instead of sequential56 on a fresh terminal case. Both represent the same
 canonical terminal evidence, never two purported valid release/refund outcomes. NOT RUN.
+
+## Database suite final completeness gate (after5c3db0e)
+
+Founder explicitly confirmed059–063 have NEVER been applied anywhere. No migration
+file is changed in this follow-up; no SQL execution or database connection occurred.
+Starting HEAD was5c3db0e05a103208b1aece2781dfacf838de3949 on track/payment-security;
+HEAD..main was empty. Human dependency modifications and the pre-existing untracked
+payment-security-5c3db0e.diff are preserved and excluded from the commit.
+
+The incremental46/53 assertions remain, but only90_final_acceptance.sql can certify
+suite completion. New03 creates private, disposable-test-only explicit completion
+records with session_user, backend PID, timestamp and details. Its SECURITY DEFINER
+recorder has a fixed scenario allowlist, verifies dedicated worker identity/expected
+login for worker checkpoints, and reserves administrative checkpoints for its actual
+setup owner. PUBLIC/anon/authenticated/service_role have no access; workers get only
+helper execution, no direct table DML. This is trusted test instrumentation, not a
+financial RPC or a malicious-administrator-resistant audit system.
+
+Workers36–40 and signed-storage47 record success in their assertion transaction.
+Core10/20/30 and expiry71 record completion only AFTER successful assertion flow and
+intentional fixture rollback.46/53 now COMMIT successful checkpoint writes;53 still
+skips unfinished cases for incremental use. Final90 requires34 explicit successful
+checkpoints, including every five-role worker, core/signed-storage/expiry case, duplicate
+settlement in BOTH modes, twelve named races, BOTH terminal-consumer backends for EACH
+terminal case, explicit rollback acknowledgement, and BOTH stale-worker rejections.
+Missing checkpoints fail. It reruns actual worker/financial assertions, checks dedicated
+login names and distinct backend PIDs, and only after successful COMMIT emits the
+persisted final row and PAYMENT_DB_FINAL_ACCEPTANCE_COMPLETE. Fixture rows or lack of
+errors do not constitute successful completion.
+
+41/42 now retain mode-specific committed checkpoints, with actual assertions replacing
+boolean-only acceptance.50 records race backend PIDs.58/59 refuse missing consumption
+rows and commit terminal checkpoints with the original financial transaction.55 refuses
+missing original lease observations and commits explicit stale-completion rejection
+checkpoints.60 is HUMAN acknowledgement in original A backend after its documented
+ROLLBACK; final90 requires a distinct A/B backend for that case. A PID cannot prove
+overlap or that a human observed a lock wait: retain interactive transcripts and
+pg_locks/pg_stat_activity evidence. Sequential56 does NOT satisfy mandatory58/59.
+
+Exact final HUMAN command, after all prerequisite/setup/scenarios in payment-db README,
+using verified isolated PGHOST/PGPORT/PGDATABASE/PGOPTIONS and original setup owner:
+
+```powershell
+psql -X -v ON_ERROR_STOP=1 -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -f tests/payment-db/90_final_acceptance.sql
+if ($LASTEXITCODE -ne 0) { throw 'Payment database final acceptance FAILED or incomplete' }
+```
+
+New test-only functions (no application exports/signatures changed):
+- payment_db_acceptance.assert_true(p boolean,label text) ? void.
+- payment_db_acceptance.complete(p_scenario text,p_details jsonb) ? void.
+
+File inventory:
+- tests/payment-db/03_completion_setup.sql: private explicit completion recorder/ACLs.
+- tests/payment-db/10_contracts.sql: successful core checkpoint after fixture rollback.
+- tests/payment-db/20_outcomes_recovery.sql: successful outcome checkpoint after rollback.
+- tests/payment-db/30_permissions.sql: successful authorization checkpoint after rollback.
+- tests/payment-db/36_worker_issuer.sql: explicit real issuer completion.
+- tests/payment-db/37_worker_verifier.sql: explicit real verifier completion.
+- tests/payment-db/38_worker_settler.sql: explicit real settler completion.
+- tests/payment-db/39_worker_executor.sql: explicit real executor completion.
+- tests/payment-db/40_worker_notifier.sql: explicit real notifier completion.
+- tests/payment-db/41_session_a.sql: first duplicate-consumer mode/backend checkpoint.
+- tests/payment-db/42_session_b.sql: asserted counts and second duplicate checkpoint.
+- tests/payment-db/46_worker_results.sql: commit successful result checkpoint.
+- tests/payment-db/47_signed_storage_contract.sql: explicit signed storage completion.
+- tests/payment-db/50_races_setup.sql: actual race backend PID capture.
+- tests/payment-db/53_race_assert.sql: commit successful named incremental race checks.
+- tests/payment-db/55_stale_worker.sql: missing-row rejection and durable stale checkpoint.
+- tests/payment-db/58_terminal_consume_a.sql: explicit successful first terminal consumer.
+- tests/payment-db/59_terminal_consume_b.sql: explicit successful second terminal consumer.
+- tests/payment-db/60_rollback_ack.sql: original backend human rollback acknowledgement.
+- tests/payment-db/71_expiry_relink_recovery.sql: explicit successful expiry/relink recovery.
+- tests/payment-db/90_final_acceptance.sql: strict34-checkpoint gate and committed final result.
+- tests/payment-db/README.md: exact order/command, test semantics and isolated setup plan.
+- docs/handoff/payment-security.md: evidence, scope and unverified boundaries.
+
+Local database tooling investigation (NO CONNECTIONS): Windows wsl.exe exists; PostgreSQL
+binaries, psql, Docker and Supabase CLI were absent from PATH and checked standard
+Program Files/WinGet link locations. WSL Ubuntu executes as family, x86_64, filesystem
+about950GiB available. Its PATH and checked system/local-user locations found no
+PostgreSQL/Docker/Supabase tooling. Bounded inventory is not an exhaustive disk search.
+An initial dpkg formatted probe and a later quoted shell loop had Windows/WSL quoting
+errors; direct executable probes were used to avoid treating those errors as absence.
+
+Immediate human setup step: provision a Docker-compatible runtime (e.g. Docker Desktop
+with Ubuntu integration), reviewed standalone Supabase CLI, and psql client, without
+project dependency edits. Official prerequisites reviewed:
+https://supabase.com/docs/guides/local-development/cli-workflows . Then, after separate
+SQL/bootstrap authorization, create a NEW out-of-worktree local Supabase stack with
+empty app migrations/no seeds/no linked cloud project and loopback ports. Real auth
+schema/functions and roles are required; vanilla PostgreSQL alone or an auth stub is
+insufficient. Prepare the named flexsoar_payment_v2_test database using ONLY the fresh
+local bootstrap schema, then review/apply001–058,059–063 and03 explicitly. See README
+for default stack dbname versus named-test-target handling. No production/shared dump,
+credentials or data snapshot is needed. No database is claimed ready or verified.
+
+Verification this follow-up:
+- npx tsc --noEmit: exit0.
+- npm test -- --reporter=json --outputFile=<OS TEMP>/flexsoar-db-completeness-tests.json:
+  488 passed /2 failed /490 total, only unchanged shared PricePayout FSC-copy assertions.
+- Final webpack result will be recorded below when the running command completes.
+- All new/modified SQL, completeness gate, permissions, constraints and concurrency:
+  NOT RUN. Static source review is not SQL compilation or database proof.
+- No production application/Rust/funding configuration changed. Funding remains disabled;
+  existing dedicated connection, chain observer/sender, replacement-operation and isolated
+  end-to-end integration blockers remain. No dependency install/change, keys, public-chain
+  actions, emails, push or deployment. OpenCode was not used.
+
+Final normal webpack validation: npx next build --webpack exited0,40/40pages and full
+route/build-trace completion. Existing optional Privy @farcaster/mini-app-solana warning
+remains; no configuration suppression or dependency edit. No environment files or
+integration-credential environment names were present in this validation shell.
+Final direct WSL probes (no shell quoting) reported dpkg-query: no packages found for
+postgresql, postgresql-client, postgresql-16/17, docker.io/docker-ce/podman; ls reported
+all checked PostgreSQL/local/user executable paths absent. Windows winget.exe exists
+at the current user's WindowsApps link. Immediate HUMAN installer step may use
+winget install --exact --id Docker.DockerDesktop --source winget, then enable its
+Ubuntu WSL integration. Nothing was installed or started here. CLI/psql and reviewed
+fresh-local Supabase schema preparation are still required afterward; no ready database
+or one-command schema bootstrap is claimed. git diff --check: exit0.
+
+Additional discovery: Windows per-user Programs/DockerDesktop and Programs/PostgreSQL,
+plus Scoop Supabase/PostgreSQL locations were absent. wsl.exe --version reports
+WSL2.7.14.0/kernel6.18.33.2-2. Official Docker Windows/WSL installation guidance:
+https://docs.docker.com/desktop/setup/install/windows-install/ . Final90 additionally
+requires complete current worker/race case inventories and retained terminal-consumer
+results so no zero-row loop can stand in for actual verification.

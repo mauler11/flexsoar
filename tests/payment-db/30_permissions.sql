@@ -47,3 +47,6 @@ SELECT pg_temp.expect_error('SELECT public.fn_payment_v2_record_verified_event('
 RESET ROLE;
 RESET SESSION AUTHORIZATION;
 ROLLBACK;
+
+-- Reached only after every assertion and the intentional fixture rollback succeeded.
+SELECT payment_db_acceptance.complete('core:30','{}'::jsonb);

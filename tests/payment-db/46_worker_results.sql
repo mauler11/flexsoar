@@ -16,4 +16,5 @@ DO $check$ DECLARE c record;n bigint;BEGIN
  END LOOP;
 END $check$;
 SET CONSTRAINTS ALL IMMEDIATE;
-ROLLBACK;
+SELECT payment_db_acceptance.complete('worker_results','{}'::jsonb);
+COMMIT;

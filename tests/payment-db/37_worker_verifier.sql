@@ -13,5 +13,6 @@ SELECT payment_db_workers.expect_error('INSERT INTO payment_v2.events DEFAULT VA
 UPDATE payment_db_workers.cases SET f=f||jsonb_build_object('event',public.fn_payment_v2_record_verified_event((f->'proof')||jsonb_build_object('permitHex',f->>'permit'))) WHERE name IN('escrow','direct');
 SELECT public.fn_payment_v2_recovery_binding(f->'proof'->>'attempt',f->'proof'->>'genesis',f->'proof'->>'program') FROM payment_db_workers.cases WHERE name='escrow';
 SELECT payment_db_workers.expect_error('SELECT public.fn_payment_v2_authorize_attempt(gen_random_uuid())','permission denied');
+SELECT payment_db_acceptance.complete('worker:verifier','{}'::jsonb);
 SET CONSTRAINTS ALL IMMEDIATE;
 COMMIT;

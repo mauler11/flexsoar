@@ -12,6 +12,7 @@ DO $check$ DECLARE c record;a jsonb;b jsonb;expected_events int;expected_journal
    PERFORM payment_db_races.assert_true((a->0->>'leaseId')<>(b->0->>'leaseId'),'unique lease identities');
    PERFORM payment_db_races.assert_true(((a->0->>'id')=(b->0->>'id'))=(c.name LIKE '%takeover'),'same job only for expired takeover; SKIP LOCKED jobs differ');
    PERFORM payment_db_races.assert_true((SELECT count(DISTINCT login)=2 FROM payment_db_races.observations WHERE name=c.name),'two actual login identities');
+   PERFORM payment_db_acceptance.complete('race:'||c.name,'{}'::jsonb);
    CONTINUE;
   END IF;
   IF c.name='rollback' THEN PERFORM payment_db_races.assert_true(a IS NULL,'A provisional receipt/observations rolled back');ELSE PERFORM payment_db_races.assert_true(a IS NOT NULL,'A committed');END IF;
@@ -19,7 +20,8 @@ DO $check$ DECLARE c record;a jsonb;b jsonb;expected_events int;expected_journal
    PERFORM payment_db_races.assert_true(NOT EXISTS(SELECT 1 FROM payment_v2.events WHERE sale_id=(c.f->>'sale')::uuid),'no contradictory financial evidence');
    PERFORM payment_db_races.assert_true(NOT EXISTS(SELECT 1 FROM public.orders WHERE payment_v2_attempt_id=(c.f->>'attempt')::uuid),'no order');
    PERFORM payment_db_races.assert_true((SELECT owner_id=(c.f->>'seller')::uuid AND status='active' FROM public.cards WHERE id=(c.f->>'card')::uuid),'no claim movement');
-   PERFORM payment_db_races.assert_true((SELECT status='cancelled' FROM public.listings WHERE id=(c.f->>'listing')::uuid),'canonical revocation closes listing');CONTINUE;
+   PERFORM payment_db_races.assert_true((SELECT status='cancelled' FROM public.listings WHERE id=(c.f->>'listing')::uuid),'canonical revocation closes listing');
+   PERFORM payment_db_acceptance.complete('race:'||c.name,'{}'::jsonb);CONTINUE;
   END IF;
   expected_events:=CASE WHEN c.name IN('release_refund','refund_release') THEN 2 ELSE 1 END;
   expected_journal:=CASE c.name WHEN 'release_refund' THEN 5 WHEN 'refund_release' THEN 4 ELSE 2 END;
@@ -41,7 +43,9 @@ DO $check$ DECLARE c record;a jsonb;b jsonb;expected_events int;expected_journal
    PERFORM payment_db_races.assert_true((SELECT count(1)=2 FROM payment_db_races.observations WHERE name=c.name AND side IN('consume_a','consume_b')),'both terminal consumer barriers committed');
    PERFORM payment_db_races.assert_true((SELECT x.payload=y.payload FROM payment_db_races.observations x JOIN payment_db_races.observations y ON y.name=x.name AND y.side='consume_b' WHERE x.name=c.name AND x.side='consume_a'),'same corresponding terminal receipt');
   END IF;
+  PERFORM payment_db_acceptance.complete('race:'||c.name,'{}'::jsonb);
  END LOOP;
 END $check$;
 SET CONSTRAINTS ALL IMMEDIATE;
-ROLLBACK;
+-- Incremental checks may skip unfinished cases; only90 is final acceptance.
+COMMIT;

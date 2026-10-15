@@ -52,3 +52,6 @@ BEGIN
 END $tests$;
 SET CONSTRAINTS ALL IMMEDIATE;
 ROLLBACK;
+
+-- Reached only after every assertion and the intentional fixture rollback succeeded.
+SELECT payment_db_acceptance.complete('core:20','{}'::jsonb);

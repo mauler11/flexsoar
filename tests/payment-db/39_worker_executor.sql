@@ -15,5 +15,6 @@ SELECT payment_db_workers.assert_true(jsonb_array_length(f->'leases')>0,'work wa
 SELECT public.fn_payment_v2_operation_context((op->>'id')::uuid,(op->>'leaseId')::uuid) FROM payment_db_workers.cases CROSS JOIN LATERAL jsonb_array_elements(f->'leases') op WHERE name='operations';
 SELECT public.fn_payment_v2_signed_operation((op->>'id')::uuid,(op->>'leaseId')::uuid) FROM payment_db_workers.cases CROSS JOIN LATERAL jsonb_array_elements(f->'leases') op WHERE name='operations' AND op->>'action'='execute_outcome';
 SELECT payment_db_workers.expect_error('SELECT public.fn_payment_v2_reconcile_event(gen_random_uuid())','permission denied');
+SELECT payment_db_acceptance.complete('worker:executor','{}'::jsonb);
 SET CONSTRAINTS ALL IMMEDIATE;
 COMMIT;
