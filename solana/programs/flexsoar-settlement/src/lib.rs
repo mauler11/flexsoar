@@ -323,81 +323,83 @@ mod tests {
     }
 }
 
+// Large account wrappers live on the heap to keep SBF entrypoint frames below 4 KiB.
+// This does not change account serialization or instruction account ordering.
 // Account constraints bind every handler to this program's retained PDAs.
 #[derive(Accounts)] pub struct Legacy {}
 #[derive(Accounts)]
 pub struct Init<'info> {
-    #[account(init,payer=bootstrap,space=8+ConfigV2::INIT_SPACE,seeds=[b"config-v2"],bump)] pub config:Account<'info,ConfigV2>,
+    #[account(init,payer=bootstrap,space=8+ConfigV2::INIT_SPACE,seeds=[b"config-v2"],bump)] pub config:Box<Account<'info,ConfigV2>>,
     #[account(mut)] pub bootstrap:Signer<'info>, pub program_data:Account<'info,ProgramData>, pub mint:Account<'info,Mint>, pub system_program:Program<'info,System>,
 }
 #[derive(Accounts)]
 pub struct Govern<'info> {
-    #[account(mut,seeds=[b"config-v2"],bump)] pub config:Account<'info,ConfigV2>, pub first:Signer<'info>, pub second:Signer<'info>,
+    #[account(mut,seeds=[b"config-v2"],bump)] pub config:Box<Account<'info,ConfigV2>>, pub first:Signer<'info>, pub second:Signer<'info>,
 }
 #[derive(Accounts)]
 pub struct Guardian<'info> {
-    #[account(mut,seeds=[b"config-v2"],bump)] pub config:Account<'info,ConfigV2>,
+    #[account(mut,seeds=[b"config-v2"],bump)] pub config:Box<Account<'info,ConfigV2>>,
     #[account(address=config.roles.guardian)] pub guardian:Signer<'info>,
 }
 #[derive(Accounts)]
 #[instruction(card_id:[u8;32])]
 pub struct Register<'info> {
-    #[account(seeds=[b"config-v2"],bump)] pub config:Account<'info,ConfigV2>,
-    #[account(init,payer=inventory,space=8+CardControl::INIT_SPACE,seeds=[b"card-v2",card_id.as_ref()],bump)] pub card:Account<'info,CardControl>,
+    #[account(seeds=[b"config-v2"],bump)] pub config:Box<Account<'info,ConfigV2>>,
+    #[account(init,payer=inventory,space=8+CardControl::INIT_SPACE,seeds=[b"card-v2",card_id.as_ref()],bump)] pub card:Box<Account<'info,CardControl>>,
     #[account(mut,address=config.roles.inventory)] pub inventory:Signer<'info>,
     #[account(address=config.roles.authenticator)] pub authenticator:Signer<'info>, pub system_program:Program<'info,System>,
 }
 #[derive(Accounts)]
 #[instruction(template:Permit)]
 pub struct Open<'info> {
-    #[account(seeds=[b"config-v2"],bump)] pub config:Account<'info,ConfigV2>,
-    #[account(mut,seeds=[b"card-v2",template.card.as_ref()],bump)] pub card:Account<'info,CardControl>,
-    #[account(init,payer=issuer,space=8+SaleV2::INIT_SPACE,seeds=[b"sale-v2",template.sale_id.as_ref()],bump)] pub sale:Account<'info,SaleV2>,
-    #[account(init,payer=issuer,seeds=[b"escrow-v2",sale.key().as_ref()],bump,token::mint=mint,token::authority=sale)] pub escrow:Account<'info,TokenAccount>,
+    #[account(seeds=[b"config-v2"],bump)] pub config:Box<Account<'info,ConfigV2>>,
+    #[account(mut,seeds=[b"card-v2",template.card.as_ref()],bump)] pub card:Box<Account<'info,CardControl>>,
+    #[account(init,payer=issuer,space=8+SaleV2::INIT_SPACE,seeds=[b"sale-v2",template.sale_id.as_ref()],bump)] pub sale:Box<Account<'info,SaleV2>>,
+    #[account(init,payer=issuer,seeds=[b"escrow-v2",sale.key().as_ref()],bump,token::mint=mint,token::authority=sale)] pub escrow:Box<Account<'info,TokenAccount>>,
     #[account(address=config.mint)] pub mint:Account<'info,Mint>,
     #[account(mut,address=config.roles.issuer)] pub issuer:Signer<'info>, pub token_program:Program<'info,Token>, pub system_program:Program<'info,System>, pub rent:Sysvar<'info,Rent>,
 }
 #[derive(Accounts)]
 pub struct Lifecycle<'info> {
-    #[account(seeds=[b"config-v2"],bump)] pub config:Account<'info,ConfigV2>,
-    #[account(mut,seeds=[b"card-v2",sale.terms.card.as_ref()],bump)] pub card:Account<'info,CardControl>,
-    #[account(mut,seeds=[b"sale-v2",sale.terms.sale_id.as_ref()],bump=sale.bump)] pub sale:Account<'info,SaleV2>,
+    #[account(seeds=[b"config-v2"],bump)] pub config:Box<Account<'info,ConfigV2>>,
+    #[account(mut,seeds=[b"card-v2",sale.terms.card.as_ref()],bump)] pub card:Box<Account<'info,CardControl>>,
+    #[account(mut,seeds=[b"sale-v2",sale.terms.sale_id.as_ref()],bump=sale.bump)] pub sale:Box<Account<'info,SaleV2>>,
     #[account(address=config.roles.issuer)] pub issuer:Signer<'info>,
 }
 #[derive(Accounts)]
 pub struct Purchase<'info> {
-    #[account(mut,seeds=[b"config-v2"],bump)] pub config:Account<'info,ConfigV2>,
-    #[account(mut,seeds=[b"card-v2",sale.terms.card.as_ref()],bump)] pub card:Account<'info,CardControl>,
-    #[account(mut,seeds=[b"sale-v2",sale.terms.sale_id.as_ref()],bump=sale.bump)] pub sale:Account<'info,SaleV2>,
+    #[account(mut,seeds=[b"config-v2"],bump)] pub config:Box<Account<'info,ConfigV2>>,
+    #[account(mut,seeds=[b"card-v2",sale.terms.card.as_ref()],bump)] pub card:Box<Account<'info,CardControl>>,
+    #[account(mut,seeds=[b"sale-v2",sale.terms.sale_id.as_ref()],bump=sale.bump)] pub sale:Box<Account<'info,SaleV2>>,
     #[account(address=config.roles.issuer)] pub issuer:Signer<'info>, pub buyer:Signer<'info>,
-    #[account(mut)] pub source:Account<'info,TokenAccount>, #[account(mut)] pub seller_token:Account<'info,TokenAccount>, #[account(mut)] pub treasury_token:Account<'info,TokenAccount>,
-    #[account(mut,seeds=[b"escrow-v2",sale.key().as_ref()],bump,token::authority=sale,token::mint=config.mint)] pub escrow:Account<'info,TokenAccount>, pub token_program:Program<'info,Token>,
+    #[account(mut)] pub source:Box<Account<'info,TokenAccount>>, #[account(mut)] pub seller_token:Box<Account<'info,TokenAccount>>, #[account(mut)] pub treasury_token:Box<Account<'info,TokenAccount>>,
+    #[account(mut,seeds=[b"escrow-v2",sale.key().as_ref()],bump,token::authority=sale,token::mint=config.mint)] pub escrow:Box<Account<'info,TokenAccount>>, pub token_program:Program<'info,Token>,
     /// CHECK: fixed runtime instructions sysvar, never caller-provided contents.
     #[account(address=anchor_lang::solana_program::sysvar::instructions::ID)] pub instructions:UncheckedAccount<'info>,
 }
 #[derive(Accounts)]
 pub struct Staff<'info> {
-    #[account(seeds=[b"config-v2"],bump)] pub config:Account<'info,ConfigV2>,
-    #[account(mut,seeds=[b"sale-v2",sale.terms.sale_id.as_ref()],bump=sale.bump)] pub sale:Account<'info,SaleV2>, pub actor:Signer<'info>,
+    #[account(seeds=[b"config-v2"],bump)] pub config:Box<Account<'info,ConfigV2>>,
+    #[account(mut,seeds=[b"sale-v2",sale.terms.sale_id.as_ref()],bump=sale.bump)] pub sale:Box<Account<'info,SaleV2>>, pub actor:Signer<'info>,
 }
 #[derive(Accounts)]
 pub struct GovernSale<'info> {
-    #[account(seeds=[b"config-v2"],bump)] pub config:Account<'info,ConfigV2>,
-    #[account(mut,seeds=[b"sale-v2",sale.terms.sale_id.as_ref()],bump=sale.bump)] pub sale:Account<'info,SaleV2>, pub first:Signer<'info>, pub second:Signer<'info>,
+    #[account(seeds=[b"config-v2"],bump)] pub config:Box<Account<'info,ConfigV2>>,
+    #[account(mut,seeds=[b"sale-v2",sale.terms.sale_id.as_ref()],bump=sale.bump)] pub sale:Box<Account<'info,SaleV2>>, pub first:Signer<'info>, pub second:Signer<'info>,
 }
 #[derive(Accounts)]
 pub struct Outcome<'info> {
-    #[account(mut,seeds=[b"config-v2"],bump)] pub config:Account<'info,ConfigV2>,
-    #[account(mut,seeds=[b"sale-v2",sale.terms.sale_id.as_ref()],bump=sale.bump)] pub sale:Account<'info,SaleV2>,
-    #[account(mut,seeds=[b"escrow-v2",sale.key().as_ref()],bump,token::authority=sale,token::mint=sale.terms.mint)] pub escrow:Account<'info,TokenAccount>,
-    #[account(mut)] pub seller_token:Account<'info,TokenAccount>, #[account(mut)] pub treasury_token:Account<'info,TokenAccount>, #[account(mut)] pub refund_token:Account<'info,TokenAccount>, pub token_program:Program<'info,Token>,
+    #[account(mut,seeds=[b"config-v2"],bump)] pub config:Box<Account<'info,ConfigV2>>,
+    #[account(mut,seeds=[b"sale-v2",sale.terms.sale_id.as_ref()],bump=sale.bump)] pub sale:Box<Account<'info,SaleV2>>,
+    #[account(mut,seeds=[b"escrow-v2",sale.key().as_ref()],bump,token::authority=sale,token::mint=sale.terms.mint)] pub escrow:Box<Account<'info,TokenAccount>>,
+    #[account(mut)] pub seller_token:Box<Account<'info,TokenAccount>>, #[account(mut)] pub treasury_token:Box<Account<'info,TokenAccount>>, #[account(mut)] pub refund_token:Box<Account<'info,TokenAccount>>, pub token_program:Program<'info,Token>,
     /// CHECK: fixed runtime instructions sysvar for standalone financial call.
     #[account(address=anchor_lang::solana_program::sysvar::instructions::ID)] pub instructions:UncheckedAccount<'info>,
 }
 #[derive(Accounts)]
 pub struct Acknowledge<'info> {
-    #[account(seeds=[b"config-v2"],bump)] pub config:Account<'info,ConfigV2>,
-    #[account(mut,seeds=[b"card-v2",sale.terms.card.as_ref()],bump)] pub card:Account<'info,CardControl>,
-    #[account(seeds=[b"sale-v2",sale.terms.sale_id.as_ref()],bump=sale.bump)] pub sale:Account<'info,SaleV2>,
+    #[account(seeds=[b"config-v2"],bump)] pub config:Box<Account<'info,ConfigV2>>,
+    #[account(mut,seeds=[b"card-v2",sale.terms.card.as_ref()],bump)] pub card:Box<Account<'info,CardControl>>,
+    #[account(seeds=[b"sale-v2",sale.terms.sale_id.as_ref()],bump=sale.bump)] pub sale:Box<Account<'info,SaleV2>>,
     #[account(address=config.roles.reconciler)] pub reconciler:Signer<'info>,
 }

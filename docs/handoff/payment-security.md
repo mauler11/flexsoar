@@ -10,9 +10,10 @@ refund and the policy defaults below. Implementation is NOT deployment approval.
 ## Release verdict
 
 FUNDING IS DISABLED. No environment flag can turn on the application signing path.
-Rust program/source and application protocol/adapters are implemented, but Rust/SBF
-compilation, validator execution, real Postgres grants/locks, schema and operational
-signing/configuration are NOT verified or complete. Never describe this as launch
+Rust/SBF compilation and bounded isolated-validator execution now pass (see latest
+verification below). Application protocol/adapters are implemented, but real
+Postgres grants/locks, schema and operational signing/configuration are NOT
+verified or complete. Never describe this as launch
 ready, a completed database integration, or proven atomic purchase recovery.
 
 The legacy builder and quote endpoints now refuse issuance. Checkout exposes only
@@ -57,7 +58,7 @@ Do not deploy only the settlement refusal, or re-enable an old builder to work a
   entries, SHA-256 834ca943173d4db87622426e161eeb17afcdbac94e37368e6f697430961925c5.
   Human must store immutable version AND full rule record, not just version label.
 
-## Program behavior and authority (source implemented; runtime unverified)
+## Program behavior and authority (bounded local execution verified; production unverified)
 
 initialize_v2 restricts bootstrap to THIS program's upgradeable ProgramData PDA
 and actual upgrade-authority signer. Initializes six-decimal mint, domain, policy,
@@ -110,7 +111,8 @@ Checks immutable sale/generation/mode/custody, current issuer epoch/treasury/pol
 program/config/domain, exact split and Clock validity at EXECUTION. Escrow branch
 atomically consumes sale, transfers full principal to escrow and increments bounded
 aggregate principal. Direct branch atomically consumes and transfers both 95/5 legs.
-Rollback relies on actual Solana transaction semantics; no validator proof yet.
+Rollback has now been exercised on the isolated validator for the bounded cases
+below; this does not prove database or deployed-production behavior.
 revise_sale increments revision only while open; revoke closes only unconsumed sale.
 A buy winning first beats cancel/reprice; a fence winning first rejects old buy.
 A funded sale requires a controlled refund, never unpaid cancellation.
@@ -265,7 +267,7 @@ counterfeit handling/return/disposal, changed-mind/post-release promises and los
 wallet redirection remain unresolved operational terms. They do not weaken the
 independent release/refund controls; refunds remain manual at launch.
 
-## Local verification and honest limits
+## Earlier verification before toolchain installation (historical; superseded below)
 
 Production TypeScript is exercised by purchase-payment.test.ts and payment-v2.test.ts:
 wire vectors, integer/interval/split checks, sponsored buyer+issuer signatures,
@@ -908,3 +910,169 @@ solana/tests/local-v2.mjs (explicit local configuration/wallet isolation) and th
 handoff (installed versions, real failed builds, evidence and next commands).
 Exports added: none. Funding disabled; no SQL/database writes, production identities,
 public signing/broadcasts, real funds, push or deployment. OpenCode not used.
+
+
+## Actual Rust / isolated-validator verification after OS prerequisites (2026-10-15)
+
+Starting commit 3e95bbf680e1de44caaefc2ce7d1139f6f4066ff, correct branch and
+HEAD..main empty. Human npm pair preserved unchanged and unstaged. No project
+manifests/lockfiles, deployment configuration, operational keys or SQL changed.
+Funding remains hard-coded false. This section supersedes earlier NOT RUN Rust
+and validator status; real database/production verification remains outstanding.
+
+### Confirmed implementation defect: SBF stack frames
+
+Native compilation alone missed an actual SBF defect. First locked SBF command
+returned exit0 BUT emitted unsafe stack diagnostics: open_sale global offset4808,
+buy_sale5672, execute_outcome4704, Open::try_accounts4744 and
+Purchase::try_accounts4336 (limit4096). The first artifact was NOT accepted or run.
+Changed program src/lib.rs: box ConfigV2/CardControl/SaleV2/TokenAccount account
+wrappers in Anchor contexts. No data fields, instruction arguments, serialization,
+account ordering, authority rules or dependency versions changed. Transfer helpers
+still take Account references through deref coercion. This fixes stack allocation,
+not a waiver/suppression of compiler diagnostics.
+
+Native final command (explicit WSL Ubuntu, host Rust/Cargo1.85.1):
+
+```powershell
+wsl.exe -d Ubuntu --exec env PATH=/home/family/.cargo/bin:/usr/local/bin:/usr/bin:/bin TMPDIR=/home/family/.cache/flexsoar-rust-tmp CARGO_TARGET_DIR=/home/family/.cache/flexsoar-native-target CARGO_BUILD_JOBS=2 cargo test --locked --manifest-path /mnt/c/Users/Family/flexsoar-payment-security/solana/Cargo.toml --lib
+```
+
+PASS exit0, 8 passed/0 failed/0 ignored: 7 explicit production-function/protocol
+unit tests plus Anchor-generated test_id. Repeated after boxing: same8/8. Native
+warnings include Anchor macro unexpected cfg and deprecations; none suppressed.
+An earlier attempt on the mounted Windows target failed linking with "No space
+left on device" despite later disk checks showing ample capacity; moving build
+and temp files to Linux disk with2 jobs resolved it. Exact transient cause was
+not proven. No cleanup of preexisting build/user work was used as a workaround.
+
+Final locked SBF command (Agave2.1.0, platform-tools1.43/Rust1.79.0-dev):
+
+```powershell
+wsl.exe -d Ubuntu --exec env PATH=/home/family/.cargo/bin:/home/family/.local/opt/flexsoar-tools/agave-2.1.0/solana-release/bin:/usr/local/bin:/usr/bin:/bin TMPDIR=/home/family/.cache/flexsoar-rust-tmp cargo-build-sbf --manifest-path /mnt/c/Users/Family/flexsoar-payment-security/solana/programs/flexsoar-settlement/Cargo.toml --sbf-out-dir /home/family/.cache/flexsoar-v2-local-build -- --locked
+```
+
+PASS exit0, release finished5m53s after boxing; NO stack-limit/overwrite diagnostics.
+Two deprecation warnings remain (upgradeable-loader module and macro realloc).
+Old Cargo warns about resolver fallback config; checked-in lock stays authoritative.
+Artifact /home/family/.cache/flexsoar-v2-local-build/flexsoar_settlement.so SHA256:
+99aa6bec4e949de3484bc7fef0b70a83b040bdf92a1060871fe4de8d4c64743c.
+Build may create ephemeral local program-key artifacts; none was read or used as
+an operational identity. Harness genesis uses only its in-memory test bootstrap.
+
+### Confirmed harness defect: Agave binding is not what --bind-address implies
+
+First startup inspection using ss found RPC18899, pubsub18900 and faucet18901
+bound to0.0.0.0 even though --bind-address127.0.0.1 was supplied. Pinned official
+Agave v2.1.0 validator/src/bin/solana-test-validator.rs confirms an unspecified
+faucet address; this flag does not confine all services. Stopped the owned validator
+and harness, verified host ports closed. That interrupted partial run is NOT counted
+as successful loopback-only verification. All its transaction requests used127.0.0.1,
+only valueless test assets/ephemeral keys; no public-chain connection or real funds.
+
+New solana/tests/run-local-v2.sh launches the ENTIRE harness/validator inside a
+fresh ROOTLESS user+network namespace, brings up ONLY lo, with no external network
+interface/route and no sudo or host network changes. Agave's wildcard sockets are
+therefore reachable only through that namespace's loopback, never the host/LAN.
+Before key generation, local-v2.mjs checks that its namespace differs from the
+parent and ip -j link lists exactly one UP loopback interface. Direct invocation
+outside the namespace was tested: exit1 "private network namespace required",
+before keys/validator startup. If unshare/ip/namespace checks fail, tests refuse;
+no fallback to exposed host binding or public RPC. Host ss showed no test listeners
+during isolated execution or after cleanup. Existing temporary local config and
+absent wallet path protections remain; no operational config/key loaded.
+
+Exact successful runtime command:
+
+```powershell
+wsl.exe -d Ubuntu --exec bash /mnt/c/Users/Family/flexsoar-payment-security/solana/tests/run-local-v2.sh /home/family/.cache/flexsoar-v2-local-build/flexsoar_settlement.so
+```
+
+PASS exit0: 84 ON-CHAIN SCENARIO GROUPS, no failures, using the compiled program,
+ephemeral identities and a valueless six-decimal SPL mint. This is a group count,
+not84 Rust #[test] functions or a count of all individual assert calls.
+
+Actual runtime coverage:
+- Unauthorized bootstrap rejected and config creation rolled back. Old initialize
+  and buy instructions rejected. Duplicate governor cannot satisfy native2-of-3.
+- Wrong domain/program/config/Card/pair/mode/generation/custody version/authority
+  epoch/mint/token program/treasury account/amount split/refund account rejected
+  in all3 sales; absent issuer or buyer signer rejected despite sponsored fees.
+- Two competing buyers for each of escrow-refund, vaulted-direct, escrow-release:
+  exactly ONE finalized purchase; winner debited1,000,000 units, loser debited0.
+  Seller/treasury receive950,000/50,000 only for direct or accepted release.
+- Insufficient escrow funding rolls back; direct first950,000 transfer followed
+  by failed50,000 second transfer rolls back balance AND open sale state.
+- Expired authorization rejected; reprice-first fences old revision (direct case).
+  Buy-first fences later cancellation AND repricing in both modes.
+- Receipt role and exact pair checked; authentication before receipt rejected;
+  receipt alone/failed authentication cannot authorize release or acknowledge claim.
+- Failed-auth escrow gets full1,000,000 refund including fee allocation; accepted
+  escrow releases stored95/5 only. Opposing approval/duplicate execution cannot
+  create a second terminal outcome. Concurrent duplicate exits plus conflicting
+  refund approval produce one successful exit; stale/batched/replayed commands fail.
+- Normal funding pause permits authorized recovery; emergency outflow pause blocks
+  execution with principal unchanged, governance resume permits it. Dust7 stays in
+  escrow; it neither prevents full principal exit nor becomes withdrawable surplus.
+- Future treasury/policy rotation does not retarget already funded release accounts.
+  Exit requests occur after original permit's wall-clock expiry without a new buy.
+- Only enrolled reconciler can acknowledge terminal outcome; premature/duplicate
+  acknowledgements fail. Refunded control quarantined; direct/released controls
+  adopt original buyer/vaulted state. This acknowledgement uses a clearly labelled
+  SIMULATED DB-commit digest, NOT evidence that Postgres consumed anything.
+- Waited for finalized slots; all3 retained961-byte Sale accounts match original
+  winner's690-byte permit exactly, with funding Clock inside original authorization
+  interval, funded slot retained and terminal outcome slot for release/refund.
+
+Negative tests now require LocalInstructionFailure with a real chain InstructionError;
+transport, serialization, fee-signing or RPC/confirmation failures cannot satisfy
+program-rejection assertions. Race losers must likewise have actual instruction
+errors. This closes a test false-positive gap, not a weakening of assertions.
+Captured bounded validator stderr helps diagnose failed startup using test context.
+
+### Limits and release blockers remain
+
+NO actual Postgres schema/RPC/grant/RLS/lock/ledger/outbox test has run. No shared DB
+was contacted. Browser/process-loss reconciliation still requires durable human-
+authored schema and real least-privilege verifier/settler/executor integration.
+Native tests/validator cannot establish those guarantees. All migration contracts
+above remain required, including retirement of directly callable legacy overloads.
+
+Not covered by this bounded validator run: cancel-first ordering (reprice-first IS
+covered); complete post-ack resale generation cycle; Squads CPI/enrollment and real
+staff/human independence; full dispute/reinspection supersession; destination ATA
+close/recreation at runtime; archival observer against real validator evidence;
+actual browser/worker restart plus DB recovery; public deployments and operational
+key rotation. Existing TS fixtures are not substitutes for those missing tests.
+IDL-generation workflow was not run; manual canonical instruction/retained-account
+ABI is what this harness exercised. No production authority/caps/policy unresolved
+items have been silently configured. No launch readiness claim.
+
+Files changed: program src/lib.rs (boxed contexts); local-v2.mjs (strict on-chain
+failure assertions, safety/isolation guard and expanded recovery tests);
+run-local-v2.sh (rootless loopback-only launcher); this handoff (actual evidence).
+No added public TS/Rust exports or frozen signature changes. Human npm pair and
+Cargo.lock hashes unchanged. Funding disabled; no SQL/shared DB/production keys/
+public-chain activity/real funds/push/deployment. OpenCode not used.
+
+Final normal checks AFTER this continuation's changes:
+- npx --no-install tsc --noEmit: PASS exit0.
+- npm test -- --reporter=dot: 453 passed / 2 failed / 455, exit1; only known FSC
+  copy assertions1901/1960. Dedicated payment suites91/91 within that full run;
+  the additional intermittent market failures did not reproduce this time and
+  remain documented rather than repaired by unrelated source changes.
+- npx --no-install next build --webpack: PASS exit0,40/40 static pages, full route/
+  trace completion. Same optional Privy Farcaster module warning; no dependency
+  added. Integration credentials removed from build child environment, telemetry
+  disabled, no env files/operational secrets supplied. No API/admin/cron invocation.
+- node --check local-v2.mjs, bash -n run-local-v2.sh and git diff --check: PASS.
+- Final native test process exit0 confirmed; final isolated harness exit0 confirmed.
+- Final host ss: no18899/18900/18901/18902 listeners. Direct unsafe invocation
+  outside a private namespace fails BEFORE key generation. User dependencies and
+  Cargo.lock retained the exact hashes listed above; old data worktree untouched.
+
+Next human action is the reviewed migration/schema implementation in an ISOLATED
+Postgres instance, then actual privilege/constraint/locking/crash-recovery acceptance
+checks using the plain-English RPC contracts above. Program validation is now real,
+but it cannot authorize production funding without database protection, enrolled
+operational identities/signing infrastructure and the remaining integration tests.

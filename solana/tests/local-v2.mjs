@@ -1,13 +1,13 @@
 /** Explicit opt-in, owned loopback validator only. NO production key files.
  * First build the program with the reviewed SBF toolchain, then:
- * node solana/tests/local-v2.mjs --run-local-validator --program-so <built.so>
+ * bash solana/tests/run-local-v2.sh <built.so> (inside Ubuntu)
  * Needs existing @solana/web3.js installation, not @solana/spl-token.
  * SPL packing reference: https://github.com/solana-program/token/blob/main/interface/src/instruction.rs
  * This drives the ACTUAL compiled program; it is not a simulated escrow ledger.
  */
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync, readlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname, basename } from 'node:path';
 import net from 'node:net';
@@ -20,6 +20,12 @@ if(!args.includes('--program-so')||!so?.endsWith('.so')||!existsSync(so))throw n
 const validator='solana-test-validator';
 const help=execFileSync(validator,['--help'],{encoding:'utf8',windowsHide:true});
 for(const flag of ['--upgradeable-program','--bind-address','--ledger','--rpc-port','--faucet-port','--gossip-port','--dynamic-port-range','--config','--mint'])if(!help.includes(flag))throw new Error(`Unsupported validator: missing ${flag}`);
+// Agave 2.1's RPC/pubsub/faucet ignore --bind-address. Require a NEW
+// rootless network namespace containing ONLY loopback before generating keys.
+const parentNetwork=process.env.FLEXSOAR_PARENT_NETNS;
+if(!parentNetwork||parentNetwork===readlinkSync('/proc/self/ns/net'))throw new Error('Use run-local-v2.sh: private network namespace required.');
+const links=JSON.parse(execFileSync('ip',['-j','link','show'],{encoding:'utf8'}));
+if(!Array.isArray(links)||links.length!==1||links[0].ifname!=='lo'||!links[0].flags.includes('UP'))throw new Error('Local test namespace must contain only active loopback.');
 const URL_RPC='http://127.0.0.1:18899';
 assert.equal(new URL(URL_RPC).hostname,'127.0.0.1');
 for(const port of [18899,18900,18901])await new Promise((ok,bad)=>{const s=net.createServer();s.once('error',()=>bad(new Error('Local test port occupied; refusing to reuse existing validator.')));s.listen(port,'127.0.0.1',()=>s.close(ok));});
@@ -29,7 +35,7 @@ const bootstrap=Keypair.generate(),gov=[Keypair.generate(),Keypair.generate(),Ke
 const roleNames=['issuer','inventory','receiver','authenticator','reviewer','release','reconciler','guardian'];
 const roles=Object.fromEntries(roleNames.map(n=>[n,Keypair.generate()]));
 const seller=Keypair.generate(),treasury=Keypair.generate(),buyers=[Keypair.generate(),Keypair.generate(),Keypair.generate()],mint=Keypair.generate();
-const root=mkdtempSync(join(tmpdir(),'flexsoar-local-'));let child;
+const root=mkdtempSync(join(tmpdir(),'flexsoar-local-'));let child;let validatorErrors='';
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 const program=new PublicKey('CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF');
 const token=new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),ataProgram=new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
@@ -43,7 +49,15 @@ const ataIx=owner=>new TransactionInstruction({programId:ataProgram,data:Buffer.
 const roleBytes=()=>Buffer.concat(roleNames.map(n=>roles[n].publicKey.toBuffer()));
 const encode=p=>Buffer.concat([Buffer.from([70,83,79,65,82,86,50,0,2,p.mode]),...['domain','program','config','saleId','card','pair','attempt','beneficiary','policy','buyer','seller','treasury','mint','tokenProgram','buyerToken','sellerToken','treasuryToken','refundToken','issuer'].map(n=>p[n]),...['generation','revision','custodyVersion','authorityEpoch','total','net','fee','validFrom','expiresAt'].map(n=>u64(p[n]))]);
 const attest=(p,sale,action,revision=0)=>Buffer.concat([Buffer.from([70,83,79,65,82,86,50,0,action]),sale.toBuffer(),p.attempt,p.pair,hash(`local-evidence-${action}`),u64(revision)]);
-let nonce=0,checks=0,connection;
+let nonce=0,checks=0,connection;const retained=[];
+class LocalInstructionFailure extends Error {
+  constructor(signature,chainError){super(`Local transaction ${signature}: ${JSON.stringify(chainError)}`);this.chainError=chainError;}
+}
+const isInstructionFailure=e=>e instanceof LocalInstructionFailure && Array.isArray(e.chainError?.InstructionError);
+// Transport, serialization, sponsorship or confirmation failures must NOT pass
+// a test that claims the actual program rejected a command.
+async function rejectsOnChain(promise){await assert.rejects(promise,isInstructionFailure);}
+function checkRaceLoser(results){for(const r of results)if(r.status==='rejected')assert.ok(isInstructionFailure(r.reason),String(r.reason));}
 async function send(instructions,signers=[],tables=[]){
   const block=await connection.getLatestBlockhash('confirmed');
   const message=new TransactionMessage({payerKey:bootstrap.publicKey,recentBlockhash:block.blockhash,instructions:[ComputeBudgetProgram.setComputeUnitLimit({units:500000+(nonce++%10000)}),...instructions]}).compileToV0Message(tables);
@@ -52,7 +66,7 @@ async function send(instructions,signers=[],tables=[]){
   // Failed commands must execute on our owned validator, not merely preflight.
   const signature=await connection.sendRawTransaction(tx.serialize(),{skipPreflight:true});
   const confirmation=await connection.confirmTransaction({signature,...block},'confirmed');
-  assert.equal(confirmation.value.err,null);return signature;
+  if(confirmation.value.err)throw new LocalInstructionFailure(signature,confirmation.value.err);return signature;
 }
 const balance=async address=>BigInt((await connection.getTokenAccountBalance(address,'confirmed')).value.amount);
 async function mintTo(owner,amount){await send([new TransactionInstruction({programId:token,keys:[meta(mint.publicKey,false,true),meta(ata(owner),false,true),meta(bootstrap.publicKey,true)],data:Buffer.concat([Buffer.from([7]),u64(amount)])})]);}
@@ -68,22 +82,29 @@ function buy(p,sale,card,escrow){return ix('buy_sale',[meta(config,false,true),m
 function staff(name,p,sale,actor,action,revision=0,boolean){return ix(name,[meta(config),meta(sale,false,true),meta(actor.publicKey,true)],attest(p,sale,action,revision),...(boolean===undefined?[]:[Buffer.from([boolean?1:0])]));}
 function governSale(name,p,sale,action,revision=0){return ix(name,[meta(config),meta(sale,false,true),meta(gov[0].publicKey,true),meta(gov[1].publicKey,true)],attest(p,sale,action,revision));}
 const governKeys=()=>[meta(config,false,true),meta(gov[0].publicKey,true),meta(gov[1].publicKey,true)];
+const acknowledge=(sale,card,actor)=>ix('acknowledge_claim',[meta(config),meta(card,false,true),meta(sale),meta(actor.publicKey,true)],hash('local-simulated-db-commit'));
 const outcome=(p,sale,escrow,revision)=>ix('execute_outcome',[meta(config,false,true),meta(sale,false,true),meta(escrow,false,true),meta(ata(seller.publicKey),false,true),meta(ata(treasury.publicKey),false,true),meta(new PublicKey(p.refundToken),false,true),meta(token),meta(SYSVAR_INSTRUCTIONS_PUBKEY)],u64(revision));
 try {
   // Never load the operator's default Solana config or client wallet. This
   // local config contains PUBLIC test context only; its wallet path is absent.
   const localConfig=join(root,'validator-config.json');
   writeFileSync(localConfig,JSON.stringify({json_rpc_url:URL_RPC,websocket_url:'ws://127.0.0.1:18900',keypair_path:join(root,'unused-wallet.json'),commitment:'confirmed'}),{flag:'wx',mode:0o600});
-  child=spawn(validator,['--config',localConfig,'--url',URL_RPC,'--mint',bootstrap.publicKey.toBase58(),'--bind-address','127.0.0.1','--rpc-port','18899','--faucet-port','18901','--gossip-port','18902','--dynamic-port-range','19000-19020','--ledger',join(root,'ledger'),'--upgradeable-program',program.toBase58(),resolve(so),bootstrap.publicKey.toBase58()],{stdio:'ignore',windowsHide:true});
+  child=spawn(validator,['--config',localConfig,'--url',URL_RPC,'--mint',bootstrap.publicKey.toBase58(),'--bind-address','127.0.0.1','--rpc-port','18899','--faucet-port','18901','--gossip-port','18902','--dynamic-port-range','19000-19020','--ledger',join(root,'ledger'),'--upgradeable-program',program.toBase58(),resolve(so),bootstrap.publicKey.toBase58()],{stdio:['ignore','ignore','pipe'],windowsHide:true});
+  child.stderr.setEncoding('utf8');child.stderr.on('data',data=>{validatorErrors=(validatorErrors+data).slice(-8000);});
   let spawnError;child.on('error',e=>{spawnError=e;});
   connection=new Connection(URL_RPC,'confirmed');
-  for(let i=0;;i++){if(spawnError)throw spawnError;if(child.exitCode!==null)throw new Error('Owned local validator exited');try{await connection.getGenesisHash();break;}catch{if(i>=120)throw new Error('Local validator startup timeout');await pause(500);}}
+  for(let i=0;;i++){if(spawnError)throw spawnError;if(child.exitCode!==null)throw new Error(`Owned local validator exited: ${validatorErrors}`);try{await connection.getGenesisHash();break;}catch{if(i>=120)throw new Error('Local validator startup timeout');await pause(500);}}
   for(const signer of [bootstrap,roles.issuer,roles.inventory]){const signature=await connection.requestAirdrop(signer.publicKey,10_000_000_000);await connection.confirmTransaction(signature,'confirmed');}
   await send([SystemProgram.createAccount({fromPubkey:bootstrap.publicKey,newAccountPubkey:mint.publicKey,lamports:await connection.getMinimumBalanceForRentExemption(82),space:82,programId:token}),new TransactionInstruction({programId:token,keys:[meta(mint.publicKey,false,true)],data:Buffer.concat([Buffer.from([20,6]),bootstrap.publicKey.toBuffer(),Buffer.from([0])])})],[mint]);
   await send([ataIx(seller.publicKey),ataIx(treasury.publicKey),...buyers.map(b=>ataIx(b.publicKey))]);
   const domain=new PublicKey(await connection.getGenesisHash()).toBuffer(),policy=hash('MY-USDC-ESCROW-1');
   const loader=new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111'),programData=PublicKey.findProgramAddressSync([program.toBuffer()],loader)[0];
+  await rejectsOnChain(send([ix('initialize_v2',[meta(config,false,true),meta(roles.inventory.publicKey,true,true),meta(programData),meta(mint.publicKey),meta(SystemProgram.programId)],domain,policy,treasury.publicKey.toBuffer(),roleBytes(),Buffer.concat(gov.map(g=>g.publicKey.toBuffer())))],[roles.inventory]));
+  assert.equal(await connection.getAccountInfo(config),null);checks++;
   await send([ix('initialize_v2',[meta(config,false,true),meta(bootstrap.publicKey,true,true),meta(programData),meta(mint.publicKey),meta(SystemProgram.programId)],domain,policy,treasury.publicKey.toBuffer(),roleBytes(),Buffer.concat(gov.map(g=>g.publicKey.toBuffer())))]);
+  await rejectsOnChain(send([ix('buy',[],u64(1),hash('old-card-ref'))]));checks++;
+  await rejectsOnChain(send([ix('initialize',[])]));checks++;
+  await rejectsOnChain(send([ix('configure',[meta(config,false,true),meta(gov[0].publicKey,true),meta(gov[0].publicKey,true)],roleBytes(),u64(2_000_000),u64(10_000_000))],[gov[0]]));checks++;
   await send([ix('configure',governKeys(),roleBytes(),u64(2_000_000),u64(10_000_000))],gov.slice(0,2));
   await send([ix('set_pause',governKeys(),Buffer.from([0,0]))],gov.slice(0,2));
   await mintTo(buyers[2].publicKey,950_000);
@@ -95,25 +116,48 @@ try {
     await send([ix('register_card',[meta(config),meta(card,false,true),meta(roles.inventory.publicKey,true,true),meta(roles.authenticator.publicKey,true),meta(SystemProgram.programId)],cardId,pair,seller.publicKey.toBuffer(),Buffer.from([mode]))],[roles.inventory,roles.authenticator]);
     const tables=await table([config,card,sale,escrow,mint.publicKey,ata(seller.publicKey),ata(treasury.publicKey),...buyers.map(b=>ata(b.publicKey)),token,SystemProgram.programId,SYSVAR_RENT_PUBKEY,SYSVAR_INSTRUCTIONS_PUBKEY]);
     await send([ix('open_sale',[meta(config),meta(card,false,true),meta(sale,false,true),meta(escrow,false,true),meta(mint.publicKey),meta(roles.issuer.publicKey,true,true),meta(token),meta(SystemProgram.programId),meta(SYSVAR_RENT_PUBKEY)],encode(p))],[roles.issuer],tables);
+    for(const [field,value] of Object.entries({domain:hash('wrong-domain'),program:SystemProgram.programId.toBuffer(),config:SystemProgram.programId.toBuffer(),card:hash('wrong-card'),pair:hash('wrong-pair'),mode:1-mode,generation:2,custodyVersion:2,authorityEpoch:3,mint:bootstrap.publicKey.toBuffer(),tokenProgram:SystemProgram.programId.toBuffer(),treasuryToken:ata(seller.publicKey).toBuffer(),total:1_000_001,refundToken:ata(buyers[1].publicKey).toBuffer()})){
+      await rejectsOnChain(send([buy({...p,[field]:value},sale,card,escrow)],[roles.issuer,buyers[0]],tables));checks++;
+    }
+    for(const [index,signers]of [[3,[buyers[0]]],[4,[roles.issuer]]]){
+      const unsigned=buy(p,sale,card,escrow);unsigned.keys[index].isSigner=false;
+      await rejectsOnChain(send([unsigned],signers,tables));checks++;
+    }
+    assert.equal((await connection.getAccountInfo(sale)).data[698],1);
+    assert.equal(await balance(ata(buyers[0].publicKey)),before[0]);
     const insufficient={...p,buyer:buyers[2].publicKey.toBuffer(),buyerToken:ata(buyers[2].publicKey).toBuffer(),refundToken:ata(buyers[2].publicKey).toBuffer()};
-    await assert.rejects(send([buy(insufficient,sale,card,escrow)],[roles.issuer,buyers[2]],tables));
+    await rejectsOnChain(send([buy(insufficient,sale,card,escrow)],[roles.issuer,buyers[2]],tables));
     assert.equal(await balance(ata(buyers[2].publicKey)),950000n);assert.equal(await balance(ata(seller.publicKey)),sellerBefore);assert.equal((await connection.getAccountInfo(sale)).data[698],1);checks++;
-    await assert.rejects(send([buy({...p,expiresAt:1},sale,card,escrow)],[roles.issuer,buyers[0]],tables));checks++;
-    if(mode===1){await send([ix('revise_sale',[meta(config),meta(card,false,true),meta(sale,false,true),meta(roles.issuer.publicKey,true)],u64(1))],[roles.issuer]);await assert.rejects(send([buy(p,sale,card,escrow)],[roles.issuer,buyers[0]],tables));p.revision=2;checks++;}
+    await rejectsOnChain(send([buy({...p,expiresAt:1},sale,card,escrow)],[roles.issuer,buyers[0]],tables));checks++;
+    if(mode===1){await send([ix('revise_sale',[meta(config),meta(card,false,true),meta(sale,false,true),meta(roles.issuer.publicKey,true)],u64(1))],[roles.issuer]);await rejectsOnChain(send([buy(p,sale,card,escrow)],[roles.issuer,buyers[0]],tables));p.revision=2;checks++;}
+    p.expiresAt=Math.floor(Date.now()/1000)+8;
     const candidates=[p,{...p,buyer:buyers[1].publicKey.toBuffer(),buyerToken:ata(buyers[1].publicKey).toBuffer(),refundToken:ata(buyers[1].publicKey).toBuffer(),attempt:hash(`local-attempt-${caseIndex}-1`),beneficiary:hash('local-user-1')}];
     const race=await Promise.allSettled(candidates.map((q,i)=>send([buy(q,sale,card,escrow)],[roles.issuer,buyers[i]],tables)));
-    assert.equal(race.filter(r=>r.status==='fulfilled').length,1);const winner=race.findIndex(r=>r.status==='fulfilled'),win=candidates[winner];
+    assert.equal(race.filter(r=>r.status==='fulfilled').length,1);checkRaceLoser(race);const winner=race.findIndex(r=>r.status==='fulfilled'),win=candidates[winner];
+    await rejectsOnChain(send([ix('revoke_sale',[meta(config),meta(card,false,true),meta(sale,false,true),meta(roles.issuer.publicKey,true)])],[roles.issuer]));
+    await rejectsOnChain(send([ix('revise_sale',[meta(config),meta(card,false,true),meta(sale,false,true),meta(roles.issuer.publicKey,true)],u64(win.revision))],[roles.issuer]));checks++;
     const after=await Promise.all(buyers.slice(0,2).map(b=>balance(ata(b.publicKey))));assert.equal(before[winner]-after[winner],1000000n);assert.equal(before[1-winner]-after[1-winner],0n);checks++;
-    if(mode===1){assert.equal(await balance(ata(seller.publicKey))-sellerBefore,950000n);assert.equal(await balance(ata(treasury.publicKey))-treasuryBefore,50000n);checks++;continue;}
+    if(mode===1){
+      assert.equal(await balance(ata(seller.publicKey))-sellerBefore,950000n);assert.equal(await balance(ata(treasury.publicKey))-treasuryBefore,50000n);
+      await rejectsOnChain(send([acknowledge(sale,card,roles.issuer)],[roles.issuer]));
+      await send([acknowledge(sale,card,roles.reconciler)],[roles.reconciler]);
+      const control=(await connection.getAccountInfo(card)).data;
+      assert.equal(control[153],1);assert.equal(control[104],1);assert.deepEqual(control.subarray(72,104),win.buyer);
+      await rejectsOnChain(send([buy(win,sale,card,escrow)],[roles.issuer,buyers[winner]],tables));checks++;retained.push({sale,permit:win,state:3});continue;
+    }
     assert.equal(await balance(escrow),1000000n);assert.equal(await balance(ata(seller.publicKey)),sellerBefore);assert.equal(await balance(ata(treasury.publicKey)),treasuryBefore);checks++;
-    await assert.rejects(send([staff('authorize_release',win,sale,roles.release,3)],[roles.release]));
-    await assert.rejects(send([staff('record_receipt',win,sale,roles.issuer,0)],[roles.issuer]));
+    await rejectsOnChain(send([staff('authorize_release',win,sale,roles.release,3)],[roles.release]));
+    await rejectsOnChain(send([staff('record_receipt',win,sale,roles.issuer,0)],[roles.issuer]));
+    await rejectsOnChain(send([staff('record_authentication',win,sale,roles.authenticator,1,0,true)],[roles.authenticator]));
+    await rejectsOnChain(send([staff('record_receipt',{...win,pair:hash('wrong-delivered-pair')},sale,roles.receiver,0)],[roles.receiver]));checks++;
     await send([staff('record_receipt',win,sale,roles.receiver,0)],[roles.receiver]);
-    await assert.rejects(send([staff('authorize_release',win,sale,roles.release,3)],[roles.release]));checks++;
+    await rejectsOnChain(send([acknowledge(sale,card,roles.reconciler)],[roles.reconciler]));
+    assert.equal((await connection.getAccountInfo(card)).data[153],0);
+    await rejectsOnChain(send([staff('authorize_release',win,sale,roles.release,3)],[roles.release]));checks++;
     const refund=caseIndex===0;
     await send([staff('record_authentication',win,sale,roles.authenticator,refund?2:1,0,!refund)],[roles.authenticator]);
-    if(refund){await assert.rejects(send([staff('authorize_release',win,sale,roles.release,3)],[roles.release]));await send([governSale('authorize_refund',win,sale,4)],gov.slice(0,2));}
-    else{await send([staff('authorize_release',win,sale,roles.release,3)],[roles.release]);await assert.rejects(send([governSale('authorize_refund',win,sale,4)],gov.slice(0,2)));}checks++;
+    if(refund){await rejectsOnChain(send([staff('authorize_release',win,sale,roles.release,3)],[roles.release]));await send([governSale('authorize_refund',win,sale,4)],gov.slice(0,2));}
+    else{await send([staff('authorize_release',win,sale,roles.release,3)],[roles.release]);await rejectsOnChain(send([governSale('authorize_refund',win,sale,4)],gov.slice(0,2)));}checks++;
     const dust=7n;await send([new TransactionInstruction({programId:token,keys:[meta(ata(buyers[1-winner].publicKey),false,true),meta(escrow,false,true),meta(buyers[1-winner].publicKey,true)],data:Buffer.concat([Buffer.from([3]),u64(dust)])})],[buyers[1-winner]]);
     await send([ix('set_pause',governKeys(),Buffer.from([1,0]))],gov.slice(0,2));
     if(caseIndex===2){
@@ -121,20 +165,41 @@ try {
       await send([ix('update_future_terms',governKeys(),Keypair.generate().publicKey.toBuffer(),hash('local-future-policy'))],gov.slice(0,2));checks++;
     }
     await send([ix('emergency_pause',[meta(config,false,true),meta(roles.guardian.publicKey,true)],Buffer.from([1]))],[roles.guardian]);
-    await assert.rejects(send([outcome(win,sale,escrow,1)]));assert.equal(await balance(escrow),1000007n);checks++;
+    await rejectsOnChain(send([outcome(win,sale,escrow,1)]));assert.equal(await balance(escrow),1000007n);checks++;
     await send([ix('set_pause',governKeys(),Buffer.from([1,0]))],gov.slice(0,2));
-    await assert.rejects(send([outcome(win,sale,escrow,0)]));
+    await rejectsOnChain(send([outcome(win,sale,escrow,0)]));
+    // Recovery commands remain executable after the original permit expires.
+    while(Math.floor(Date.now()/1000)<=win.expiresAt)await pause(250);
     const beforeRefund=await balance(new PublicKey(win.refundToken));
-    await assert.rejects(send([outcome(win,sale,escrow,1),outcome(win,sale,escrow,1)]));
+    await rejectsOnChain(send([outcome(win,sale,escrow,1),outcome(win,sale,escrow,1)]));
     assert.equal(await balance(escrow),1000007n);checks++;
-    const exits=await Promise.allSettled([send([outcome(win,sale,escrow,1)]),send([outcome(win,sale,escrow,1)])]);assert.equal(exits.filter(r=>r.status==='fulfilled').length,1);
+    const exits=await Promise.allSettled([send([outcome(win,sale,escrow,1)]),send([outcome(win,sale,escrow,1)]),send([governSale('authorize_refund',win,sale,4,1)],gov.slice(0,2))]);assert.equal(exits.filter(r=>r.status==='fulfilled').length,1);checkRaceLoser(exits);
     assert.equal(await balance(escrow),dust);assert.equal((await connection.getAccountInfo(sale)).data[698],refund?5:4);
     if(refund){assert.equal(await balance(new PublicKey(win.refundToken))-beforeRefund,1000000n);assert.equal(await balance(ata(seller.publicKey)),sellerBefore);assert.equal(await balance(ata(treasury.publicKey)),treasuryBefore);}
     else{assert.equal(await balance(ata(seller.publicKey))-sellerBefore,950000n);assert.equal(await balance(ata(treasury.publicKey))-treasuryBefore,50000n);}
-    await assert.rejects(send([outcome(win,sale,escrow,1)]));checks++;
+    await rejectsOnChain(send([outcome(win,sale,escrow,1)]));checks++;
+    await send([acknowledge(sale,card,roles.reconciler)],[roles.reconciler]);
+    const control=(await connection.getAccountInfo(card)).data;
+    assert.equal(control[153],1);assert.equal(control[154],refund?1:0);
+    if(!refund)assert.deepEqual(control.subarray(72,104),win.buyer);
+    await rejectsOnChain(send([acknowledge(sale,card,roles.reconciler)],[roles.reconciler]));checks++;
+    retained.push({sale,permit:win,state:refund?5:4});
+    console.log(`LOCAL case ${caseIndex}: ${refund?'full refund':'95/5 release'}; original permit expired, terminal retained, replay rejected`);
     await send([ix('set_pause',governKeys(),Buffer.from([0,0]))],gov.slice(0,2));
   }
-  console.log(`LOCAL VALIDATOR ONLY: ${checks} program/balance assertions passed; no database integration asserted.`);
+  const finalSlot=await connection.getSlot('confirmed');
+  for(let i=0;await connection.getSlot('finalized')<finalSlot;i++){
+    if(i>=120)throw new Error('Local finalized recovery evidence timed out');await pause(500);
+  }
+  for(const {sale,permit,state}of retained){
+    const data=(await connection.getAccountInfo(sale,'finalized')).data;
+    assert.equal(data.length,961);assert.equal(data[698],state);
+    assert.deepEqual(data.subarray(8,698),encode(permit));
+    assert.ok(data.readBigUInt64LE(700)>0n);
+    assert.ok(data.readBigInt64LE(708)>=BigInt(permit.validFrom)&&data.readBigInt64LE(708)<BigInt(permit.expiresAt));
+    if(state!==3)assert.ok(data.readBigUInt64LE(716)>0n);
+  }checks++;
+  console.log(`LOCAL VALIDATOR ONLY: ${checks} on-chain scenario groups passed; no database integration asserted.`);
 } finally {
   if(child&&child.exitCode===null){child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),pause(5000)]);}
   // Delete only the unique directory created by THIS helper, after process exit.
