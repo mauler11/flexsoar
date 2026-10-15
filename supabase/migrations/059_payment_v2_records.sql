@@ -165,6 +165,15 @@ CREATE TABLE payment_v2.operations(
  lease_id uuid,leased_by name,worker_id uuid,lease_until timestamptz,attempts integer NOT NULL DEFAULT 0,
  signature text,resolved_event uuid REFERENCES payment_v2.events(id),last_error text,available_at timestamptz NOT NULL DEFAULT now(),created_at timestamptz NOT NULL DEFAULT now()
 );
+-- Raw signed bytes are capability-bearing, executor-only, retained once per operation.
+CREATE TABLE payment_v2.signed_operations(
+ operation_id uuid PRIMARY KEY REFERENCES payment_v2.operations(id),network_id uuid NOT NULL REFERENCES payment_v2.networks(id),
+ envelope jsonb NOT NULL,signed_transaction bytea NOT NULL CHECK(octet_length(signed_transaction) BETWEEN 66 AND 1232),
+ transaction_digest payment_v2.key32 NOT NULL,message_digest payment_v2.key32 NOT NULL,
+ signature text NOT NULL,blockhash payment_v2.key32 NOT NULL,last_valid_block_height payment_v2.u64 NOT NULL,
+ staged_by name NOT NULL,staged_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ UNIQUE(network_id,signature),CHECK(transaction_digest=sha256(signed_transaction))
+);
 CREATE TABLE payment_v2.outbox(
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),event_id uuid NOT NULL REFERENCES payment_v2.events(id),user_id uuid NOT NULL REFERENCES public.users(id),
  kind text NOT NULL,payload jsonb NOT NULL,state text NOT NULL DEFAULT 'pending' CHECK(state IN('pending','leased','delivered')),
@@ -200,7 +209,7 @@ BEGIN RAISE EXCEPTION 'PAYMENT_V2_IMMUTABLE: %',TG_TABLE_NAME; END $$;
 DO $tables$
 DECLARE n text;
 BEGIN
- FOREACH n IN ARRAY ARRAY['policies','wallet_accounts','quote_books','candidates','events','consumptions','decisions','governance_approvals','attestations','lifecycle_evidence','usdc_journal'] LOOP
+ FOREACH n IN ARRAY ARRAY['signed_operations','policies','wallet_accounts','quote_books','candidates','events','consumptions','decisions','governance_approvals','attestations','lifecycle_evidence','usdc_journal'] LOOP
   EXECUTE format('CREATE TRIGGER immutable BEFORE UPDATE OR DELETE ON payment_v2.%I FOR EACH ROW EXECUTE FUNCTION payment_v2.immutable()',n);
  END LOOP;
  -- Mutable state/tombstones may never be deleted, even by workers.

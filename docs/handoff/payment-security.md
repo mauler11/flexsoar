@@ -1497,3 +1497,204 @@ a new isolated test database, collect first application/errors/catalog and run a
 contracts/negative-role/multi-session tests. Keep funding disabled. Then provision/review
 dedicated connection transport and actual attestation/lifecycle verifiers, and run the
 full loopback program-observer-Postgres recovery scenarios. Production is blocked.
+
+## Review fixes after bb3943e — 2026-10-17 local session
+
+Status: executable application/offline changes plus REVISED UNAPPLIED DRAFTS; funding
+remains disabled. No SQL, database connection, public-chain action or email occurred.
+The user authorized revising059–063 as unapplied drafts. This session cannot establish
+migration application state without a prohibited database connection. HUMAN MUST
+confirm these drafts have never been applied before using the revisions. If any was
+applied, preserve that deployed history and author/review forward migrations instead.
+The earlier signature-only limitation above is superseded ONLY for the bounded
+execute_outcome operation described below, not generic authority/funding operations.
+
+Confirmed defects and corrections:
+
+1.061 locked public.users FOR UPDATE despite063 supplying SELECT only. It neither
+updates user balances nor depends on mutable current wallet links: attempts retain
+original financial destinations. Removed those unnecessary locks, retaining the
+Item ? Card ? Sale ? Listing ? Attempt/Escrow serialization and foreign-key integrity.
+063 gives owner a SELECT-only users RLS policy and fails if table/column UPDATE is
+inherited. No worker/service_role receives user mutation rights. Dedicated settler38
+and administrator46 now test complete escrow/direct settlement under final ownership.
+This privilege fix is statically reviewed, NOT runtime-proven until human SQL runs.
+
+2.Different TS wrapper objects were insufficient credential separation. The new
+worker_identity RPC checks actual session_user membership, rejects superusers and
+unknown/null roles, and returns the login. Reconciliation asks both connections for
+verifier/settler identities before scanning; equal logins fail. SQL require_role still
+rejects owner/service/authenticator/ordinary memberships and multiple worker groups.
+Do not implement both connections with one service-role credential. Offline doubles
+test the application guard; only real separate LOGIN sessions prove permissions.
+
+3.Operation finish formerly accepted signature-only submitted/unknown and could attach
+a signature via unsigned retry. Both paths now fail without durable bytes or reject
+that retry. New immutable signed_operations stores operation/network FK, exact raw
+transaction, envelope, signature, transaction/message SHA256, blockhash and last valid
+block height, staging login/time, unique(network,signature); UPDATE/DELETE forbidden.
+It is private under final owner/RLS/ACL setup, readable only through live executor
+lease RPCs. Customer/admin/outbox responses do not expose the raw transaction.
+
+4.A new contradictory funded/direct observation after finalized revocation could enter
+the event queue before later settlement refused it.060 now rejects novel funding when
+Sale is not open/cancel_requested; an exact previously recorded receipt still recovers.
+It does not reverse chain finality or fabricate a second valid outcome.
+
+Durable signed-operation contract (SQL signatures / actual TS callers):
+
+- fn_payment_v2_worker_identity(p_required_role name) ? jsonb:
+  paymentWorkerIdentity(client:PaymentRpc,role:worker-role-union):Promise<string>.
+- fn_payment_v2_signed_operation(p_operation_id uuid,p_lease_id uuid) ? jsonb
+  {plan,envelope|null}: loadSignedOperation(executor,operationId,leaseId).
+- fn_payment_v2_stage_signed_operation(p_operation_id uuid,p_lease_id uuid,p_envelope jsonb)
+  ? void: stageSignedOperation(executor,operationId,leaseId,value).
+- Existing finish_operation frozen arity is unchanged; submitted/unknown now requires
+  matching signed_operations. retry must remain genuinely unsigned.
+- Private exit_plan(uuid) derives execute_outcome program/accounts/data from immutable
+  Sale, network snapshot, funded attempt and operation revision, never client terms.
+- New additive contract exports: loadSignedOperation, stageSignedOperation,
+  signedOperationRecovery, paymentWorkerIdentity. No frozen contract signature changed.
+- Production helper exports parseExitPlan(value:unknown):ExitPlan;
+  inspectSignedOperation(value:unknown,expected:ExitPlan):SignedOperationEnvelope;
+  loadSignedOperation(...):Promise<{plan:ExitPlan;envelope:SignedOperationEnvelope|null}>;
+  stageSignedOperation(...):Promise<SignedOperationEnvelope>;
+  signedOperationRecovery(value,plan,observed:RecoveryObservation):RecoveryDecision.
+  Types are declared in lib/db/payment-signed-operation.ts.
+
+Bounded recovery and trust model:
+
+The supported envelope contains ONE standalone execute_outcome instruction, one real
+fee-payer signature, no lookup tables, nonce or extra instructions. Actual Ed25519,
+canonical serialization, program, revision, ordered account keys/flags, instruction
+bytes, signature/hash/blockhash correspondence are verified in production TS against
+an INDEPENDENT leased DB plan on both staging and loading. Sponsored execution fees
+are allowed; no buyer signing authority is inferred from this permissionless exit.
+SQL checks envelope correspondence, canonical bytes/hashes and first signature bytes;
+SQL DOES NOT independently implement Ed25519 or decode the complete Solana message.
+Dedicated executor is trusted to use the production inspector. A malicious executor
+cannot turn stored bytes into verified payment: verifier and settler remain separate.
+
+Before broadcast, await stage RPC COMMIT acknowledgement. It stores bytes and pins
+signature/state atomically, keeping the lease. If ACK is lost, DO NOT send or sign anew:
+load under the live/reclaimed lease and compare immutable bytes. Before persistence,
+no broadcast is permitted; a crash then creates no authorized send. After persistence
+but before send, after a lost broadcast response, restart or takeover, first observe
+original signature AND retained Sale at a consistent finalized context. The recovery
+policy requires exact network/genesis/program/Sale/signature identity. Terminal Sale
+or successful finalized signature means RECONCILE, not locally mark paid/unlocked.
+Pending/unavailable/finalized failure/unknown state/hold/revision mismatch/pause/expired
+or invalid blockhash stays blocked. Only a complete not-found observation with still
+funded matching revision and valid original blockhash/height returns IDENTICAL bytes.
+That decision function has no signing or send primitive. A missing RPC response never
+means no execution. LastValidBlockHeight is provider metadata, not Solana-signed data;
+the real trusted observer must also check blockhash validity and finality consistently.
+
+Still required: dedicated-login transport, real trusted observation/sender integration,
+blockhash provider binding, sender lease discipline, approved replacement-operation
+protocol for irrecoverably expired/finalized-failed transactions, and full isolated
+program-observer-Postgres recovery tests. No automatic replacement or buyer repay path
+exists here. Other operations (authority attestations, Squads, open/revoke, funding)
+have no supported signed-plan storage and CANNOT mark submitted through this path.
+They need separately reviewed exact plan encodings/integration; remain fail-closed.
+A stale executor can retain signed bytes after lease loss: database CAS cannot revoke
+a transaction; program Sale terminal/revision fencing is the final financial guard.
+
+Authored database verification — ALL NOT RUN:
+
+-35 setup plus36issuer/37verifier/38settler/39executor/40notifier/46results require FIVE
+actual non-superuser LOGIN connections, each ONLY one worker group. They test real
+session_user, no owner/service/authenticator membership, positive role RPCs, cross-role
+rejections and direct protected-table DML denial.30 retains JWT impersonation negatives.
+Setup commits synthetic-only fixtures/roles in named loopback disposable target, creates
+no credentials and refuses existing test role names. Two wrappers do not count.
+-45 exports a public synthetic plan, offline make-signed-fixture.mjs generates a real
+valueless ephemeral signature WITHOUT saving a key, and47 stages/retries/reads it and
+rejects changed validity. Synthetic blockhash must NEVER be broadcast. Exact human
+commands/order, authentication requirements and lease caveats are in payment-db README.
+-50–57 add independent-session barriers for conflicting signature/attempt, canonical
+release vs adversarial refund (both orders), pending cancellation vs funding, finalized
+revoke vs contradictory funding, funded vs contradictory revoke, rollback after writes,
+competing operation/outbox workers and expired lease takeover/stale completion. Only ONE
+canonical chain result is asserted. Terminal observation uses verifier then a SEPARATE
+settler56;53 asserts exact order/cache/claim history/ledger/event/consumption/journal/
+outbox results.57 isolates queue eligibility to known synthetic IDs;54 changes only
+synthetic lease clocks, avoiding nondeterministic sleeps. These tests do not prove
+on-chain exclusivity; they test database arbitration only IF later executed.
+-Existing deferred constraints are forced with SET CONSTRAINTS ALL IMMEDIATE before
+rollback/commit. No single-session test is called concurrent proof. No SQL parser,
+server, migration runner, container or database test was invoked in this session.
+
+Changed-file inventory for this review (dependencies excluded):
+- lib/api/contract.ts: additive durable-recovery/identity exports.
+- lib/db/payment-reconciliation.ts: actual connection identity guard before observation.
+- lib/db/payment-v2-workers.ts: identity adapter and reject signature-bearing unsigned retry.
+- lib/db/payment-signed-operation.ts: exact signed-message validation/storage/recovery policy.
+- supabase/migrations/059_payment_v2_records.sql: immutable private signed envelopes.
+- supabase/migrations/060_payment_v2_contracts.sql: contradictory post-revocation funding guard.
+- supabase/migrations/061_payment_v2_settlement.sql: remove unjustified users row locks.
+- supabase/migrations/062_payment_v2_recovery.sql: bounded signed-plan/lease RPCs and identity.
+- supabase/migrations/063_payment_v2_permissions_fences.sql: minimum users policy and RPC grants.
+- tests/payment-v2.test.ts: actual credential-identity application guard cases.
+- tests/payment-signed-operation.test.ts: actual SDK/Ed25519/adapter/offline recovery cases.
+- tests/payment-db/01_fixtures.sql: optional initiate-only fixtures for real issuer/verifier.
+- tests/payment-db/02_attestation_fixture.sql: shared synthetic canonical attestation helper.
+- tests/payment-db/20_outcomes_recovery.sql: shared helper and reject signature-only finish.
+- tests/payment-db/30_permissions.sql: ordinary identity/signed-store RPC denial.
+- tests/payment-db/35_workers_setup.sql: committed disposable worker principals/fixtures.
+- tests/payment-db/36_worker_issuer.sql: real issuer success and denied cross-role/DML.
+- tests/payment-db/37_worker_verifier.sql: real verifier success and denied cross-role/DML.
+- tests/payment-db/38_worker_settler.sql: real settlement/idempotency/permission regression.
+- tests/payment-db/39_worker_executor.sql: real lease/context/signed-plan authorization.
+- tests/payment-db/40_worker_notifier.sql: real notifier lease/retry and denied cross-role/DML.
+- tests/payment-db/45_export_synthetic_plan.sql: public plan export under actual executor.
+- tests/payment-db/46_worker_results.sql: exact persisted identities and financial results.
+- tests/payment-db/47_signed_storage_contract.sql: exact offline signed-envelope SQL contract.
+- tests/payment-db/make-signed-fixture.mjs: bounded OS-TEMP-only offline fixture generator.
+- tests/payment-db/50_races_setup.sql: canonical/adversarial cases and real queue logins.
+- tests/payment-db/51_race_a.sql: explicit first transaction/barrier.
+- tests/payment-db/52_race_b.sql: explicit competing transaction/barrier.
+- tests/payment-db/53_race_assert.sql: exact committed financial/lease invariants.
+- tests/payment-db/54_expire_test_lease.sql: synthetic-only deterministic expiry.
+- tests/payment-db/55_stale_worker.sql: old-lease completion rejection.
+- tests/payment-db/56_consume_canonical_terminal.sql: separate authorized terminal consumer.
+- tests/payment-db/57_prepare_queue_case.sql: synthetic queue eligibility isolation.
+- tests/payment-db/README.md: human-only real-connection/race instructions and limitations.
+- docs/handoff/payment-security.md: review evidence and remaining integration blockers.
+
+Validation of this review:
+- npx tsc --noEmit: exit0, normal installed dependencies/configuration.
+- npm test -- --reporter=json --outputFile=<OS TEMP>/flexsoar-payment-review-final.json:
+  488 passed /2 failed /490 total. ONLY the two unchanged PricePayout FSC-copy assertions
+  in shared invariants.test.ts fail. No shared assertion changed.
+- Focused npx --no-install vitest run tests/payment-signed-operation.test.ts
+  tests/payment-v2.test.ts tests/payment-db-adapters.test.ts:81/81, exit0. Includes real
+  offline SDK signing, Ed25519 and fixture-generator invocation, no network/SQL.
+- Final normal webpack build result is recorded below after completion.
+- SQL compilation, effective grants/RLS, real connection permission success, deferred
+  constraints and all separate-session races: NOT RUN. TS doubles are not database proof.
+- Rust/program unchanged this review; no new Rust/validator run. OpenCode was not used.
+- Human manifest/lockfile remain byte-identical to reviewed main pair and are excluded
+  from staging. No dependency request/install/change, no SQL execution, DB connection,
+  production credentials, public-chain signing/broadcast, emails, push or deployment.
+
+Next human action: confirm059–063 were never applied, review revisions and README,
+prepare a fresh disposable named loopback database with reviewed baseline roles/schema,
+then separately authorize/apply and run real-principal and multi-session tests exactly
+as documented. Capture first error/catalog/role/lock/results evidence for forward repair.
+Do not activate funding: actual DB/runtime authority/recovery integration is unverified.
+
+Final webpack validation: npx next build --webpack exited0, generated40/40pages and
+completed route/trace output. Existing optional Privy @farcaster/mini-app-solana resolver
+warning persists; missing Stripe key was reported (no credentials supplied). No type
+error bypasses or dependency edits. git diff --check exited0 (line-ending notices only).
+Human race instructions explicitly use interactive psql with \\i and open connections;
+psql -f exiting before a human barrier would roll back and is NOT a valid race run.
+
+Additional authored terminal-consumption barrier files:
+- tests/payment-db/58_terminal_consume_a.sql: actual settler holds terminal consumption
+  transaction open after financial writes; explicit human COMMIT only.
+- tests/payment-db/59_terminal_consume_b.sql: separate settler backend waits and returns
+  the identical canonical receipt.53 checks both receipts and exact financial counts.
+Use58/59 instead of sequential56 on a fresh terminal case. Both represent the same
+canonical terminal evidence, never two purported valid release/refund outcomes. NOT RUN.

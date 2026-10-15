@@ -29,7 +29,7 @@ psql -X -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -f tests/payment-db/20_ou
 psql -X -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -f tests/payment-db/30_permissions.sql
 ```
 
-Use a disposable administrator connection for these scripts. `30_permissions.sql` changes **session authorization**, not only current role, to exercise negative connection identity checks. It requires sufficient test-only administrator rights. Positive non-superuser issuer/verifier/settler/executor/notifier connection tests remain required after provisioning dedicated test login principals. Never make authenticator or service_role members to get tests working.
+Use a disposable administrator connection for these scripts. `30_permissions.sql` changes **session authorization**, not only current role, to exercise negative connection identity checks. It requires sufficient test-only administrator rights. Positive non-superuser issuer/verifier/settler/executor/notifier connection tests are now authored in35..40 and46 below, but remain NOT RUN. Never make authenticator or service_role members to get tests working.
 
 ## Coverage authored, execution pending
 
@@ -62,3 +62,157 @@ quote;71 refuses to proceed before expiry, relinks only the synthetic user, reco
 the original permit and consumes/retries the original payment. It never rewrites
 immutable timestamps, requests a new payment or signs anything. It rolls back its
 reconciliation and relink changes. Current SQL grants/locks still require execution.
+
+
+## Review fixes after bb3943e: revised UNAPPLIED drafts only
+
+This continuation revised059..063 on the founder's explicit representation that they
+are new/unapplied drafts. No database/catalog connection was made to confirm that.
+BEFORE application, the human must confirm none was applied anywhere intended for
+reuse. If any was applied, preserve its version/checksum and request a reviewed
+forward migration; do not rerun/overwrite it. A fresh disposable target is preferred.
+SQL syntax, ownership/grants, dedicated principals and every scenario below: NOT RUN.
+
+The unused public.users FOR UPDATE locks were removed. Settlement never changes a
+user balance or relies on current wallet links. Item/Card/Sale/Listing/Attempt/Escrow
+locks plus immutable wallet/account snapshots and FK enforcement cover its changes.
+063 now grants the owner SELECT-only RLS access to users and fails on unexpected
+inherited table/column UPDATE privileges; no user UPDATE privilege was added.
+
+## Real dedicated connections:35..40,45..47
+
+Run35_workers_setup.sql as the isolated migration administrator after the reviewed
+schema. It commits SYNTHETIC fixtures and creates five explicitly named test LOGIN
+roles, each NOINHERIT/NOSUPERUSER/NOBYPASSRLS with only its corresponding worker role.
+It creates no passwords and changes no authentication configuration. Human must
+arrange authentication ONLY for this disposable loopback instance (its own test
+credential handling); never supply production passwords or grant service_role/
+authenticator/owner membership. Tests refuse pre-existing test principals rather
+than overwrite them. Do not execute every directory file by wildcard.
+
+Use the same verified PGHOST=127.0.0.1, PGPORT, PGDATABASE and PGOPTIONS marker above.
+Run these with genuinely separate login connections, in this order, within the
+synthetic one-hour authorization interval:
+
+```powershell
+psql -X -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -f tests/payment-db/35_workers_setup.sql
+psql -X -U payment_db_test_issuer -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -f tests/payment-db/36_worker_issuer.sql
+psql -X -U payment_db_test_verifier -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -f tests/payment-db/37_worker_verifier.sql
+psql -X -U payment_db_test_settler -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -f tests/payment-db/38_worker_settler.sql
+psql -X -U payment_db_test_executor -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -f tests/payment-db/39_worker_executor.sql
+psql -X -U payment_db_test_notifier -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -f tests/payment-db/40_worker_notifier.sql
+psql -X -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -f tests/payment-db/46_worker_results.sql
+```
+
+Each connection sets LOCAL ROLE to its single permission group; **session_user must
+remain the specified LOGIN**. Tests reject superuser/admin substitution, count worker
+memberships, assert no owner/service_role/authenticator membership, call the actual
+identity RPC, exercise successful authorized operations and deny cross-role/table DML.
+38 reaches full escrow/direct settlement using the finalized SECURITY DEFINER owner
+permissions;46 checks original receipt, Card status/ledger-related counts and actual
+issuer/verifier/settler audit login names.30 additionally tests JWT role spoofing.
+SET ROLE under an administrator is NOT equivalent to these real connections.
+
+To test durable bytes (47), first39 must hold an active execute_outcome lease:
+
+1. Export45 using that real executor connection and `psql -X -q -At`. Save its single
+JSON output to a NEW OS TEMP file named `flexsoar-payment-synthetic-plan-<unique>.json`.
+Use Out-File -Encoding utf8 -NoClobber; the offline helper accepts the PS5 UTF8 BOM.
+2. Run `node tests/payment-db/make-signed-fixture.mjs ISOLATED_SYNTHETIC_ONLY <planPath> <newEnvelopePath>`.
+Both paths must be named synthetic JSON inside OS TEMP. The helper uses the installed
+SDK and a new valueless fee signer, saves NO private key and writes with exclusive
+creation. Its synthetic blockhash/height are intentionally not network validity data.
+NEVER broadcast this fixture. Production offline inspector is exercised against this
+actual helper's output by payment-signed-operation.test.ts.
+3. Open psql as payment_db_test_executor with the target acknowledgement. Set variables
+operation_id from plan.operationId, lease_id from exported leaseId and signed_envelope_json
+to the generated SINGLE-LINE JSON. For interactive psql, use `\set signed_envelope_json '<generated JSON line>'`;
+JSON quoting must be preserved. Then `\i tests/payment-db/47_signed_storage_contract.sql`.
+This is HUMAN SQL execution only after separate authorization, not an agent command.
+4.47 stages exactly once, retries exact bytes (lost ACK), reads them back, rejects changed
+validity/context and marks a synthetic unknown send outcome WITHOUT sending anything.
+If the lease expired, claim a fresh lease first; if already staged, retrieve the old
+envelope instead of creating another signature. No automatic replacement exists.
+
+SQL does NOT verify Ed25519 or decode Solana messages. It validates row/context/byte
+hashes, first signature identity and immutable storage. Every production stage/recovery
+uses inspectSignedOperation with the separately fetched DB plan. Financial verification
+and receipt consumption remain separate roles; staging does not prove payment.
+
+## Deterministic separate-session arbitration:50..57
+
+Run50_races_setup.sql once as administrator on a fresh synthetic target (after schema;
+35 supplies the standard issuer/verifier/settler LOGINs if used).50 also creates distinct
+executor_a/b and notifier_a/b LOGINs, each with ONLY its own worker membership. These
+are test identities with no passwords/production secrets. The fixtures have a one-hour
+authorization interval. No psql script auto-signs, sends or invents a second valid chain
+result. Deliberately conflicting proof JSON is a buggy-verifier/adversarial database
+input, NOT a claim that two Solana outcomes were valid. Only ONE canonical terminal
+observation is admissible for each sale. Database code trusts the dedicated verifier;
+these tests cannot prove the verifier's cryptographic correctness.
+
+For each case, open independent terminals A/B and run51_race_a.sql /52_race_b.sql with
+`-v race_case=<case>`. Worker logins also supply `-v worker_role=payment_v2_<role>`;
+use the exact credentials below. Scripts leave transactions OPEN, force deferred
+constraints before returning, and print the result. For lock races, verify B blocks
+while A holds Item/Card/Sale locks; a third isolated administrator may inspect
+pg_stat_activity/pg_locks. Commit A, then commit B. Never use sleeps as synchronization.
+For rollback, explicitly ROLLBACK A, then let B finish and COMMIT. A's returned order
+was provisional; clients may expose a durable receipt only after COMMIT succeeds.
+
+Use **interactive psql**, not `psql -f` for51/52: exiting the connection rolls back
+the open transaction. For example, launch A with
+`psql -X -U payment_db_test_settler -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -v race_case=conflicting_signature -v worker_role=payment_v2_settler`,
+then enter `\i tests/payment-db/51_race_a.sql` and leave that connection open.
+Launch B independently with its verifier login/role and the same case, enter
+`\i tests/payment-db/52_race_b.sql`. After observing B waiting, enter `COMMIT;`
+in A, wait for B's result, then `COMMIT;` in B. For rollback use `ROLLBACK;` in A.
+The scripts themselves never complete the barrier transaction for you.
+
+| race_case | A login/role | B login/role | Expected result |
+|---|---|---|---|
+| conflicting_signature | payment_db_test_settler/settler | payment_db_test_verifier/verifier | Different signature for same sale rejected; one original order |
+| conflicting_attempt | settler | verifier | Separately initiated/authorized second buyer cannot consume the winning sale |
+| release_refund | verifier | verifier | Canonical release event holds locks; opposite fabricated refund rejected |
+| refund_release | verifier | verifier | Canonical refund event holds locks; opposite fabricated release rejected |
+| funding_cancel | isolated administrator simulating seller auth.uid only | settler | Cancel remains intent; canonical funded payment wins and listing sells |
+| funding_revoke | settler | verifier | Finalized funded evidence prevents contradictory revocation |
+| revoked_funding | verifier | verifier | Canonical revoke wins; contradictory new funding evidence rejected |
+| rollback | settler, ROLLBACK A | settler | B alone commits exact claim/order/journal/outbox |
+
+For terminal cases, B ONLY arbitrates/imports observations. After both commit, run
+56_consume_canonical_terminal.sql with the SAME race_case in an ACTUAL settler login
+connection, twice-idempotent consume included. No verifier connection is allowed to
+settle. Then run53_race_assert.sql as administrator: exact one order, beneficiary/cache,
+Card legs/provenance, USDC legs/per-event balance, evidence/consumption and notification
+counts. No opposite terminal row may appear. Run53 after EACH completed case; it only
+asserts cases with a committed B observation. A missing B means a case was not tested.
+Record case names, both backend PIDs/logins, blocked lock evidence and all results.
+
+For deterministic **terminal consumption concurrency**, use58/59 INSTEAD OF56 on a
+fresh terminal case. Open two separate real settler connections with race_case and
+target acknowledgement. Interactive A includes58_terminal_consume_a.sql, leaving
+the transaction open. B includes59_terminal_consume_b.sql and must wait. COMMIT A,
+then COMMIT B and run53: both consume observations must contain the identical receipt,
+with exactly the same financial counts above. Record distinct backend PIDs; these
+connections may share the dedicated settler LOGIN because both perform ONLY settlement.
+The canonical event is shared: never invent two valid opposite terminal outcomes.
+
+For queues, run57_prepare_queue_case.sql as administrator BEFORE EACH named queue
+case. It isolates eligibility to the exact synthetic fixture IDs and expires only
+their test leases; no production path can do this. Use the role/login pairs:
+
+- operations: A payment_db_race_executor_a, B payment_db_race_executor_b; each SET ROLE
+payment_v2_executor. A claims one row and holds its lock; B SKIP LOCKED claims the other.
+- outbox: A payment_db_race_notifier_a, B payment_db_race_notifier_b; role payment_v2_notifier.
+- operation_takeover / outbox_takeover: after57, A claims and COMMITS. Administrator runs54
+(expire only the exact committed synthetic A lease), then B claims and COMMITS.53 must
+show SAME work ID but different lease IDs and login identities. Use A's original login
+to run55_stale_worker.sql with worker_role: completion with the original lease must fail.
+
+For queue competition run51/52 as above and COMMIT both;53 requires disjoint IDs. For
+all takeover cases, no external execution/delivery occurs. These prove CAS/SKIP LOCKED
+only if run. Single-session fixtures/unit mocks do not establish concurrency safety.
+On-chain shared Sale consumption, not a database reservation or lease, prevents two
+buyers funding the same sale. A stale worker can still hold previously signed bytes;
+only the program's terminal/revision fencing prevents a second financial outcome.

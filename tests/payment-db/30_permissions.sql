@@ -20,6 +20,8 @@ SELECT pg_temp.expect_error('SELECT public.fn_payment_v2_record_attestation(''{}
 SELECT pg_temp.expect_error('INSERT INTO payment_v2.events DEFAULT VALUES','permission denied');
 SELECT pg_temp.expect_error('UPDATE payment_v2.attempts SET state=''released''','permission denied');
 SELECT pg_temp.expect_error('SELECT public.fn_purchase_card(gen_random_uuid(),gen_random_uuid(),''fabricated'')','permission denied');
+SELECT pg_temp.expect_error('SELECT public.fn_payment_v2_worker_identity(''payment_v2_verifier'')','permission denied');
+SELECT pg_temp.expect_error('SELECT public.fn_payment_v2_stage_signed_operation(gen_random_uuid(),gen_random_uuid(),''{}'')','permission denied');
 -- A JWT role string must not grant database authority.
 SELECT set_config('request.jwt.claims','{"role":"payment_v2_verifier"}',true);
 SELECT pg_temp.expect_error('SELECT public.fn_payment_v2_record_verified_event(''{}'')','permission denied');

@@ -206,6 +206,7 @@ BEGIN
  IF FOUND THEN
   IF e.attempt_id<>a.id OR e.sale_id<>s.id OR e.kind<>v_kind OR e.proof IS DISTINCT FROM p_event THEN RAISE EXCEPTION 'PAYMENT_V2_CONFLICTING_EVIDENCE';END IF;RETURN e.id;
  END IF;
+ IF v_kind IN('funded','direct') AND s.state NOT IN('open','cancel_requested') THEN RAISE EXCEPTION 'PAYMENT_V2_FUNDING_CONTRADICTS_SALE_STATE';END IF;
  INSERT INTO payment_v2.events(attempt_id,sale_id,kind,network_id,genesis,signature,slot,funded_at,decision_revision,proof,proof_digest,verifier_login)
  VALUES(a.id,s.id,v_kind,s.network_id,(s.network_snapshot).genesis,p_event->>'signature',(p_event->>'slot')::bigint,(p_event->>'fundedAtSeconds')::bigint,(p_event->>'decisionRevision')::numeric,p_event,sha256(convert_to(p_event::text,'UTF8')),session_user) RETURNING id INTO v_id;
  RETURN v_id;

@@ -8,7 +8,7 @@ BEGIN
  END;RAISE EXCEPTION 'expected rejection: %',statement;
 END $$;
 -- Synthetic rows only; no data copied from Panda, production, customer records or wallets.
-CREATE FUNCTION pg_temp.fixture(mode smallint,valid_seconds integer DEFAULT 600) RETURNS jsonb LANGUAGE plpgsql AS $$
+CREATE FUNCTION pg_temp.fixture(mode smallint,valid_seconds integer DEFAULT 600,record_evidence boolean DEFAULT true) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE seller uuid:=gen_random_uuid();buyer uuid:=gen_random_uuid();model uuid:=gen_random_uuid();sku uuid:=gen_random_uuid();item uuid:=gen_random_uuid();card uuid:=gen_random_uuid();listing uuid:=gen_random_uuid();net uuid:=gen_random_uuid();sale uuid:=gen_random_uuid();u uuid;st uuid;enroller uuid;reviewer uuid;i int;role_name text;status jsonb;permit text;proof jsonb;event uuid;funded bigint:=extract(epoch FROM clock_timestamp())::bigint;
 BEGIN
  INSERT INTO public.users(id,auth_id,handle,email,country_code,solana_address) VALUES
@@ -45,8 +45,8 @@ BEGIN
  PERFORM public.fn_payment_v2_record_lifecycle(proof);
  PERFORM set_config('request.jwt.claim.sub',buyer::text,true);
  status:=public.fn_payment_v2_initiate(listing,gen_random_uuid(),'MY-USDC-ESCROW-1','834ca943173d4db87622426e161eeb17afcdbac94e37368e6f697430961925c5');
- permit:=public.fn_payment_v2_authorize_attempt((status->>'id')::uuid);
+ IF record_evidence THEN permit:=public.fn_payment_v2_authorize_attempt((status->>'id')::uuid);END IF;
  proof:=jsonb_build_object('kind',CASE mode WHEN 0 THEN 'funded' ELSE 'direct' END,'signature',repeat('3',88),'slot',2,'fundedAtSeconds',funded::text,'decisionRevision','0','permitHex',permit,'genesis',proof->>'genesis','program',proof->>'program','sale',proof->>'sale','attempt',payment_v2.b58(sha256(uuid_send((status->>'id')::uuid))),'finality','finalized');
- event:=public.fn_payment_v2_record_verified_event(proof);
- RETURN jsonb_build_object('seller',seller,'buyer',buyer,'card',card,'item',item,'listing',listing,'network',net,'sale',sale,'attempt',status->>'id','permit',permit,'event',event,'proof',proof);
+ IF record_evidence THEN event:=public.fn_payment_v2_record_verified_event(proof);END IF;
+ RETURN jsonb_build_object('issuerTerms',(SELECT issuer_terms FROM payment_v2.sales WHERE id=sale),'seller',seller,'buyer',buyer,'card',card,'item',item,'listing',listing,'network',net,'sale',sale,'attempt',status->>'id','permit',permit,'event',event,'proof',proof);
 END $$;

@@ -16,10 +16,12 @@ export async function authorizePaymentAttempt(issuer:PaymentRpc,attemptId:string
 export async function paymentOperationContext(executor:PaymentRpc,operation:Pick<PaymentOperation,'id'|'leaseId'>):Promise<Record<string,unknown>>{
  uuid(operation.id);uuid(operation.leaseId);return object(await paymentRpc(executor,'fn_payment_v2_operation_context',{p_operation_id:operation.id,p_lease_id:operation.leaseId}));
 }
-/** Persist the signature BEFORE sending. Unknown/submitted operations only recover
- * that identity; bookkeeping failure is never permission to sign a replacement. */
+/** Reports transport state only AFTER stageSignedOperation has durably stored the
+ * complete envelope. Database rejects signature-only submission. Unknown/submitted
+ * operations recover that identity; bookkeeping failure never permits replacement. */
 export async function finishPaymentOperation(executor:PaymentRpc,operation:Pick<PaymentOperation,'id'|'leaseId'>,outcome:'retry'|'submitted'|'unknown',signature:string|null,error:string|null):Promise<void>{
  uuid(operation.id);uuid(operation.leaseId);
+ if(outcome==='retry'&&signature!==null)throw new Error('signed operation is recovery-only');
  if(!['retry','submitted','unknown'].includes(outcome)||(signature!==null&&!/^[1-9A-HJ-NP-Za-km-z]{80,96}$/.test(signature))||(outcome!=='retry'&&!signature))throw new Error('signed operation identity required');
  await paymentRpc(executor,'fn_payment_v2_finish_operation',{p_operation_id:operation.id,p_lease_id:operation.leaseId,p_outcome:outcome,p_signature:signature,p_error:error});
 }
@@ -48,4 +50,9 @@ export async function finishPaymentOutbox(notifier:PaymentRpc,job:Pick<PaymentOu
 
 export async function recordPaymentOperationFailure(verifier:PaymentRpc,operationId:string,proof:Record<string,unknown>):Promise<void>{
  uuid(operationId);await paymentRpc(verifier,'fn_payment_v2_record_operation_failure',{p_operation_id:operationId,p_proof:proof});
+}
+
+export async function paymentWorkerIdentity(client:PaymentRpc,role:'payment_v2_issuer'|'payment_v2_verifier'|'payment_v2_settler'|'payment_v2_executor'|'payment_v2_notifier'):Promise<string>{
+ const r=object(await paymentRpc(client,'fn_payment_v2_worker_identity',{p_required_role:role}));
+ if(typeof r.login!=='string'||!r.login||r.role!==role||r.superuser!==false)throw new Error('Dedicated database connection identity mismatch');return r.login;
 }

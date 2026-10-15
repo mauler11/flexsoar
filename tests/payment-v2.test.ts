@@ -120,6 +120,7 @@ describe('durable production recovery orchestration (RPC doubles are NOT Postgre
   });
   async function setup(kind:OutcomeKind='released'){
     const {s}=await fixture(kind);const applied:string[]=[];const rpc=vi.fn<PaymentRpc['rpc']>().mockImplementation(async(name,args)=>{
+      if(name==='fn_payment_v2_worker_identity')return {data:{login:String(args.p_required_role)+'-login',role:args.p_required_role,superuser:false},error:null};
       if(name==='fn_payment_v2_begin_scan')return {data:{leaseId:'lease',afterAddress:null},error:null};
       if(name==='fn_payment_v2_finish_scan')return {data:null,error:null};
       if(name==='fn_payment_v2_recovery_binding')return {data:{permitHex:Buffer.from(encodePermit(s.permit)).toString('hex'),appliedKinds:[...applied]},error:null};
@@ -132,6 +133,14 @@ describe('durable production recovery orchestration (RPC doubles are NOT Postgre
     const {rpc,observer}=await setup(kind);const one=await reconcilePayments({rpc},observer,20,{rpc});expect(one.failed).toEqual([]);expect(one.processed).toBe(kind==='released'||kind==='refunded'?2:1);
     expect((await reconcilePayments({rpc},observer,20,{rpc})).processed).toBe(0);
     expect(rpc.mock.calls.every(([name])=>!name.includes('purchase_card'))).toBe(true);
+  });
+  it('rejects two wrappers sharing a credential even when their objects differ',async()=>{
+    const {observer}=await setup();const scan=vi.spyOn(observer,'scan');const rpc=vi.fn(async()=>({data:{login:'same-login',role:'payment_v2_verifier',superuser:false},error:null}));
+    await expect(reconcilePayments({rpc},observer,20,{rpc})).rejects.toThrow('identity mismatch');expect(scan).not.toHaveBeenCalled();
+  });
+  it('also rejects identical login names when two wrappers report different role labels',async()=>{
+    const {observer}=await setup();const scan=vi.spyOn(observer,'scan');const rpc=vi.fn(async(_n:string,args:Record<string,unknown>)=>({data:{login:'one-credential',role:args.p_required_role,superuser:false},error:null}));
+    await expect(reconcilePayments({rpc},observer,20,{rpc})).rejects.toThrow('distinct database logins');expect(scan).not.toHaveBeenCalled();
   });
   it('keeps funding receipt identity stable when later escrow decisions change revision',async()=>{
     const {rpc,observer}=await setup('released');await reconcilePayments({rpc},observer,20,{rpc});

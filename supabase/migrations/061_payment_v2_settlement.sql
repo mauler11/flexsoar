@@ -39,8 +39,10 @@ BEGIN
  END IF;
  SELECT id,item_id,owner_id,status INTO c.id,c.item_id,c.owner_id,c.status FROM public.cards WHERE id=s.card_id;
  IF s.generation<>(SELECT generation FROM payment_v2.inventory WHERE card_id=c.id) THEN RAISE EXCEPTION 'PAYMENT_V2_GENERATION_CONFLICT';END IF;
- -- Lock user rows only after Item/Card/Sale/Listing/Attempt/Escrow/Evidence.
- PERFORM 1 FROM public.users WHERE id IN(a.buyer_id,a.seller_id) ORDER BY id FOR UPDATE;
+ -- No user/account cash balance is mutated. Destinations are immutable attempt snapshots.
+ -- Item/Card/Sale/Listing/Attempt/Escrow locks serialize claim/financial changes;
+ -- FK enforcement protects referenced identities. Relinking a wallet must not block recovery.
+ -- Do not lock users: SELECT-only owner intentionally has no user UPDATE permission.
  IF e.kind IN('funded','direct') THEN
   IF o.id IS NOT NULL OR x.id IS NOT NULL OR s.state NOT IN('open','cancel_requested') OR c.owner_id<>s.seller_id OR c.status<>'active'
   OR NOT EXISTS(SELECT 1 FROM public.listings WHERE id=s.listing_id AND seller_id=s.seller_id AND card_id=c.id AND status='public') THEN RAISE EXCEPTION 'PAYMENT_V2_FUNDED_OWNERSHIP_CONFLICT: manual resolution required; never pay again';END IF;

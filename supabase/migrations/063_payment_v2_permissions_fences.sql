@@ -157,7 +157,7 @@ DO $ownership$ DECLARE t record;f record;g record;n text;BEGIN
  END LOOP;
  FOREACH n IN ARRAY ARRAY['users','items','cards','listings','orders','ledger_entries'] LOOP
   EXECUTE format('GRANT SELECT ON public.%I TO payment_v2_owner',n);
-  EXECUTE format('CREATE POLICY payment_v2_owner_access ON public.%I TO payment_v2_owner USING(true) WITH CHECK(true)',n);
+  IF n='users' THEN EXECUTE 'CREATE POLICY payment_v2_owner_access ON public.users FOR SELECT TO payment_v2_owner USING(true)';ELSE EXECUTE format('CREATE POLICY payment_v2_owner_access ON public.%I TO payment_v2_owner USING(true) WITH CHECK(true)',n);END IF;
  END LOOP;
  GRANT UPDATE ON public.items,public.cards TO payment_v2_owner;
  GRANT INSERT,UPDATE ON public.listings,public.orders TO payment_v2_owner;
@@ -182,16 +182,18 @@ DO $grants$ DECLARE f record;r text;BEGIN
    WHEN f.proname IN('fn_payment_v2_prepare_sale','fn_payment_v2_authorize_attempt') THEN 'payment_v2_issuer'
    WHEN f.proname IN('fn_payment_v2_begin_scan','fn_payment_v2_finish_scan','fn_payment_v2_recovery_binding','fn_payment_v2_record_verified_event','fn_payment_v2_record_attestation','fn_payment_v2_record_lifecycle','fn_payment_v2_record_operation_failure') THEN 'payment_v2_verifier'
    WHEN f.proname='fn_payment_v2_reconcile_event' THEN 'payment_v2_settler'
-   WHEN f.proname IN('fn_payment_v2_claim_operations','fn_payment_v2_finish_operation','fn_payment_v2_operation_context') THEN 'payment_v2_executor'
+   WHEN f.proname IN('fn_payment_v2_claim_operations','fn_payment_v2_finish_operation','fn_payment_v2_operation_context','fn_payment_v2_signed_operation','fn_payment_v2_stage_signed_operation') THEN 'payment_v2_executor'
    WHEN f.proname IN('fn_payment_v2_claim_outbox','fn_payment_v2_finish_outbox') THEN 'payment_v2_notifier'
    WHEN f.proname IN('fn_payment_v2_initiate','fn_payment_v2_own_attempts','fn_payment_v2_attach_candidate','fn_payment_v2_record_decision','fn_payment_v2_approve_refund','fn_payment_v2_admin_queue','fn_payment_v2_admin_obligations','fn_payment_v2_list_card','fn_payment_v2_request_cancel','fn_payment_v2_redeem_card','fn_payment_v2_review_dispatch') THEN 'authenticated'
    WHEN f.proname IN('fn_payment_v2_managed','fn_payment_v2_legacy_guard') THEN 'PUBLIC' END;
+  IF f.proname='fn_payment_v2_worker_identity' THEN EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO payment_v2_issuer,payment_v2_verifier,payment_v2_settler,payment_v2_executor,payment_v2_notifier',f.sig);CONTINUE;END IF;
   IF r IS NULL THEN RAISE EXCEPTION 'unclassified payment RPC %',f.sig;END IF;
   EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO %s',f.sig,CASE WHEN r='PUBLIC' THEN 'PUBLIC' ELSE quote_ident(r) END);
  END LOOP;
  GRANT USAGE ON SCHEMA public TO payment_v2_issuer,payment_v2_verifier,payment_v2_settler,payment_v2_executor,payment_v2_notifier;
 END $grants$;
 DO $postflight$ DECLARE r text;BEGIN
+ IF has_table_privilege('payment_v2_owner','public.users','UPDATE') OR has_any_column_privilege('payment_v2_owner','public.users','UPDATE') THEN RAISE EXCEPTION 'unexpected inherited user mutation privilege; review catalog';END IF;
  FOREACH r IN ARRAY ARRAY['payment_v2_owner','payment_v2_issuer','payment_v2_verifier','payment_v2_settler','payment_v2_executor','payment_v2_notifier'] LOOP
   IF pg_has_role('authenticator',r::name,'MEMBER') OR pg_has_role('service_role',r::name,'MEMBER') OR pg_has_role('authenticated',r::name,'MEMBER') OR pg_has_role('anon',r::name,'MEMBER') THEN RAISE EXCEPTION 'unsafe existing membership in %',r;END IF;
  END LOOP;

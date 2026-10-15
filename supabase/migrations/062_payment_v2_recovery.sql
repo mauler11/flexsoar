@@ -49,11 +49,12 @@ DECLARE o payment_v2.operations%rowtype;
 BEGIN
  PERFORM payment_v2.require_role('payment_v2_executor');
  SELECT id,command_id,decision_id,sale_id,action,payload,payload_digest,expected_revision,ready,state,lease_id,leased_by,worker_id,lease_until,attempts,signature,resolved_event,last_error,available_at,created_at INTO o.id,o.command_id,o.decision_id,o.sale_id,o.action,o.payload,o.payload_digest,o.expected_revision,o.ready,o.state,o.lease_id,o.leased_by,o.worker_id,o.lease_until,o.attempts,o.signature,o.resolved_event,o.last_error,o.available_at,o.created_at FROM payment_v2.operations WHERE id=p_operation_id FOR UPDATE;
- IF o.id IS NOT NULL AND o.lease_id=p_lease_id AND o.leased_by=session_user AND o.lease_until IS NULL AND o.state=p_outcome AND o.signature IS NOT DISTINCT FROM p_signature AND p_outcome IN('submitted','unknown') THEN RETURN;END IF;
+ IF o.id IS NOT NULL AND o.lease_id=p_lease_id AND o.leased_by=session_user AND o.lease_until IS NULL AND o.state=p_outcome AND o.signature IS NOT DISTINCT FROM p_signature AND p_outcome IN('submitted','unknown') AND EXISTS(SELECT 1 FROM payment_v2.signed_operations WHERE operation_id=o.id AND signature=p_signature) THEN RETURN;END IF;
  IF o.id IS NULL OR o.lease_id IS DISTINCT FROM p_lease_id OR o.leased_by<>session_user OR o.lease_until IS NULL OR o.lease_until<=clock_timestamp() OR o.state='observed' THEN RAISE EXCEPTION 'PAYMENT_V2_OPERATION_LEASE_LOST';END IF;
  IF p_outcome IS NULL OR p_outcome NOT IN('retry','submitted','unknown') OR (p_signature IS NOT NULL AND p_signature !~ '^[1-9A-HJ-NP-Za-km-z]{80,96}$') THEN RAISE EXCEPTION 'PAYMENT_V2_OPERATION_OUTCOME';END IF;
  IF o.signature IS NOT NULL AND p_signature IS DISTINCT FROM o.signature THEN RAISE EXCEPTION 'PAYMENT_V2_OPERATION_SIGNATURE_CONFLICT';END IF;
- IF p_outcome='retry' AND (o.signature IS NOT NULL OR o.state IN('submitted','unknown')) THEN RAISE EXCEPTION 'PAYMENT_V2_SENT_OPERATION_RECOVERY_ONLY';END IF;
+ IF p_outcome='retry' AND (p_signature IS NOT NULL OR o.signature IS NOT NULL OR o.state IN('submitted','unknown')) THEN RAISE EXCEPTION 'PAYMENT_V2_SENT_OPERATION_RECOVERY_ONLY';END IF;
+ IF p_outcome IN('submitted','unknown') AND NOT EXISTS(SELECT 1 FROM payment_v2.signed_operations WHERE operation_id=o.id AND signature=p_signature) THEN RAISE EXCEPTION 'PAYMENT_V2_DURABLE_SIGNED_BYTES_REQUIRED';END IF;
  IF p_outcome IN('submitted','unknown') AND coalesce(o.signature,p_signature) IS NULL THEN RAISE EXCEPTION 'PAYMENT_V2_PERSIST_SIGNED_SIGNATURE_BEFORE_SEND';END IF;
  UPDATE payment_v2.operations SET state=CASE p_outcome WHEN 'retry' THEN 'pending' ELSE p_outcome END,signature=coalesce(signature,p_signature),
  last_error=left(p_error,2000),available_at=clock_timestamp()+interval '30 seconds',lease_until=NULL WHERE id=o.id;
@@ -167,6 +168,64 @@ BEGIN
  INSERT INTO payment_v2.dispatch_reviews VALUES(p_id,x.id,st,p_kind,decode(p_digest,'hex'),p_route,p_accepted_at,now());
  UPDATE payment_v2.escrows SET dispatch_evidence=p_kind,review_after=p_accepted_at+CASE p_route WHEN 'east_malaysia' THEN interval '14 days' ELSE interval '7 days' END WHERE id=x.id;
  -- Review triggers ONLY. No timeout refund/default. Label creation is not dispatch evidence.
+END $$;
+CREATE FUNCTION public.fn_payment_v2_worker_identity(p_required_role name) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+ IF p_required_role IS NULL OR p_required_role NOT IN('payment_v2_issuer','payment_v2_verifier','payment_v2_settler','payment_v2_executor','payment_v2_notifier') OR (SELECT rolsuper FROM pg_roles WHERE rolname=session_user) THEN RAISE EXCEPTION 'PAYMENT_V2_DEDICATED_CONNECTION_REQUIRED';END IF;
+ PERFORM payment_v2.require_role(p_required_role);
+ RETURN jsonb_build_object('login',session_user,'role',p_required_role,'superuser',false);
+END $$;
+CREATE FUNCTION payment_v2.exit_plan(p_operation uuid) RETURNS jsonb LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+DECLARE op payment_v2.operations%rowtype;s payment_v2.sales%rowtype;a payment_v2.attempts%rowtype;n payment_v2.networks%rowtype;accounts jsonb;
+BEGIN
+ SELECT sale_id,action,payload_digest,expected_revision INTO op.sale_id,op.action,op.payload_digest,op.expected_revision FROM payment_v2.operations WHERE id=p_operation;
+ IF op.action IS DISTINCT FROM 'execute_outcome' THEN RAISE EXCEPTION 'PAYMENT_V2_SIGNED_RECOVERY_ACTION_UNSUPPORTED';END IF;
+ SELECT network_id,network_snapshot,sale_address,escrow_address INTO s.network_id,s.network_snapshot,s.sale_address,s.escrow_address FROM payment_v2.sales WHERE id=op.sale_id;n:=s.network_snapshot;
+ SELECT a0.seller_token,a0.treasury_token,a0.refund_token INTO a.seller_token,a.treasury_token,a.refund_token FROM payment_v2.attempts a0 JOIN payment_v2.escrows x ON x.attempt_id=a0.id WHERE x.sale_id=op.sale_id;
+ IF a.seller_token IS NULL THEN RAISE EXCEPTION 'PAYMENT_V2_FUNDED_ATTEMPT_REQUIRED';END IF;
+ SELECT jsonb_agg(jsonb_build_object('pubkey',v.key,'isSigner',false,'isWritable',v.writable) ORDER BY v.pos) INTO accounts
+ FROM (VALUES(1,payment_v2.b58(n.config),true),(2,payment_v2.b58(s.sale_address),true),(3,payment_v2.b58(s.escrow_address),true),
+ (4,payment_v2.b58(a.seller_token),true),(5,payment_v2.b58(a.treasury_token),true),(6,payment_v2.b58(a.refund_token),true),
+ (7,payment_v2.b58(n.token_program),false),(8,'Sysvar1nstructions1111111111111111111111111',false)) v(pos,key,writable);
+ RETURN jsonb_build_object('operationId',p_operation,'networkId',s.network_id,'genesis',payment_v2.b58(n.genesis),'program',payment_v2.b58(n.program),
+ 'action',op.action,'expectedRevision',op.expected_revision::text,'payloadDigest',encode(op.payload_digest,'hex'),
+ 'instruction',jsonb_build_object('programId',payment_v2.b58(n.program),'dataBase64',replace(encode(substring(sha256(convert_to('global:execute_outcome','UTF8')) FROM 1 FOR 8)||payment_v2.le64(op.expected_revision),'base64'),E'\n',''),'accounts',accounts));
+END $$;
+CREATE FUNCTION public.fn_payment_v2_signed_operation(p_operation_id uuid,p_lease_id uuid) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE o payment_v2.operations%rowtype;stored jsonb;
+BEGIN
+ PERFORM payment_v2.require_role('payment_v2_executor');
+ SELECT lease_id,leased_by,lease_until INTO o.lease_id,o.leased_by,o.lease_until FROM payment_v2.operations WHERE id=p_operation_id;
+ IF o.lease_id IS DISTINCT FROM p_lease_id OR o.leased_by IS DISTINCT FROM session_user OR o.lease_until IS NULL OR o.lease_until<=clock_timestamp() THEN RAISE EXCEPTION 'PAYMENT_V2_OPERATION_LEASE_LOST';END IF;
+ SELECT envelope INTO stored FROM payment_v2.signed_operations WHERE operation_id=p_operation_id;
+ RETURN jsonb_build_object('plan',payment_v2.exit_plan(p_operation_id),'envelope',stored);
+END $$;
+CREATE FUNCTION public.fn_payment_v2_stage_signed_operation(p_operation_id uuid,p_lease_id uuid,p_envelope jsonb) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE o payment_v2.operations%rowtype;plan jsonb;old jsonb;raw bytea;message bytea;
+BEGIN
+ PERFORM payment_v2.require_role('payment_v2_executor');
+ SELECT sale_id INTO o.sale_id FROM payment_v2.operations WHERE id=p_operation_id;PERFORM payment_v2.lock_sale(o.sale_id);
+ SELECT lease_id,leased_by,lease_until,state INTO o.lease_id,o.leased_by,o.lease_until,o.state FROM payment_v2.operations WHERE id=p_operation_id FOR UPDATE;
+ IF o.lease_id IS DISTINCT FROM p_lease_id OR o.leased_by IS DISTINCT FROM session_user OR o.lease_until IS NULL OR o.lease_until<=clock_timestamp() THEN RAISE EXCEPTION 'PAYMENT_V2_OPERATION_LEASE_LOST';END IF;
+ plan:=payment_v2.exit_plan(p_operation_id);
+ IF p_envelope->'plan' IS DISTINCT FROM plan THEN RAISE EXCEPTION 'PAYMENT_V2_SIGNED_OPERATION_CONTEXT';END IF;
+ SELECT envelope INTO old FROM payment_v2.signed_operations WHERE operation_id=p_operation_id;
+ IF FOUND THEN IF old IS DISTINCT FROM p_envelope THEN RAISE EXCEPTION 'PAYMENT_V2_SIGNED_OPERATION_IMMUTABLE';END IF;RETURN;END IF;
+ IF o.state<>'leased' OR NOT EXISTS(SELECT 1 FROM payment_v2.escrows x JOIN payment_v2.operations op ON op.sale_id=x.sale_id WHERE op.id=p_operation_id AND x.state='funded' AND NOT x.held AND x.decision_revision=op.expected_revision) THEN RAISE EXCEPTION 'PAYMENT_V2_OPERATION_NOT_STAGEABLE';END IF;
+ IF NOT (p_envelope ?& ARRAY['transactionBase64','transactionDigest','messageDigest','signature','blockhash','lastValidBlockHeight','plan']) OR EXISTS(SELECT 1 FROM jsonb_each(p_envelope) f WHERE value='null'::jsonb) THEN RAISE EXCEPTION 'PAYMENT_V2_SIGNED_ENVELOPE_REQUIRED';END IF;
+ raw:=decode(p_envelope->>'transactionBase64','base64');message:=substring(raw FROM 66);
+ IF replace(encode(raw,'base64'),E'\n','') IS DISTINCT FROM p_envelope->>'transactionBase64' OR octet_length(raw) NOT BETWEEN 66 AND 1232 OR get_byte(raw,0)<>1 OR payment_v2.b58(substring(raw FROM 2 FOR 64)) IS DISTINCT FROM p_envelope->>'signature'
+ OR sha256(raw) IS DISTINCT FROM decode(p_envelope->>'transactionDigest','hex') OR sha256(message) IS DISTINCT FROM decode(p_envelope->>'messageDigest','hex')
+ OR (p_envelope->>'lastValidBlockHeight') !~ '^[0-9]+$' THEN RAISE EXCEPTION 'PAYMENT_V2_SIGNED_BYTES_CONTEXT';END IF;
+ INSERT INTO payment_v2.signed_operations(operation_id,network_id,envelope,signed_transaction,transaction_digest,message_digest,signature,blockhash,last_valid_block_height,staged_by)
+ VALUES(p_operation_id,(plan->>'networkId')::uuid,p_envelope,raw,sha256(raw),sha256(message),p_envelope->>'signature',payment_v2.unb58(p_envelope->>'blockhash'),(p_envelope->>'lastValidBlockHeight')::numeric,session_user);
+ UPDATE payment_v2.operations SET state='submitted',signature=p_envelope->>'signature' WHERE id=p_operation_id;
+ -- SQL binds bytes/digests/context, but is NOT an Ed25519/message verifier. The
+ -- executor must use the offline production validator before staging AND recovery.
+ -- This record never authorizes financial settlement or proves broadcast success.
 END $$;
 DO $seal$ DECLARE f record;BEGIN FOR f IN SELECT oid::regprocedure AS sig FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname LIKE 'fn_payment_v2_%' LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f.sig);END LOOP;END $seal$;
 COMMIT;

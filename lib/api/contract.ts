@@ -4829,3 +4829,6 @@ export type {
 };
 
 export { preparePaymentSale, recordPaymentOperationFailure, authorizePaymentAttempt, paymentOperationContext, finishPaymentOperation, recordPaymentAttestation, recordPaymentLifecycle, approvePaymentGovernance, claimPaymentOutbox, finishPaymentOutbox } from '@/lib/db/payment-v2-workers';
+
+export { loadSignedOperation, stageSignedOperation, signedOperationRecovery } from '@/lib/db/payment-signed-operation';
+export { paymentWorkerIdentity } from '@/lib/db/payment-v2-workers';

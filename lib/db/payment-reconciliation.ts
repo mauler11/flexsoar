@@ -2,6 +2,7 @@ import { decodePermit, encodePermit, equalBytes } from '@/lib/solana/protocol-v2
 import { base58Encode } from '@/lib/solana/base58';
 import type { SaleSnapshot, OutcomeKind } from '@/lib/solana/v2-observer';
 import { paymentRpc, type PaymentRpc } from './payment-v2';
+import { paymentWorkerIdentity } from './payment-v2-workers';
 export interface PaymentObserver {
   readonly genesis: string; readonly program: string;
   scan(): Promise<SaleSnapshot[]>;
@@ -12,6 +13,9 @@ export interface PaymentObserver {
 export async function reconcilePayments(client: PaymentRpc, observer: PaymentObserver, budget=20, settler?: PaymentRpc) {
   if(!settler||settler===client)throw new Error('Dedicated verifier and settler connections required; shared service-role settlement is disabled');
   if(!Number.isInteger(budget)||budget<1||budget>20)throw new Error('invalid recovery budget');
+  const verifierLogin=await paymentWorkerIdentity(client,'payment_v2_verifier');
+  const settlerLogin=await paymentWorkerIdentity(settler,'payment_v2_settler');
+  if(verifierLogin===settlerLogin)throw new Error('Dedicated verifier and settler must use distinct database logins');
   const sales=await observer.scan(); let processed=0;
   const lease=await paymentRpc(client,'fn_payment_v2_begin_scan',{p_genesis:observer.genesis,p_program:observer.program,p_limit:budget});
   if(!lease||typeof lease!=='object')throw new Error('missing durable scan lease');
