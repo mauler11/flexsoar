@@ -1,4 +1,4 @@
-import { PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction, type AddressLookupTableAccount } from '@solana/web3.js';
+import { PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction, SYSVAR_INSTRUCTIONS_PUBKEY, type AddressLookupTableAccount } from '@solana/web3.js';
 import { encodePermit, encodeAttestation, type PermitV2, type AttestationV2 } from './protocol-v2';
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, associatedTokenAddress } from './sdk';
 export function v2Addresses(program: string, card: Uint8Array, saleId: Uint8Array) {
@@ -17,7 +17,7 @@ export async function buyV2Instruction(p: PermitV2): Promise<TransactionInstruct
   const fields: [PublicKey,boolean,boolean][] = [
     [a.config,false,true],[a.card,false,true],[a.sale,false,true],[new PublicKey(p.issuer),true,false],[new PublicKey(p.buyer),true,false],
     [new PublicKey(p.buyerToken),false,true],[new PublicKey(p.sellerToken),false,true],[new PublicKey(p.treasuryToken),false,true],
-    [a.escrow,false,true],[new PublicKey(TOKEN_PROGRAM_ID),false,false],
+    [a.escrow,false,true],[new PublicKey(TOKEN_PROGRAM_ID),false,false],[SYSVAR_INSTRUCTIONS_PUBKEY,false,false],
   ];
   return new TransactionInstruction({programId,keys:fields.map(([pubkey,isSigner,isWritable])=>({pubkey,isSigner,isWritable})),
     data:Buffer.concat([Buffer.from(await discriminator('global:buy_sale')),Buffer.from(encodePermit(p))])});
@@ -49,6 +49,7 @@ export async function outcomeInstruction(program: string, p: PermitV2, revision:
     {pubkey:a.config,isSigner:false,isWritable:true},{pubkey:a.sale,isSigner:false,isWritable:true},{pubkey:a.escrow,isSigner:false,isWritable:true},
     ...[p.sellerToken,p.treasuryToken,p.refundToken].map(bytes=>({pubkey:new PublicKey(bytes),isSigner:false,isWritable:true})),
     {pubkey:new PublicKey(TOKEN_PROGRAM_ID),isSigner:false,isWritable:false},
+    {pubkey:SYSVAR_INSTRUCTIONS_PUBKEY,isSigner:false,isWritable:false},
   ]});
 }
 /** Recreate only the SAME bound ATA; this does not retarget a refund/payout. */

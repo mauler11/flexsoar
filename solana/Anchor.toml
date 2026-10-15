@@ -2,12 +2,14 @@
 resolution = true
 skip-lint = false
 
-[programs.devnet]
+[programs.localnet]
 flexsoar_settlement = "CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF"
 
 [provider]
-cluster = "devnet"
-wallet = "~/.config/solana/id.json"
+cluster = "http://127.0.0.1:8899"
+# Deliberately absent; local test operator supplies an EPHEMERAL wallet only.
+# Never fall back to a user's default production key.
+wallet = "tests/.local-validator-wallet.json"
 
 [registry]
 url = "https://api.apr.dev"

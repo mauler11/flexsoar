@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, SYSVAR_INSTRUCTIONS_PUBKEY } from '@solana/web3.js';
 import { encodePermit, decodePermit, encodeAttestation, validatePermit, type PermitV2 } from '../lib/solana/protocol-v2';
 import { buyV2Instruction, v2Addresses, recreateBoundAta, discriminator } from '../lib/solana/v2-sdk';
 import { inspectV2Transaction, localRpc, decodeSale, LocalV2Observer, type SaleSnapshot, type V2Transaction, type OutcomeKind } from '../lib/solana/v2-observer';
@@ -31,7 +31,7 @@ async function fixture(kind: OutcomeKind='funded') {
   const s:SaleSnapshot={address:a.sale.toBase58(),permit:p,state:kind==='released'?4:kind==='refunded'?5:kind==='direct'?3:2,fundedSlot:123,fundedAt:BigInt(200),outcomeSlot:125,decisionRevision:BigInt(1)};
   const isBuy=kind==='funded'||kind==='direct';const buy=await buyV2Instruction(p);
   const outcome=Buffer.alloc(16);outcome.set(await discriminator('global:execute_outcome'));outcome.writeBigUInt64LE(BigInt(1),8);
-  const accounts=isBuy?buy.keys.map(k=>k.pubkey.toBase58()):[a.config.toBase58(),s.address,a.escrow.toBase58(),new PublicKey(p.sellerToken).toBase58(),new PublicKey(p.treasuryToken).toBase58(),new PublicKey(p.refundToken).toBase58(),TOKEN_PROGRAM_ID];
+  const accounts=isBuy?buy.keys.map(k=>k.pubkey.toBase58()):[a.config.toBase58(),s.address,a.escrow.toBase58(),new PublicKey(p.sellerToken).toBase58(),new PublicKey(p.treasuryToken).toBase58(),new PublicKey(p.refundToken).toBase58(),TOKEN_PROGRAM_ID,SYSVAR_INSTRUCTIONS_PUBKEY.toBase58()];
   const keys=[key(31),...new Set(accounts)];const source=new PublicKey(p.buyerToken).toBase58(),seller=new PublicKey(p.sellerToken).toBase58(),treasury=new PublicKey(p.treasuryToken).toBase58(),escrow=a.escrow.toBase58();
   const moves: [string,string,string,string][]=kind==='funded'?[[source,escrow,key(10),'1000000']]:kind==='direct'?[[source,seller,key(10),'950000'],[source,treasury,key(10),'50000']]:kind==='released'?[[escrow,seller,s.address,'950000'],[escrow,treasury,s.address,'50000']]:[[escrow,source,s.address,'1000000']];
   const owners=new Map([[source,key(10)],[seller,key(11)],[treasury,key(12)],[escrow,s.address]]);
@@ -62,7 +62,7 @@ describe('canonical production protocol',()=>{
 });
 describe('actual v2 instruction and outcome verifier',()=>{
   it.each(['funded','direct','released','refunded'] as const)('verifies %s, with sponsor and principal-only escrow dust handling',async kind=>{const {tx,s,signature}=await fixture(kind);await expect(inspectV2Transaction(tx,signature,s,kind)).resolves.toBeUndefined();});
-  it.each(['program','signer','issuer','amount','recipient','mint','owner','unrelated','permit','slot'] as const)('rejects wrong %s',async fault=>{
+  it.each(['program','signer','issuer','amount','recipient','mint','owner','unrelated','permit','slot','duplicate'] as const)('rejects wrong %s',async fault=>{
     const {tx,s,signature}=await fixture();
     if(fault==='program')tx.transaction.message.instructions[0].programId=key(29);
     if(fault==='signer')tx.transaction.message.accountKeys.find(k=>k.pubkey===key(10))!.signer=false;
@@ -74,6 +74,7 @@ describe('actual v2 instruction and outcome verifier',()=>{
     if(fault==='unrelated'){tx.transaction.message.instructions.push({programId:key(29)});tx.meta.innerInstructions![0].index=1;}
     if(fault==='permit')s.permit={...s.permit,attempt:b(29)};
     if(fault==='slot')tx.slot++;
+    if(fault==='duplicate')tx.transaction.message.instructions.push({...tx.transaction.message.instructions[0]});
     await expect(inspectV2Transaction(tx,signature,s,'funded')).rejects.toThrow();
   });
   it('rejects opposite outcome and stale revision; current quote expiry does not invalidate executed evidence',async()=>{

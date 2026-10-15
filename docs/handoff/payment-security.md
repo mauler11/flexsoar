@@ -359,8 +359,8 @@ Primary wire/API references inspected (not live deployment evidence):
 
 ## Final verification for this implementation revision
 
-- Latest adapted full Vitest run: 452 passed / 2 failed / 454, 14 files passed,
-  one shared file failed. Within it dedicated payment suites are 90/90 (45 each).
+- Latest adapted full Vitest run: 453 passed / 2 failed / 455, 14 files passed,
+  one shared file failed. Within it dedicated payment suites are 91/91 (purchase-payment 45, payment-v2 46).
   Only failures: untouched FSC-copy assertions invariants.test.ts:1901 and :1960.
   Earlier 448/5 intermittent result remains above; no claim the flakiness is fixed.
 - Latest adapted no-emit compiler: three TS2749 diagnostics only, sign-in/page.tsx:20,
@@ -434,3 +434,27 @@ Re-exported through contract where appropriate; existing signatures unchanged.
 - lib/db/payment-reconciliation.ts:
   - InterfaceDeclaration PaymentObserver (fields/methods in named source).
   - export async function reconcilePayments(client: PaymentRpc, observer: PaymentObserver, budget=20)
+
+## Companion program commit and final ABI guard
+
+Application gating/adapters commit: 4ade2bf. The companion commit supplies the Rust
+program, unit-test source, guarded local validator harness and loopback Anchor config.
+Financial instructions require the fixed instructions sysvar and exactly ONE
+TOP-LEVEL own-program instruction per transaction, preventing unsupported batched
+buys/exits and proxy-CPI financial calls. Other-program compute, memo and ATA
+instructions remain allowed. Governance approval through Squads CPI is unaffected;
+actual financial execution is a separate permissionless top-level command. SDK,
+observer and fixtures include the appended sysvar account (buy account 11, exit 8).
+The local harness checks batched exit refusal before terminal execution. This new
+Rust guard is source-reviewed but NOT runtime-verified; no compiler/validator exists.
+Final adapted full suite after this change: 453/455 pass, only the two known FSC
+failures; dedicated suites 91/91. Normal validation and real DB/Rust guarantees
+remain blocked as stated above.
+
+Continuation verification note: the final compiler rerun using explicit React type
+aliases reported four diagnostics: the same three TS2749 errors above, plus
+TS2307 resolving @privy-io/react-auth/solana in unchanged EmbeddedWalletSection.
+The installed package exports that subpath via dist/dts/solana.d.mts; the generic
+adapted wildcard resolver does not model that export. A preliminary rerun without
+React type aliases produced 349 resolver/cascading diagnostics and is not a useful
+validation result. Neither adapted run replaces the pending standard typecheck.

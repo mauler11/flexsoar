@@ -1,4 +1,4 @@
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, SYSVAR_INSTRUCTIONS_PUBKEY } from '@solana/web3.js';
 import { decodePermit, equalBytes, encodePermit, validatePermit, type PermitV2 } from './protocol-v2';
 import { base58Encode, base58Decode } from './base58';
 import { discriminator, v2Addresses } from './v2-sdk';
@@ -46,7 +46,7 @@ export async function inspectV2Transaction(tx: V2Transaction, signature: string,
   if(!equalBytes(bytes.slice(0,8),disc)) throw new Error('wrong payment instruction');
   const buyer=new PublicKey(p.buyer).toBase58(); const issuer=new PublicKey(p.issuer).toBase58();
   const source=new PublicKey(p.buyerToken).toBase58(), seller=new PublicKey(p.sellerToken).toBase58(), treasury=new PublicKey(p.treasuryToken).toBase58(), refund=new PublicKey(p.refundToken).toBase58();
-  const accounts=isPurchase?[a.config.toBase58(),a.card.toBase58(),s.address,issuer,buyer,source,seller,treasury,a.escrow.toBase58(),TOKEN_PROGRAM_ID]:[a.config.toBase58(),s.address,a.escrow.toBase58(),seller,treasury,refund,TOKEN_PROGRAM_ID];
+  const accounts=isPurchase?[a.config.toBase58(),a.card.toBase58(),s.address,issuer,buyer,source,seller,treasury,a.escrow.toBase58(),TOKEN_PROGRAM_ID,SYSVAR_INSTRUCTIONS_PUBKEY.toBase58()]:[a.config.toBase58(),s.address,a.escrow.toBase58(),seller,treasury,refund,TOKEN_PROGRAM_ID,SYSVAR_INSTRUCTIONS_PUBKEY.toBase58()];
   if(ix.accounts?.length!==accounts.length||accounts.some((v,i)=>ix.accounts![i]!==v)) throw new Error('wrong instruction accounts');
   if(isPurchase) {
     if(!equalBytes(bytes.slice(8),encodePermit(p))) throw new Error('wrong immutable permit');
