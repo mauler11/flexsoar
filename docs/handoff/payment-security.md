@@ -1076,3 +1076,424 @@ Postgres instance, then actual privilege/constraint/locking/crash-recovery accep
 checks using the plain-English RPC contracts above. Program validation is now real,
 but it cannot authorize production funding without database protection, enrolled
 operational identities/signing infrastructure and the remaining integration tests.
+
+
+## 2026-10-16: SQL drafting continuation ? AUTHORING ONLY, NOT APPLIED
+
+Starting source: track/payment-security, HEAD64707bbfc00662d76f8c536f6095ff7626bd5d3a;
+HEAD..main empty. No reset/merge/rebase. The founder explicitly authorized NEW SQL
+migration/test authorship for this task, overriding the repository SQL-authorship
+ban only. SQL execution remains forbidden. No database, SQL parser connected to a
+database, migrations, seed, reset, container or database tests were run. The previous
+plain-English contract is now backed by DRAFT SQL; none of it establishes live schema.
+
+Human package.json/package-lock.json modifications are preserved, unstaged and exactly
+match main's pair (SHA256 D98A62F311AF26DA6B39B095B1D19BA9D6C2CDE7843EBA6FB7A82F6A3201EC8A /
+1DEC156573D13BFCA04776527634BBDDD3765B6F5AAFB443599FCE70341DA56F). No dependency edits.
+No historical migration was changed. Funding remains compile-time FALSE. Existing
+worktrees and old data commits remain untouched. OpenCode was not used.
+
+### Draft file/application order
+
+1.059_payment_v2_records.sql: preflightPG15+/required base columns/card pending_vault,
+new NOLOGIN roles, private schema/domains, versioned policy, immutable financial
+terms/evidence, sales/generation fences, attempts/candidates, escrow decisions,
+operations/outbox/cursors, exact USDC journal, additive orders.payment_rail and
+payment_v2_attempt_id. No network/staff/inventory activation or automatic backfill.
+The only configuration seed is the already approved MY-USDC-ESCROW-1 policy, digest
+834ca943173d4db87622426e161eeb17afcdbac94e37368e6f697430961925c5.
+2.060_payment_v2_contracts.sql: session initiation/read/candidates, trusted issuer sale
+preparation/canonical690-byte permit construction, verifier recovery/evidence recording.
+3.061_payment_v2_settlement.sql: atomic evidence consumption, claim/cache/accounting/
+orders/outbox, physical/independent/governance decisions and finalized attestation/
+lifecycle consumption, durable administrative obligation queries.
+4.062_payment_v2_recovery.sql: cursor/operation/outbox leases, immutable signed operation
+identity, failure observation, listing/cancel/redeem adapters, reviewed dispatch evidence.
+5.063_payment_v2_permissions_fences.sql: immutable correspondence/terms, exact deferred
+USDC allocation and owner-cache/ledger checks, retained configuration audit, legacy
+mutation guards/overload retirement, final ownership/RLS/revokes/explicit role grants.
+
+Apply/review all FIVE as a coordinated cutover while application/program funding is
+paused. Every intermediate public contract is sealed against PUBLIC/anon/authenticated/
+service_role before commit;063 opens only its explicit allowlist. A partial application
+is not a runnable marketplace. Do not deploy SQL or the settlement refusal alone.
+No new enum values are introduced, so no same-transaction enum consumption issue.
+If any preflight/object/ownership conflict occurs, stop and preserve the error/catalog;
+write a separately reviewed forward repair. Do not edit migration history, drop financial
+records or use a destructive rollback. New IDs059..063 were unoccupied at drafting.
+
+### Durable records and invariants
+
+All payment-v2 tables are private. No client/worker receives table DML. Most records
+are immutable and all financial identities/consumptions are retained, with restrictive
+foreign keys rather than cascade cleanup. Mutable records retain tombstones. Staff
+key/person/user/role identities cannot be rewritten; active assignment can rotate to
+a new row, while old decision actors remain referencable. Network/staff changes append
+a configuration audit record. Human setup/authority changes are administrative trust,
+not an application service-role capability.
+
+Inventory enrollment binds exact Item/Card/pair commitments with independent inventory
+and reviewer persons; enrollment is manual, never SKU inference or migration backfill.
+Sales bind the listing, original seller/token account, immutable full network snapshot,
+mode/custody version/generation/revision, MYR price and policy. Mode is derived from
+Item.custody and enrolled CardControl mode, not client terms. One fenced sale per Card
+and listing; generations cannot be reused. Repricing uses finalized revocation then a
+NEW generation/listing/sale, not a mutable quote or unsafe reservation expiry. Rust's
+revise_sale is not exposed by these DB contracts.
+
+Trusted issuer quote books contain total USDC base units, FX source snapshot and time
+interval. Users cannot insert them or choose amounts/wallets/mode/beneficiaries. Attempts
+bind the buyer session/user, SHA256(UUID bytes) attempt and beneficiary commitments,
+original wallet/ATAs, seller/treasury/refund accounts, quote, policy, MYR gross/fee/net
+and USDC total/net/fee. Separate denomination columns: NEVER write USDC into legacy
+amount_cents. Net/fee are exactly total minus floor5% / floor5%. All19keys, sevenu64s
+and twoi64s encode in the existing Rust/TypeScript Permit order,690bytes, FSOARV2-NUL,
+version2. No alternative signing protocol or digest-as-payment-proof was added.
+
+Events are verified-role assertions about independently checked FINALIZED transactions,
+not a SQL cryptographic verifier. They must correspond to the stored permit, original
+funding time interval, network/program/sale/attempt/mode and revision. Unique genesis+
+signature prevents cross-program reuse on the same chain; sale uniqueness permits
+one funding/direct outcome and at most one release/refund terminal outcome. Signatures
+submitted by buyers remain untrusted candidate rows. Deleting/relinking cannot release
+an identity for reuse. Consumers compare full order/receipt context BEFORE returning
+idempotent success. Conflicting evidence, references or returned order IDs fail.
+
+Attempt states: initiated -> authorized -> funded/direct -> released/refunded as applicable;
+unresolved is reserved for explicit investigation, never a downgrade of paid state.
+Expiry is an immutable authorization boundary, not evidence no payment occurred. No
+expiry job resets paid state, unlocks a sale or offers another payment. Expired/abandoned
+unfunded authorization UI must still ask for chain status until finalized revocation or
+consumption is established. Current API status retains the persisted finance state;
+it does not invent terminal unpaid status from a wall-clock timeout.
+
+### Atomic claim/accounting contract
+
+Common lock order: Item -> Card -> Sale -> Listing -> Attempt -> Escrow -> Evidence/
+Decision -> sorted user/account rows. Initial unlocked reads discover IDs only. Purchase,
+terminal reconciliation and admin transitions re-read mutable predicates under these
+locks. Cursor/operation/outbox claims lock only their own durable work rows; they never
+perform a financial transition. Existing receipts are authorized by privileged consumer
+role plus immutable buyer/listing/Card/attempt/network/permit/reference correspondence.
+
+- Funded seller-held: seller ledger/cache ownership -> conditional buyer, Cardpending_vault,
+listing sold, orderescrow_funded, escrowfunded, dispatch deadline fundedAt+48h and review
+fundedAt+72h. Buyer-wallet debit / escrow liability credit in USDC journal. No seller or
+platform revenue yet. Exact paired Card ledger entries and append-only claim_history.
+- Vaulted direct: same atomic claim transfer, ordersettled, buyer-total/seller-net/treasury-
+fee USDC allocation. Card active but sale fence remains until finalized chain acknowledgement.
+- Receipt: immutable staff command and separately verified finalized record_receipt;
+physical custody becomes warehouse, but authentication remains pending, no payout and no
+Card unlock. Receipt never stamps authenticated_at/by. No legacy vault trigger runs.
+- Authentication: separate immutable actor/pair/evidence, independent person from receiver;
+failed authentication leaves claim locked. Independent rejection review requires a dispute
+hold and distinct reviewer; resolving a hold does not replace release approval.
+- Release: independent release person's acceptance command after receipt/pass, verified
+on-chain authorization revision, then queued bounded execute_outcome. Only FINALIZED
+released evidence moves escrow principal -> original seller95%/treasury5%, marks order
+settled, updates Item authentication metadata from authentication evidence, and Card active.
+The sale still fences all mutations until acknowledgement. No generic withdrawal authority.
+- Refund: explicit reason and manual two-person governance, then verified authorized refund
+revision and finalized full-principal outcome. Escrow -> ORIGINAL buyer principal, including
+unreleased fee. Orderrefunded; paired conditional claim reversal to seller; Cardlocked and
+inventory quarantined. No seller ban/relisting/new Card/physical-return assertion.
+- Direct/released/refunded consumption enqueues acknowledge_claim only AFTER the financial
+DB commit is guaranteed by the same transaction. Verified acknowledgement clears the sale
+fence; success increments custody version/modevaulted; refund keeps quarantine. Another
+sale cannot replace unresolved CardControl state.
+
+Consumption, exact USDC journal allocations, Card ledger/cache/provenance, order/attempt/
+escrow/sale changes and notification outbox are one Postgres transaction. Deferred checks
+compare exact account allocations, not merely a zero sum, and cache against Card holdings.
+Claim history is a NEW append-only private table; legacy card_provenance rows stay unchanged.
+Market read/timeline integration must include v2 history before launch.
+
+Orders' gross/fee/net remain MYRsen valuation snapshots. V2 cash_cents/credit_cents are0,
+seller_payout/payout_release_atNULL; paid_out staysfalse and stripe_transfer_idNULL.
+Those fields are not USDC seller-payment status. Solana proceeds are recorded in v2 state
+and USDC journal. Stripe selection/execution remain dormant; no Stripe path was repaired.
+A balanced journal alone cannot prove funds moved: that relies on the separate authoritative
+verifier and actual chain evidence. No database function signs or calls networks.
+
+### Actual public RPCs and callers
+
+All names below are prefixed fn_payment_v2_. Argument names in the SQL are the JSON RPC
+keys, not optional positional aliases. No old purchase overload remains callable.
+
+| Suffix and actual input types | Result | Caller / DB principal |
+|---|---|---|
+| prepare_sale(p_listing_id uuid,p_network_id uuid,p_terms jsonb) | uuid | preparePaymentSale; issuer |
+| authorize_attempt(p_attempt_id uuid) | text hex690bytes | authorizePaymentAttempt; issuer |
+| initiate(p_listing_id uuid,p_idempotency_key uuid,p_policy_version text,p_policy_digest text) | jsonb AttemptStatus | initiatePaymentAttempt; authenticated session |
+| own_attempts(p_listing_id uuid) | jsonb array | ownPaymentAttempts; session buyer only |
+| attach_candidate(p_attempt_id uuid,p_signature text) | void | attachPaymentCandidate; session owner only |
+| recovery_binding(p_attempt text,p_genesis text,p_program text) | jsonb permitHex/appliedKinds | reconcilePayments; verifier |
+| record_verified_event(p_event jsonb) | uuid | reconcilePayments; verifier |
+| reconcile_event(p_event_id uuid) | jsonb original receipt | reconcilePayments fourth injected client; settler |
+| begin_scan(p_genesis text,p_program text,p_limit integer) | jsonb leaseId/afterAddress | reconcilePayments; verifier |
+| finish_scan(p_lease_id uuid,p_last_address text,p_failures jsonb) | void | reconcilePayments; verifier |
+| record_decision(p_decision jsonb) | uuid operation | recordPaymentDecision; enrolled action-specific staff session |
+| approve_refund(p_command_id uuid) | uuid same operation | approvePaymentGovernance; independent governor session (also dispute resolution) |
+| record_attestation(p_proof jsonb) | void | recordPaymentAttestation; verifier, NOT arbitrary admin session |
+| record_lifecycle(p_proof jsonb) | void | recordPaymentLifecycle; verifier |
+| record_operation_failure(p_operation_id uuid,p_proof jsonb) | void | recordPaymentOperationFailure; verifier |
+| claim_operations(p_worker_id uuid,p_limit integer) | jsonb leases | claimPaymentOperations; executor |
+| operation_context(p_operation_id uuid,p_lease_id uuid) | jsonb immutable context | paymentOperationContext; executor |
+| finish_operation(p_operation_id uuid,p_lease_id uuid,p_outcome text,p_signature text,p_error text) | void | finishPaymentOperation; executor |
+| claim_outbox(p_limit integer) | jsonb jobs | claimPaymentOutbox; notifier |
+| finish_outbox(p_id uuid,p_lease_id uuid,p_delivered boolean,p_error text) | void | finishPaymentOutbox; notifier |
+| list_card(p_card_id uuid,p_seller_id uuid,p_price_cents integer,p_payout_method text,p_fair_price_cents integer) | uuid | frozen listCard wrapper; session owner, explicit cash display election |
+| request_cancel(p_listing_id uuid,p_actor uuid) | void | frozen cancelListing; owner session |
+| redeem_card(p_card_id uuid,p_user_id uuid,p_address jsonb,p_fee_cents bigint) | uuid, always refusal | frozen redeemCard; unsupported shipping proof/CardControl retirement stays blocked |
+| review_dispatch(p_id uuid,p_escrow_id uuid,p_kind text,p_digest text,p_route text,p_accepted_at timestamptz) | void | reviewed dispatch integration pending; reviewer session |
+| admin_queue() / admin_obligations() | jsonb | enrolled staff session; existing queue plus separate full-obligation RPC integration pending |
+
+prepare_sale p_terms keys: idUUID, saleAddress/escrowAddressbase58, totalUnitsdecimal,
+fxSnapshotobject, validFrom/expiresAtdecimal i64seconds. SameID/fullterms retry returns
+original sale; altered terms/listing/network raise conflict. Mode/buyer/routing are never
+client financial inputs. authorize_attempt returns immutable original bytes even after
+expiry for recovery; returning bytes is NOT permission to sign/broadcast an expired or
+paused authorization. Builder/signing still disabled. New authorizations check current
+epoch/issuer/policy and configured positive caps/independent enrolled authority set.
+
+record_verified_event JSON matches the production orchestrator: genesis/program/sale/
+attemptbase58, kindfunded|direct|released|refunded, signature, slotinteger,
+fundedAtSecondsdecimal, permitHex, decisionRevisiondecimal, finalityfinalized. Funding/
+direct revision is ALWAYS0, so later release/hold revisions do not change original funding
+receipt identity. This fixes a production retry mismatch discovered during this drafting.
+
+record_decision retains escrowId/commandId/expectedRevision/action/evidenceDigest/
+pairCommitment. Added actions map to the EXISTING program: receipt->record_receipt tag0;
+authentication_pass/fail->record_authentication tag1/2; release->authorize_release3;
+refund->authorize_refund4; dispute->dispute_hold5; resolve_dispute_release/refund->
+resolve_dispute6/7; review_authentication_pass/fail->review_authentication8 with explicit
+boolean. Refund/refund-resolution additionally requires refundReason seller_default,
+authentication_rejection or approved_loss. Default rejects verified transit OR receipt;
+rejection requires original fail evidence+48elapsed hours. No automatic timer refund.
+
+Attestation proof additionally binds commandId, action, exact pair/evidence, actorbase58,
+network/program/sale, signature/slot/finality, executedAtSeconds and resultingRevision.
+Lifecycle proof binds saleId/kindopened|revoked|acknowledged, network/program/sale,
+generation/revision, signature/slot/finality; acknowledgement also binds outcome and
+cardCommitmenthex. A finalized opening observed after a cancel request preserves the
+cancel intent; it must not reopen purchase availability. A verifier MUST independently
+verify actual instruction, all canonical arguments/accounts, signer/role/governance/CPI
+and finalized account transition. The SQL proof JSON/digest is correspondence/audit only.
+The existing financial observer does NOT yet implement receipt/authentication/lifecycle/
+Squads-governance verification; wrappers are not substitutes. This is a release blocker.
+
+### Permissions / deployment prerequisites
+
+Roles: payment_v2_owner NOLOGIN owns objects/SECURITY DEFINER functions; issuer prepares
+immutable quotes/permits, verifier writes verified observations, settler consumes them,
+executor leases bounded operations, notifier leases notifications. All are separate roles.
+Privileged functions check **session_user membership**, not current_role, JWT role, arbitrary
+GUC, user-supplied signature or digest. Non-superuser workers must belong to exactly ONE
+worker role and cannot be members of owner/authenticator/service_role/authenticated/anon.
+Superuser/migration administrators remain an explicit trust boundary, like program upgrade
+authority. They are never application credentials.
+
+Human must provision distinct login principals/connections for issuer/verifier/settler/
+executor/notifier, their per-role membership and connection secrets OUTSIDE this branch.
+For NOINHERIT principals the direct connection adapter can SET LOCAL ROLE to its assigned
+role inside a transaction; session_user must remain the distinct login. Do not grant
+privileged roles to PostgREST authenticator/service_role or use JWT role spoofing to make
+an RPC work. Existing Supabase createServiceSupabase cannot provide this separation.
+No direct PostgreSQL driver/credential integration was installed or fabricated. PaymentRpc
+is the typed injection boundary; a reviewed dedicated-login transport remains required.
+Two wrapper objects pointing to one credential do not establish separation; DB checks do.
+
+Internal reconciliation route now returns503 rather than calling shared service_role,
+even when the previous local-reconciliation flag is set. Authenticated legacy receipt and
+own-attempt reads remain available; they do not write settlements. The orchestration
+requires a separately injected settler and fails before observation if missing/same object.
+Current application workers cannot use the new privileged DB contracts until the dedicated
+transport is supplied. Funding stays hardcoded false irrespective of flags/network rows.
+
+Legacy retirement in063 enumerates actual pg_proc overload identities/defaults, replaces
+all corresponding reference-only purchase/core/credit, list/cancel/redeem, vault shipment/
+receipt/default/cancellation and money-moving trade bodies with refusal, and revokes all
+non-owner execute ACLs. Old outstanding offers therefore cannot bypass locks. Guard
+triggers also protect EVERY enrolled Item/Card/listing/order/ledger/redemption/vault/provenance/
+trade/associated-credit-hold write even through legacy postgres-owned SECURITY DEFINER
+helpers; registered Item replacement Card INSERT is fenced. Direct financial DML and column
+grants to public/anon/authenticated/service_role are revoked; schema CREATE is revoked.
+Legacy grading/mint/custody functions may operate only on unenrolled historical inventory;
+registered pairs require v2 transitions. Unsupported trading/redemption remain disabled.
+The generic old receipt/unlock/order-intake triggers are removed via the NEW migration.
+These are intentional coordinated compatibility breaks, not a standalone production patch.
+
+### Recovery / operations and cutover
+
+Operation/cursor/outbox leases are durable, bounded5minutes, CAS on leaseID plus connection
+identity, with SKIP LOCKED and30second retry backoff. Persist signed signature BEFORE
+network submission using finish_operation(submitted); unknown/submitted never return to
+unsigned pending or change signature. A lost response recovers the original operation.
+Finalized failed transaction proof may close a failed operation without marking funds paid/
+unpaid. Financial reconciliation resolves/supersedes pending commands with a verified-event
+FK and explicit no-command-success inference; an old pending revoke cannot keep retrying
+after funded consumption. Notification deliveryKey is the immutable outboxUUID; provider
+idempotency and transport still need integration. Delivery failure never rolls back a prior
+financial commit; crash after provider delivery needs that same delivery key.
+
+Receipt/authentication/release intent persists BEFORE signing. Acceptance without release
+remains funded/locked. Release/refund finalized with DB failure stays recoverable from original
+retained Sale/attempt/evidence; no second payment/refund. Database commit without chain ack
+keeps the sale fenced. Browser, worker or wallet relinking never changes destinations or resets
+paid status. Scan failures append unresolved records; cursor wraps on complete scan and does
+not erase obligations. No database transaction performs network, signing, email or cron work.
+
+Solana/Postgres are NOT atomic together. One shared on-chain sale consumption protects two
+competing buyers in BOTH modes; database reservations do not. Finalized program ordering
+resolves purchase versus revoke/expiry; DB cancel intent cannot revoke a previously signed
+transaction. A winning finalized payment is consumable even when cancel_requested, and quote
+expiry is checked against ORIGINAL execution time, not recovery time. Impossible/conflicting
+chain/DB ownership is an explicit unresolved obligation, not a silent loss or second payment.
+
+Panda remains legacy direct: no escrow fabricated, no replay, no automatic classification
+from sol: prefix.059 labels all existing rows legacy_unverified by new metadata only; original
+rows/references/amounts/paid_out/transfers/journals are not rewritten. Existing authenticated
+receipt/recovery of already-recorded orders stays intact. An old successful but UNRECORDED
+legacy payment still needs separately reviewed authoritative legacy reconciliation; retiring
+reference-only RPCs does not solve that case. Before cutover: freeze legacy issuance, inventory
+signed/unknown attempts, observe original program/network history and explicitly resolve them.
+Never tell a paid buyer to pay again. Program legacy-buy rejection, builder/UI gates, database
+permission changes, verifier/settler deployment and operator procedures must roll out together.
+
+### Human isolated application/test instructions and catalog evidence
+
+See tests/payment-db/README.md for exact psql commands, target guard, fixture roles and
+manual two-session procedures. These are INSTRUCTIONS FOR HUMAN REVIEW, not execution
+authorization for this agent. Use new disposable loopback DB flexsoar_payment_v2_test,
+Supabase auth/roles/extensions and checked-in historical schema through058; independently
+verify synthetic-only identity, port/process/no tunnel and no production credentials/data.
+Apply named059..063 in order only after review. Run10/20/30 separately;40..42 deliberately
+commit synthetic concurrency fixtures and require two sessions.70/71 commit a30second
+synthetic authorization then require actual expiry before relink/recovery; no timestamp rewrite.
+All SQL scenarios remain NOT RUN, including syntax compilation under Postgres.
+
+Before any eventual PRODUCTION migration the human must obtain read-only catalog evidence:
+server_version_num; migration history/version inventory; table/column names/types/defaults/
+nullability/generated attributes from pg_class/pg_attribute/pg_attrdef; pg_enum labels;
+pg_constraint definitions/validation/FK delete/update rules; pg_index unique/partial predicates;
+all relevant pg_proc identities, identity+full arguments/defaults, results, source, language,
+prosecdef/proconfig/owner/ACL and dependent functions; pg_trigger definitions/enabled state and
+functions; pg_policy definitions and RLS/FORCE flags; pg_namespace owners/ACL; table+column+
+sequence ACLs; pg_default_acl; pg_roles attributes and transitive pg_auth_members membership.
+Cover every purchase/core/credit/list/cancel/redeem/trade/mint/burn/authenticate/grade/custody/
+vault/default/payout helper and any additional live SECURITY DEFINER entry point not checked
+in. Include view definitions/owners/security options and function dependencies. Obtain aggregate
+conflict counts for duplicate references, ledger/cache mismatches, dangling ownership/custody,
+legacy pending payments/holds/intakes, outstanding offers and unresolved operations?no customer
+PII dump. Inspect each unknown function/grant before accepting this allowlist. No live catalog
+was contacted; a deployed extra bypass cannot be ruled out from checked-in files.
+
+### Test authorship, static review, and release blockers
+
+New SQL fixtures assert against ACTUAL new RPCs/constraints, not duplicated settlement logic:
+10 canonical permit offsets/modes, correspondence/immutability/duplicate consume, exactMYR vs
+USDC, claim fences, receipt/pass separation, failed-auth lock, all enumerated legacy overloads;
+20 release/refund full principal+exclusion/idempotency, independent review/governance, signed
+operation recovery, leases/outbox/rollback;30 real negative session authorization/JWT spoofing/
+row access/direct DML and overloaded grants;40..42 actual held-transaction duplicate settlement
+in both modes;70/71 expired original authorization, wallet relink, lost response recovery.
+Synthetic historical sol: orders are compared unchanged; this is NOT access to the real Panda.
+
+Static review found and corrected: funding receipt revision instability after later decisions;
+shared service-role verifier+consumer route; NULL lease expiry checks; missing execution-intent
+queue after approval; cancellation arriving before open observation; stale revoke/execution jobs
+after financial consumption; governance retry correspondence; principal journal denomination and
+exact allocation (including coincident buyer/treasury aggregation); physical receipt previously
+conflated with authentication; retained staff rotation identities. None of these text reviews is
+a passed SQL check. No Postgres syntax/grants/locking/deadlock/isolation/durability assertions have
+been executed. Production compatibility remains conditional on live catalog comparison.
+
+Still required: positive distinct non-superuser principal tests; full program-observer-DB loopback
+integration; additional conflicting two-session evidence/release-refund/cancel/worker lease races;
+actual finalized attestation/lifecycle/Squads verification; bounded signer and outbox provider
+integration; Card history/status/customer/admin surfaces and claim retirement/trades support;
+isolated schema execution/forward repairs; deployment identities/governance/caps/config readiness;
+legacy signed-transaction cutover; independent security review. No funding activation authorized.
+Business-day calendars, carrier liability, rejected/counterfeit disposal and post-release rights
+remain unresolved operational policy; no deductions/timeouts/refund promises were invented.
+
+Additive TS exports (all worker clients use PaymentRpc injection): preparePaymentSale(issuer,
+listingId,networkId,PaymentSaleTerms)->Promise<string>; authorizePaymentAttempt(issuer,attemptId)
+->Promise<string>; paymentOperationContext(executor,{id,leaseId})->Promise<Record<string,unknown>>;
+finishPaymentOperation(executor,{id,leaseId},outcome,signature,error)->Promise<void>;
+recordPaymentAttestation(verifier,proof)/recordPaymentLifecycle(verifier,proof)->Promise<void>;
+recordPaymentOperationFailure(verifier,operationId,proof)->Promise<void>;
+approvePaymentGovernance(session,commandId)->Promise<string>; claimPaymentOutbox(notifier,limit?)
+->Promise<PaymentOutboxJob[]>; finishPaymentOutbox(notifier,{id,leaseId},delivered,error)->Promise<void>.
+PaymentOperation now retains lease/payload/signature/recoveryOnly; PaymentDecision adds existing
+program review/resolution actions and explicit refundReason. No frozen TypeScript signature changed.
+Order types add optional drafted rail/attempt fields and escrow/refund statuses; no fixture casts.
+
+
+Final executable verification for this SQL-drafting continuation:
+- npx --no-install tsc --noEmit: exit0, including the final adapter/type/test changes.
+- npm test: initial456total/452passed/4failed. A subsequent dot-reporter run461total/
+456passed/5failed (extra shared-suite failures; terminal output truncated one failure's
+identity). JSON rerun461total/459passed/2failed. FINAL npm test with JSON reporter:
+463total/461passed/2failed, exit1, only unchanged FSC-copy assertions1901/1960.
+Do not infer intermittent failures are repaired from this later successful subset.
+Existing shared mocks at invariants110/2911 and2925/2998 collide/incompletely model
+next/navigation/usePathname and Supabase .select().in(); earlier market renders either
+throw missing usePathname or log missing .in and fail empty-state assertions. Their
+underlying scheduling variability and the truncated fifth failure remain unresolved;
+no shared assertion or market component was modified.
+- Focused payment3files before the final two extra assertions:97/97, exit0. FINAL full
+run includes payment-db-adapters6/6, payment-v248/48, purchase-payment45/45 =99/99.
+These exercise actual production TS adapters/orchestration, using explicit RPC doubles;
+they DO NOT prove PostgreSQL or role/lock guarantees.
+- npx --no-install next build --webpack: exit0,40/40pages and route/trace completion,
+including final production source changes. Existing optional Privy @farcaster/mini-app-
+solana resolver warning remains; no dependency changes, ignoreBuildErrors or suppressions.
+- git diff --check: exit0. Text-only inventory found28new public contracts all represented
+in the final grant classifier and paired dollar delimiters. This is not SQL parsing,
+compilation or a passed database check. ALL SQL/migration/integration/concurrency tests
+remain NOT RUN. Rust/program untouched, no new Rust/validator run in this SQL task.
+- No .env files or integration credential environment names were present in this worktree/
+validation shell; no secrets supplied. No database/API/admin/cron calls were invoked by
+this work. No SQL execution or database connections. No external signing/broadcast,
+real funds, emails, push or deployment. Funding stays disabled.
+
+Changed file inventory (only these task files are intended for this commit):
+- supabase/migrations/059_payment_v2_records.sql ? durable records, denominations, policy and roles.
+- supabase/migrations/060_payment_v2_contracts.sql ? canonical immutable authorization and trusted evidence RPCs.
+- supabase/migrations/061_payment_v2_settlement.sql ? atomic financial/claim/physical/governance reconciliation.
+- supabase/migrations/062_payment_v2_recovery.sql ? durable leases, signed-identity recovery and lifecycle adapters.
+- supabase/migrations/063_payment_v2_permissions_fences.sql ? correspondence, legacy retirement, RLS/ACL/owner hardening.
+- tests/payment-db/00_target_guard.sql ? explicit synthetic loopback identity acknowledgement.
+- tests/payment-db/01_fixtures.sql ? reusable synthetic fixtures/assertion helpers, not independently runnable.
+- tests/payment-db/10_contracts.sql ? canonical contract, ownership, immutable evidence and legacy-overload assertions.
+- tests/payment-db/20_outcomes_recovery.sql ? release/refund, governance, outbox/operation/cursor and rollback assertions.
+- tests/payment-db/30_permissions.sql ? negative actual connection-role/JWT/grant/ownership tests.
+- tests/payment-db/40_concurrency_setup.sql ? committed disposable fixtures for two independent sessions.
+- tests/payment-db/41_session_a.sql ? hold financial locks for duplicate-settlement race.
+- tests/payment-db/42_session_b.sql ? competing duplicate caller and exact-order/count checks.
+- tests/payment-db/70_expiry_setup.sql ? short-lived originally authorized synthetic payment observation.
+- tests/payment-db/71_expiry_relink_recovery.sql ? expired/relinked original-attempt recovery without new payment.
+- tests/payment-db/README.md ? human-only application/testing/forward-repair instructions.
+- lib/db/payment-v2-workers.ts ? dedicated-role typed adapters; no fabricated DB transport or signer.
+- lib/db/payment-v2.ts ? lease/identity-retaining operations, governance actions and refund reason.
+- lib/db/payment-reconciliation.ts ? distinct settler injection and stable funding receipt revision.
+- lib/db/types.ts ? optional new rail/attempt metadata and truthful financial status semantics.
+- lib/api/contract.ts ? additive worker exports only; frozen signatures unchanged.
+- app/api/internal/solana/reconcile/route.ts ? remove shared service-role fallback; fail closed.
+- tests/payment-db-adapters.test.ts ? actual adapter/route tests with isolated doubles.
+- tests/payment-v2.test.ts ? actual orchestration connection separation/stable receipt tests.
+- docs/handoff/payment-security.md ? this exact contract, limitations, evidence and human dependencies.
+
+The operational executor currently persists signature identity, not a complete durable
+signed-transaction blob. Crash before broadcast may need explicit non-execution/status
+investigation; no automatic replacement signature or buyer payment is authorized. A full
+signing/transport integration must persist any required serialized transaction/blockhash
+metadata before sending and prove safe recovery. No worker or route currently executes
+those operations, and no production functionality is claimed for those missing pieces.
+
+Next human action: review059..063 and the synthetic-target prerequisites, apply ONLY to
+a new isolated test database, collect first application/errors/catalog and run authored
+contracts/negative-role/multi-session tests. Keep funding disabled. Then provision/review
+dedicated connection transport and actual attestation/lifecycle verifiers, and run the
+full loopback program-observer-Postgres recovery scenarios. Production is blocked.

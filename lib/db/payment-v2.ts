@@ -8,8 +8,8 @@ export interface AttemptStatus {
 }
 export interface PaymentDecision {
   escrowId: string; commandId: string; expectedRevision: string;
-  action: 'receipt' | 'authentication_pass' | 'authentication_fail' | 'release' | 'refund' | 'dispute';
-  evidenceDigest: string; pairCommitment: string;
+  action: 'receipt' | 'authentication_pass' | 'authentication_fail' | 'release' | 'refund' | 'dispute' | 'review_authentication_pass' | 'review_authentication_fail' | 'resolve_dispute_release' | 'resolve_dispute_refund';
+  evidenceDigest: string; pairCommitment: string; refundReason?: 'seller_default'|'authentication_rejection'|'approved_loss';
 }
 export class PaymentSchemaUnavailable extends Error {}
 export async function paymentRpc(client: PaymentRpc, name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -32,7 +32,8 @@ export async function ownPaymentAttempts(client: PaymentRpc, listingId: string):
 export async function recordPaymentDecision(client: PaymentRpc, d: PaymentDecision): Promise<string> {
   if (!/^[0-9a-f-]{36}$/i.test(d.escrowId) || !/^[0-9a-f-]{36}$/i.test(d.commandId)) throw new Error('escrow and idempotent command IDs required');
   if (!/^[a-f0-9]{64}$/.test(d.evidenceDigest) || !/^[a-f0-9]{64}$/.test(d.pairCommitment) || !/^\d+$/.test(d.expectedRevision)) throw new Error('exact pair, revision and evidence required');
-  if (!['receipt','authentication_pass','authentication_fail','release','refund','dispute'].includes(d.action)) throw new Error('invalid decision');
+  if (!['receipt','authentication_pass','authentication_fail','release','refund','dispute','review_authentication_pass','review_authentication_fail','resolve_dispute_release','resolve_dispute_refund'].includes(d.action)) throw new Error('invalid decision');
+  if(['refund','resolve_dispute_refund'].includes(d.action)&&!['seller_default','authentication_rejection','approved_loss'].includes(d.refundReason??''))throw new Error('manual refund reason required');
   const data = await paymentRpc(client, 'fn_payment_v2_record_decision', { p_decision: d });
   if (typeof data !== 'string' || !data) throw new Error('missing durable operation ID'); return data;
 }
@@ -45,15 +46,17 @@ export async function attachPaymentCandidate(client: PaymentRpc, attemptId: stri
   if (!/^[0-9a-f-]{36}$/i.test(attemptId) || !/^[1-9A-HJ-NP-Za-km-z]{80,96}$/.test(signature)) throw new Error('invalid payment candidate');
   await paymentRpc(client,'fn_payment_v2_attach_candidate',{p_attempt_id:attemptId,p_signature:signature});
 }
-export interface PaymentOperation { id:string; payloadDigest:string; expectedRevision:string; action:string }
+export interface PaymentOperation { id:string; leaseId:string; payloadDigest:string; expectedRevision:string; action:string; payload:Record<string,unknown>; signature:string|null; recoveryOnly:boolean }
 export async function claimPaymentOperations(client: PaymentRpc, workerId: string): Promise<PaymentOperation[]> {
   if(!/^[0-9a-f-]{36}$/i.test(workerId))throw new Error('worker identity required');
   const data=await paymentRpc(client,'fn_payment_v2_claim_operations',{p_worker_id:workerId,p_limit:10});
   if(!Array.isArray(data))throw new Error('invalid operation lease response');
   return data.map(value=>{
     if(!value||typeof value!=='object')throw new Error('invalid operation');
-    for(const key of ['id','payloadDigest','expectedRevision','action'])if(typeof value[key]!=='string')throw new Error('invalid immutable operation');
-    return {id:value.id,payloadDigest:value.payloadDigest,expectedRevision:value.expectedRevision,action:value.action};
+    for(const key of ['id','leaseId','payloadDigest','expectedRevision','action'])if(typeof value[key]!=='string')throw new Error('invalid immutable operation');
+    if(!value.payload||typeof value.payload!=='object'||Array.isArray(value.payload)||typeof value.recoveryOnly!=='boolean'||(value.signature!==null&&typeof value.signature!=='string'))throw new Error('invalid operation recovery context');
+    if(value.recoveryOnly&&!value.signature)throw new Error('recovery operation missing signed identity');
+    return {id:value.id,leaseId:value.leaseId,payloadDigest:value.payloadDigest,expectedRevision:value.expectedRevision,action:value.action,payload:value.payload,signature:value.signature,recoveryOnly:value.recoveryOnly};
   });
 }
 export const FUNDING_AVAILABLE = false; // No env override: missing schema/program/signer integration cannot enable it.

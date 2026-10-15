@@ -217,7 +217,7 @@ type OpenText<T extends string> = T | (string & {});
 export type KycStatus = OpenText<'none' | 'pending' | 'verified' | 'rejected'>;
 
 /** `orders.status` — text, default 'pending'. fn_purchase_card writes 'settled'. */
-export type OrderStatus = OpenText<'pending' | 'settled' | 'refunded' | 'failed'>;
+export type OrderStatus = OpenText<'pending' | 'escrow_funded' | 'settled' | 'refunded' | 'cancelled' | 'failed'>;
 
 /** `redemptions.status` — text, default 'requested'. */
 export type RedemptionStatus = OpenText<
@@ -595,13 +595,14 @@ export interface Order {
   fee_bps: number;
   fee_cents: Cents;
   net_cents: Cents;
-  /** Stripe payment_intent. Money moved buyer -> seller before this row existed. */
+  /** Historical provider reference or immutable v2 funding reference; a string alone is never payment proof. */
   settlement_ref: string | null;
   status: OrderStatus;
   txn_id: UUID | null;
   created_at: Timestamptz;
   /**
-   * 018-020 split settlement. credit_cents + cash_cents = gross_cents;
+   * Legacy018-020 split settlement: credit_cents + cash_cents = gross_cents.
+   * V2 uses both zero; gross/fee/net are MYR valuation snapshots, not USDC;
    * credit_cents > 0 requires no settlement_ref condition of its own, but any
    * cash_cents > 0 does — fn_purchase_card enforces both. NOT NULL DEFAULT 0
    * in the schema; optional here only because lib/mock/fixtures.ts predates
@@ -618,6 +619,9 @@ export interface Order {
   seller_payout?: PayoutMethod | null;
   /** platform_config.payout_hold_days after settlement. Null pre-migration. */
   payout_release_at?: Timestamptz | null;
+  /** Added by drafted059; absent before the reviewed schema is applied. */
+  payment_rail?: 'legacy_unverified' | 'solana_v2_escrow' | 'solana_v2_direct';
+  payment_v2_attempt_id?: UUID | null;
 }
 
 // ------------------------------------------------------------

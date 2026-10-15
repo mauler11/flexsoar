@@ -112,6 +112,12 @@ describe('actual v2 instruction and outcome verifier',()=>{
   });
 });
 describe('durable production recovery orchestration (RPC doubles are NOT Postgres proofs)',()=>{
+  it('requires separately provisioned verifier and settler connections before observation',async()=>{
+    const client={rpc:vi.fn()},observer:PaymentObserver={genesis:'g',program:'p',scan:vi.fn(),evidence:vi.fn()};
+    await expect(reconcilePayments(client,observer)).rejects.toThrow('Dedicated verifier');
+    await expect(reconcilePayments(client,observer,20,client)).rejects.toThrow('Dedicated verifier');
+    expect(observer.scan).not.toHaveBeenCalled();expect(client.rpc).not.toHaveBeenCalled();
+  });
   async function setup(kind:OutcomeKind='released'){
     const {s}=await fixture(kind);const applied:string[]=[];const rpc=vi.fn<PaymentRpc['rpc']>().mockImplementation(async(name,args)=>{
       if(name==='fn_payment_v2_begin_scan')return {data:{leaseId:'lease',afterAddress:null},error:null};
@@ -123,24 +129,29 @@ describe('durable production recovery orchestration (RPC doubles are NOT Postgre
     const observer:PaymentObserver={program:new PublicKey(s.permit.program).toBase58(),genesis:base58Encode(s.permit.domain),scan:async()=>[s],evidence:vi.fn(async(_s,k)=>({signature:k,slot:k==='funded'||k==='direct'?123:125}))};return {rpc,observer,applied,s};
   }
   it.each(['funded','released','refunded','direct'] as const)('restores %s after browser/process restart; retry consumes no new money',async kind=>{
-    const {rpc,observer}=await setup(kind);const one=await reconcilePayments({rpc},observer);expect(one.failed).toEqual([]);expect(one.processed).toBe(kind==='released'||kind==='refunded'?2:1);
-    expect((await reconcilePayments({rpc},observer)).processed).toBe(0);
+    const {rpc,observer}=await setup(kind);const one=await reconcilePayments({rpc},observer,20,{rpc});expect(one.failed).toEqual([]);expect(one.processed).toBe(kind==='released'||kind==='refunded'?2:1);
+    expect((await reconcilePayments({rpc},observer,20,{rpc})).processed).toBe(0);
     expect(rpc.mock.calls.every(([name])=>!name.includes('purchase_card'))).toBe(true);
+  });
+  it('keeps funding receipt identity stable when later escrow decisions change revision',async()=>{
+    const {rpc,observer}=await setup('released');await reconcilePayments({rpc},observer,20,{rpc});
+    const events=rpc.mock.calls.filter(([name])=>name==='fn_payment_v2_record_verified_event').map(([,args])=>args.p_event as {kind:string;decisionRevision:string});
+    expect(events).toEqual([expect.objectContaining({kind:'funded',decisionRevision:'0'}),expect.objectContaining({kind:'released',decisionRevision:'1'})]);
   });
   it('recovers a committed event after response loss instead of repeating payment',async()=>{
     const {rpc,observer}=await setup();const original=rpc.getMockImplementation()!;let lost=true;
     rpc.mockImplementation(async(name,args)=>{const result=await original(name,args);if(name==='fn_payment_v2_reconcile_event'&&lost){lost=false;throw new Error('lost response');}return result;});
-    expect((await reconcilePayments({rpc},observer)).failed).toHaveLength(1);expect((await reconcilePayments({rpc},observer)).failed).toEqual([]);
+    expect((await reconcilePayments({rpc},observer,20,{rpc})).failed).toHaveLength(1);expect((await reconcilePayments({rpc},observer,20,{rpc})).failed).toEqual([]);
   });
   it('preserves unresolved obligations on missing schema/history; never fabricates success',async()=>{
     const {observer}=await setup();const rpc=vi.fn(async()=>({data:null,error:{code:'PGRST202',message:'RPC not installed'}}));
-    await expect(reconcilePayments({rpc},observer)).rejects.toThrow('PGRST202');
+    await expect(reconcilePayments({rpc},observer,20,{rpc})).rejects.toThrow('PGRST202');
     await expect(ownPaymentAttempts({rpc},'listing')).rejects.toThrow('RPC not installed');
   });
   it('rejects substituted immutable binding even when wallets later relink',async()=>{
     const {rpc,observer,s}=await setup();const original=rpc.getMockImplementation()!;
     rpc.mockImplementation(async(name,args)=>name==='fn_payment_v2_recovery_binding'?{data:{permitHex:Buffer.from(encodePermit({...s.permit,buyer:b(29)})).toString('hex'),appliedKinds:[]},error:null}:original(name,args));
-    expect((await reconcilePayments({rpc},observer)).failed[0].error).toContain('immutable');
+    expect((await reconcilePayments({rpc},observer,20,{rpc})).failed[0].error).toContain('immutable');
   });
   it('rejects attempts for another listing and decisions without exact evidence',async()=>{
     const rpc=vi.fn(async()=>({data:[],error:null}));

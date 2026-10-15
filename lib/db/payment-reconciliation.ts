@@ -9,7 +9,8 @@ export interface PaymentObserver {
 }
 /** Production orchestration with durable RPC receipts. No in-memory checkpoint,
  * signing, refund execution or notification delivery masquerades as recovery. */
-export async function reconcilePayments(client: PaymentRpc, observer: PaymentObserver, budget=20) {
+export async function reconcilePayments(client: PaymentRpc, observer: PaymentObserver, budget=20, settler?: PaymentRpc) {
+  if(!settler||settler===client)throw new Error('Dedicated verifier and settler connections required; shared service-role settlement is disabled');
   if(!Number.isInteger(budget)||budget<1||budget>20)throw new Error('invalid recovery budget');
   const sales=await observer.scan(); let processed=0;
   const lease=await paymentRpc(client,'fn_payment_v2_begin_scan',{p_genesis:observer.genesis,p_program:observer.program,p_limit:budget});
@@ -36,10 +37,10 @@ export async function reconcilePayments(client: PaymentRpc, observer: PaymentObs
         if(evidence.slot!==expectedSlot)throw new Error('verified evidence slot mismatch');
         const event=await paymentRpc(client,'fn_payment_v2_record_verified_event',{
           p_event:{genesis:observer.genesis,program:observer.program,sale:sale.address,attempt:base58Encode(expected.attempt),kind,
-            signature:evidence.signature,slot:evidence.slot,fundedAtSeconds:String(sale.fundedAt),permitHex:binding.permitHex,decisionRevision:String(sale.decisionRevision),finality:'finalized'},
+            signature:evidence.signature,slot:evidence.slot,fundedAtSeconds:String(sale.fundedAt),permitHex:binding.permitHex,decisionRevision:String(kind==='funded'||kind==='direct'?0:sale.decisionRevision),finality:'finalized'},
         });
         if(typeof event!=='string'||!event)throw new Error('missing verified event ID');
-        await paymentRpc(client,'fn_payment_v2_reconcile_event',{p_event_id:event});
+        await paymentRpc(settler,'fn_payment_v2_reconcile_event',{p_event_id:event});
         // RPC atomically enqueues notifications; no external email is sent here.
         processed++;
       }

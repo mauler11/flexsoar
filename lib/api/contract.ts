@@ -4827,3 +4827,5 @@ export type {
   Sku,
   User,
 };
+
+export { preparePaymentSale, recordPaymentOperationFailure, authorizePaymentAttempt, paymentOperationContext, finishPaymentOperation, recordPaymentAttestation, recordPaymentLifecycle, approvePaymentGovernance, claimPaymentOutbox, finishPaymentOutbox } from '@/lib/db/payment-v2-workers';
