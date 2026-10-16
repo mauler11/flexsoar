@@ -1,12 +1,48 @@
-# Payment-v2 database drafts: NOT RUN
+# Payment-v2 database suite: NOT RUN
 
-Payment database tests remain NOT RUN. The explicitly reviewed Auth repair has now
-committed and passed verification.24 historical files applied successfully through022;
-022b failed and rolled back. No later migration,059–063 or file in this test directory
-has executed. TypeScript tests do not load these files; passing application tests do
-not prove any grant, constraint, trigger or lock.
+Payment database tests remain NOT RUN. The reviewed Auth AND listing-overload repairs
+committed. All70 historical files through058 and payment records059 have now applied:
+71 completed files.060 failed and rolled back;061–063 and this test directory have not
+executed. A one-line060 syntax correction is drafted but NOT executed. TypeScript tests
+do not load these files; passing app tests prove no database permission/lock guarantee.
 
-## Current stop: historical022b multiple listing arities
+## Current stop: payment060 parser error after approved listing repair
+
+Same preserved container, no reset. Exact container ID/network/ports/mounts and internal
+loopback were reverified. Before the listing repair, both definitions/owners/ACLs were
+captured, original hashes matched the reported014/019c bodies, zero4-arg dependents and
+022b rollback state were asserted. DROP FUNCTION used ONLY the approved obsolete4-arg
+signature with RESTRICT. Canonical3-arg full definition/owner/ACL remained unchanged
+within the successful repair transaction. Later031/032 legitimately superseded that
+signature as part of the separately authorized unchanged historical sequence.
+
+The first repair attempt rolled back on a verification-query defect: pg_get_functiondef
+in a pg_proc join evaluated an aggregate and raised `"array_agg" is an aggregate function`.
+It did not commit a drop. The failure is retained. The second attempt kept the identical
+approved DROP/guards but used a direct canonical regprocedure lookup for verification;
+it committed successfully. No other repair scope was added.
+
+Resumption started ONLY at unchanged022b: it passed, as did022c through058 and059.
+060_payment_v2_contracts.sql then failed at line124 with `syntax error at end of input`,
+pointing to fn_payment_v2_prepare_sale's unparenthesized `v.mode<>CASE ... END` at line111.
+The entire060 transaction rolled back; payment_v2.require_role(name) and prepare_sale
+are absent.059 records remain, with zero networks and zero attempts. No061–063, fixtures,
+worker connections, races, signed storage or90 execution; no manual completion markers.
+
+NEW REVIEW ITEM: only failed/unapplied draft060 was edited to wrap that CASE expression
+in parentheses inside the PL/pgSQL IF condition. This is a parser-boundary correction,
+not a custody/permission change. It has NOT been applied or compilation-tested. The
+original failed input, hashes/log and catalog evidence remain in the run directory.
+After review/authorization, retry060 (NOT059), then continue061–063 only on success.
+Do not alter applied059 or historical files, skip the failure or weaken any predicate.
+
+Evidence includes listing-repair-*/ (both attempts, SQL/hash/results/isolations) and
+migrations-resume-*/ (resume manifest, hashes, exits/logs,060 failed input and rollback
+catalog). Prior run/repair/failure evidence remains. This synthetic compatibility fix
+is NOT a production recommendation: production's actual catalog requires independent
+review. Funding remains disabled and34-checkpoint acceptance has NOT run.
+
+## Earlier stop: historical022b — resolved by explicitly approved isolated repair
 
 Same preserved container/ID/digest below, no recreation/reset. The two authorized official
 Auth files at commit4eee58f296d9698a1c2c0ae14d7a0b379c7622d3 were fetched with their

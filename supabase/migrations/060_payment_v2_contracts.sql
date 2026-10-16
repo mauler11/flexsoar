@@ -108,7 +108,7 @@ BEGIN
  SELECT id,genesis,program,config,mint,token_program,treasury,treasury_token,issuer,authority_epoch,policy_version,funding_enabled,max_trade_units,max_escrow_units INTO n.id,n.genesis,n.program,n.config,n.mint,n.token_program,n.treasury,n.treasury_token,n.issuer,n.authority_epoch,n.policy_version,n.funding_enabled,n.max_trade_units,n.max_escrow_units FROM payment_v2.networks WHERE id=p_network_id;
  IF NOT FOUND OR NOT payment_v2.funding_configuration(p_network_id) OR NOT n.funding_enabled OR v.card_id IS NULL THEN RAISE EXCEPTION 'PAYMENT_V2_NOT_CONFIGURED';END IF;
  IF NOT payment_v2.owns_claim(c.id,l.seller_id) OR l.status<>'public' OR c.status<>'active' OR c.owner_id<>l.seller_id OR v.quarantined OR v.item_id<>c.item_id
- OR v.mode<>CASE i.custody WHEN 'seller' THEN 0 ELSE 1 END
+ OR v.mode<>(CASE i.custody WHEN 'seller' THEN 0 ELSE 1 END)
  OR EXISTS(SELECT 1 FROM payment_v2.sales WHERE card_id=c.id AND fence) THEN RAISE EXCEPTION 'PAYMENT_V2_SALE_FENCED';END IF;
  SELECT wa.user_id,wa.network_id,wa.wallet,wa.token_account,wa.proof_digest INTO w.user_id,w.network_id,w.wallet,w.token_account,w.proof_digest FROM payment_v2.wallet_accounts wa JOIN public.users u ON u.id=wa.user_id
  WHERE wa.user_id=l.seller_id AND wa.network_id=n.id AND u.country_code='MY' AND u.solana_address=payment_v2.b58(wa.wallet);

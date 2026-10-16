@@ -2058,3 +2058,98 @@ remains; no dependency/configuration suppression. git diff --check exited0. All 
 Auth checks succeeded; historical022b is the NEW stop. Environment and failed transaction
 evidence retained, no further repair executed. Next approval is specifically the obsolete
 4-arg listing overload retirement and unchanged022b retry, not another Auth repair.
+
+## Approved listing-overload compatibility repair; migration060 stop
+
+Started track/payment-security atc3b3cd4dfd8397c4603b2d81bb92e3c501245997;
+HEAD..main empty. User approved ONLY retiring obsolete4-arg fn_list_card in the EXISTING
+synthetic DB, then continuing unchanged manifest. Actual target reverified:
+container flexsoar-payment-db-69c6161-20261016T022841Z,
+ID71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92,
+network none, zero published ports, three exact read-only /audit mounts. All connections
+internal127.0.0.1:5432, DBflexsoar_payment_v2_test, actual session_user supabase_admin.
+No environment reset/recreation or unrelated Docker resource change.
+
+Captured BOTH listing definitions/owner/ACLs/dependencies BEFORE the DROP. Asserted:
+-two exact overloads, owners supabase_admin, SECURITY DEFINER;
+-canonical3-arg body SHA256e3d880decc1b277f84bac789ff28a00d8158852271a765c0ad221cc83ec0e7d0,
+ matching019c geography-derived implementation;
+-obsolete4-arg SHA256111d3b253c4b4f3c70cb3a372d773314ceab21627216ae6473bfc0e058341095,
+ matching014 payout-choice implementation;
+-zero pg_depend dependents of obsolete4-arg;
+-fn_require_self_or_admin absent and old fn_purchase_card_with_credit present, confirming
+ failed022b rolled back. Guarded exact target identity again inside repair transaction.
+
+First approved repair ATTEMPT ROLLED BACK: my post-drop verification joined pg_proc
+and called pg_get_functiondef(p.oid); planner evaluation encountered an aggregate and
+raised `"array_agg" is an aggregate function`. This was an orchestration verification
+query defect, not a changed schema/dependency finding. That attempt's repair.sql/hash,
+full before/error log and exit3 are preserved at listing-repair-20261016T025744Z/.
+No DROP committed. Corrected ONLY the verification query to use direct canonical
+regprocedure identity; owner/ACL comparison remained exact. Retry reran all exact guards
+and found unchanged pre-repair state. Identical approved DROP FUNCTION ... RESTRICT
+retired ONLY4-arg; full canonical definition/owner/ACL comparison passed; COMMIT exit0.
+Successful evidence at listing-repair-20261016T025811Z/ includes SQL/hash/result/isolation.
+No CASCADE, broad grant, policy weakening, historical edit or unrelated DROP.
+
+Resumed fixed manifest at022b ONLY. Original001–022 successful files were not rerun.
+Unchanged022b passed.022c through058 and059 also passed. Current unique successful
+manifest files:71/75 (all70 historical files plus059). Later031/032 replaced3-arg
+listing as explicitly encoded by unchanged history; canonical preservation was verified
+at repair COMMIT, not asserted to survive intentionally superseding later migrations.
+
+NEW FIRST FAILURE in resumed sequence:060_payment_v2_contracts.sql, psql exit3,
+source line124 (end of fn_payment_v2_prepare_sale): syntax error at end of input;
+error points to line111's `OR v.mode<>CASE i.custody WHEN 'seller' THEN 0 ELSE 1 END`.
+The PL/pgSQL IF condition needs the CASE expression parenthesized to keep its internal
+THEN within the expression parse boundary. Captured060 log and original failed SQL.
+060's BEGIN transaction rolled back entirely: catalog confirms require_role(name) and
+prepare_sale(uuid,uuid,jsonb) absent;059 records schema remains committed. Networks0,
+attempts0. No061–063 or tests executed; no manual success checkpoint. No repair beyond
+approved overload DROP was executed. No public/customer data or Panda imported.
+
+Source correction DRAFTED, NOT EXECUTED: one line of failed/unapplied060 now reads
+`OR v.mode<>(CASE i.custody WHEN 'seller' THEN 0 ELSE 1 END)`.
+No custody interpretation, ownership rule, role, grant, amount or predicate changed.
+Applied059 and ALL historical files untouched.060 correction is a reviewable pending
+revision, NOT claimed SQL-compiled/passed. After review/authorization retry060 only,
+then061–063 and full suite on success. Do NOT reapply059 (its schema already exists),
+skip failure or label migration successful. A forward migration is unnecessary for060
+because its complete transaction rolled back and no060 object persisted.
+
+New preserved run evidence under /home/family/flexsoar-payment-db-69c6161-20261016T022841Z/:
+-listing-repair-20261016T025744Z/: first verification-query failure/rollback.
+-listing-repair-20261016T025811Z/: guarded approved repair, canonical unchanged, commit0.
+-migrations-resume-20261016T025824Z/: exact resume manifest, per-file logs/source hashes,
+ results.tsv, first-failure.txt,060-failed-input.sql,060-failure-catalog.txt.
+Prior Auth/bootstrap/022b-failure directories retained. No failed data/environment erased.
+No SQL in tests/payment-db was executed. Dedicated worker, signed-storage, actual race,
+terminal, rollback/stale-lease, expiry tests and90_final_acceptance are ALL NOT RUN.
+The34-checkpoint gate has not passed. Full Solana?Postgres recovery is not verified.
+
+Source files changed:
+-supabase/migrations/060_payment_v2_contracts.sql: one-line parser correction, unapplied.
+-tests/payment-db/README.md: actual71-file progress, approved repair and next review gate.
+-docs/handoff/payment-security.md: this evidence/status record.
+No TypeScript/Rust/export/signature/dependency/shared-assertion changes. Human package
+pair hashes remain D98A62F311AF26DA6B39B095B1D19BA9D6C2CDE7843EBA6FB7A82F6A3201EC8A
+and1DEC156573D13BFCA04776527634BBDDD3765B6F5AAFB443599FCE70341DA56F. Exported diff preserved.
+This compatibility repair applies ONLY to this synthetic historical replay. Production
+catalog must be independently reviewed before ANY analogous proposal/application;
+no shared/cloud/production connection was used. Funding remains disabled, no network
+configuration inserted. No operational keys, public-chain activity, emails, push or
+deployment. OpenCode was not used.
+
+Application verification, distinct from unrun database-suite acceptance:
+-npx tsc --noEmit: exit0.
+-npm test -- --reporter=json --outputFile=<OS TEMP>/flexsoar-listing-repair-app-tests.json:
+ exit1,488 passed /2 failed /490total, only unchanged FSC-copy assertions.
+-Webpack completion recorded below when finished. Application tests cannot validate
+ 060 syntax or Postgres grants/locking; revised060 SQL remains NOT RUN.
+
+Final validation completion: npx next build --webpack exited0 with40/40pages and full
+route/trace output. Existing optional Privy @farcaster/mini-app-solana warning persists;
+no suppression or dependency change. git diff --check exited0. Final Docker inspection
+still shows exact ID running, networknone, PortBindings{}. Next action is review of
+one-line unapplied060 correction and explicit permission to retry060, then061–063 on
+success.059 must remain untouched. No database-suite or full-chain acceptance claimed.
