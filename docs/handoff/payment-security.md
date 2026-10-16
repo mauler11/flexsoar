@@ -2757,3 +2757,255 @@ Final review tightened the NEW LOGIN fixture's target guard with explicit inet_s
 Final validation: npx next build --webpack exit0,40/40 pages, existing optional Privy @farcaster/mini-app-solana warning; git diff --check exit0. Financial integration remains blocked, not completed or launch-ready.
 
 Ephemeral-key metadata clarification: Node bootstrap keys were not saved. Agave automatically created12 private test key files across the3 NEW probe ledgers, all mode0600. Only filenames/stat metadata were inspected, never contents; no operational wallet files mounted/read, no key material copied into reports/repository. Metadata recorded separately. Helper credential-related environment variable-name inspection found none; no values were printed.
+
+## 2026-10-16 — Actual local chain/database integration after22f5ab1
+
+Latest work is on track/payment-security, approved isolated worktree. HEAD at start
+22f5ab1f9d76016c23844d0260e8821d160438b9; no main divergence. Human memo manifest/lockfile
+and payment-security-5c3db0e.diff remain excluded. Funding constant remains false.
+This supersedes earlier statements that ALL coupled financial scenarios were unrun;
+it does NOT supersede remaining production signer/context/recovery blockers.
+
+ISOLATION / SCHEMA:
+Exact preserved DB container71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92,
+name flexsoar-payment-db-69c6161-20261016T022841Z, image digest
+sha256:6058a6759ab9268cff8ee70641d61f1bd75953316281b76427cf5a6b4db2eafc.
+Reverified network none, no published ports, original3 RO mounts. Existing helper
+flexsoar-payment-integration-20261016T075407Z shares that exact network namespace;
+only lo/no routes, read-only root, UID1000, dropped capabilities, no-new-privileges,
+no Docker socket/env/root-repo mounts. RPC/faucet/database remain inside namespace.
+attest-helper.sh validates actual Docker config + namespace before its local marker;
+runner independently checks interfaces/routes/ns/image-program hash. DB name alone
+is insufficient. No container/network/port reconfiguration or reset.
+
+Created NEW flexsoar_payment_v2_integration_test from template0, NOT a data clone.
+Reviewed pg_dump17.11 --schema-only --exclude-schema='payment_db_*', restored in one
+transaction with ON_ERROR_STOP. Includes official extension/Auth/helper/RLS/owner/ACL,
+trigger/event-trigger/publication definitions. Normalized source and restored dump
+identical; only pg_dump's random restrict tokens removed for comparison. Every
+public/auth/payment_v2 table asserted empty BEFORE seeds/fixtures. Source dump hash:
+e6160c8f50ba06ecf33ff4babc94283b45783ee7b7b0d1038d8a4d70f174a4c9.
+Static reference rows came from checked-in059 policy,001 tier bands,018 condition
+bands and048 color update. No accepted business/staff/wallet/acceptance rows copied.
+Original payment-db guard unchanged; original37 acceptance retained separately.
+
+New cluster LOGINs customer(authenticated only) and executor_b(executor only) added;
+existing role definitions/memberships/credentials untouched. Existing5 dedicated
+integration worker LOGINs retained. Production workers use actual non-superuser
+issuer/verifier/settler/executor transports; administrator is test fixture/audit only.
+No worker receives supabase_admin/service_role or borrowed executor/verifier role.
+Ordinary-request session is a separate synthetic LOGIN with local JWT subject;
+this is NOT a live Supabase Auth HTTP/session integration test.
+
+IMPLEMENTED EXECUTABLE WORK:
+- lib/solana/v2-authority-observer.ts: trusted-expected instruction vs finalized
+  transaction bytes/program/accounts/required signers; genesis/chain timestamp check.
+  Supports legitimate sponsorship/extra instructions; ambiguous same-program calls
+  fail. Does not manufacture context or authorize supplied client digests.
+- lib/solana/v2-operation-observer.ts: finalized same-bank Sale/Config account reads,
+  exact owner/layout/domain, original signature/history, slot-order check, blockheight
+  and blockhash validity for existing signedOperationRecovery policy. Read-only,
+  explicit loopback only. No replacement/signing/send API or env discovery.
+- tests/payment-integration/integrated.mjs: actual canonical SQL permit issuance,
+  production buy builder, finalized financial verification and dedicated settlement,
+  ordinary-user durable status, bounded execute_outcome plan/envelope validation and
+  persistence, original-byte execution, real failure injection and owned-ledger resume.
+-01/02/04 SQL fixtures: fresh signable synthetic staff/users/Item/Card/listings; added
+  independent buyers after relinking.03 read-only audit checks exact corresponding
+  orders, ledger/cache, journal counts/balance, MYR vs USDC snapshots, atomic outbox
+  and no Stripe transfer/paid_out. New target only; no original suite guard changes.
+-11 focused offline tests of actual authority inspector/observer (not SQL or chain
+  acceptance). No Rust, frozen signature, dependency or applied migration modified.
+
+ACTUAL INTEGRATED CORE RESULTS:
+- Case0 vaulted: one winner/two real transactions, rejected buyer principal debit0;
+ 950000 seller/50000 treasury, one USDC receipt/order/claim/accounting transfer.
+ Claim remained unreconciled before acknowledgement, available only after finalized
+ acknowledge_claim and DB lifecycle consumption.
+- Case1 seller-held:1M escrow/no seller payout; receiver receipt did NOT authenticate
+ or release; authentication pass did NOT release. Distinct release approver authorized,
+ exact95/5 execution finalized, authoritative release reconciled, claim acknowledged.
+- Case2 governed refund: distinct2-of-3 test governor signatures + independent DB
+ approvals; full1M original principal returned; zero seller/platform allocation paid;
+ conditional ownership reversed, Card locked/quarantined, acknowledgement retained.
+- All cases: actual competing buyers; only one principal debit and one DB claim;
+ repeated terminal execution rejected on-chain; recovery repeat creates no new order.
+- Signed persistence response loss injected AFTER actual DB commit; envelope reloaded
+ from dedicated executor RPC. Same raw transaction used for outcome broadcast, whose
+ returned response was discarded. DB still funded until actual finalized observation
+ reconciled release/refund. No fabricated financial proof or simulated commit digest.
+- Case4 separate direct sale: real process stop after funding FINALIZED and quote
+ expiry; restart, actual first settlement COMMIT response dropped, idempotent recovery;
+ second process stop after finalized acknowledgement plus synthetic wallet relink;
+ restart recovered original receipt/claim. No second buyer signature/payment.
+ A later NEW initiation using old wallet correctly failed BUYER_WALLET_REQUIRED;
+ fresh buyers were added, not a wallet-validation bypass or relink reversal.
+- Restart read-only observation of terminal envelopes used production observer/policy;
+ original release blockhash expired, policy returned reconcile, never retransmit.
+ Stale completion of observed operations rejected by dedicated executor connection.
+- Case5 reruns governed refund with live production signed-operation observer before
+ identical-byte submission, then finalized verification/reconciliation/acknowledgement.
+- Case6 deliberately holds1M synthetic escrow to test real5-minute lease takeover and
+ expiry. Its unbroadcast outcome must remain review-blocked; see final result below.
+
+FAILURE EVIDENCE / LIMITS:
+First signable setup exited after Card fixture failed missing condition-band reference
+rows (inventory transaction rolled back). Exact historical reference seeds supplied.
+That process had not retained ephemeral keys; no sale/Card/order/attempt/operation
+existed, so ONLY the NEW DB's synthetic staff/network configuration was superseded:
+old staff inactive/old network disabled, old rows/configuration history retained.
+Accepted database/staff untouched. Later runs retain labelled ephemeral keys0600
+outside repo, never operational keys or a production persistence substitute.
+
+Case3 registration timed out before ANY buyer payment/attempt. Original signature
+43H4M6Gxk7iEes5dHqYA6ACpD3p3sBNvTjA5aV6Csbgkfk5omqjHEQoZUMUqpghTz1xuDzt2yK2ohzFq98UG4mSa
+preserved; read-only restart found signature statusnull and no Card account. Original
+bytes were not retained by that older harness path. No replacement was signed and no
+success marker inserted; its opening sale remains unresolved. Case4 is a distinct
+Card/sale, NOT replacement/replay of case3. Harness now requires getHealth readiness
+and journals ALL test sends before broadcast. Underlying timeout cause remains
+unproven; WSL also intermittently returned Wsl/Service/0x8007274c for a read-only tail
+command (next identical access worked). No global WSL/Docker changes made.
+
+Acknowledgement digest is SHA256 of ACTUAL consumption returned by dedicated settler
+and checked for matching attempt/sale/event. Program reconciler remains trusted;
+Postgres/Solana do not become atomic or independently validate each other's state.
+No fabricated database-commit digest from old standalone harness reused here.
+
+REMAINING INTEGRATION / LAUNCH BLOCKERS:
+- Bounded issuer/verifier immutable context read RPCs and restart discovery for ALL
+  opening/revocation/decision/ack commands. This harness knows its own prepared input,
+  recorded decision and actual commit result; no untrusted client expected context.
+- Production durable signed plans/store support ONLY execute_outcome. Multi-authority
+  opening/receipt/auth/release/refund-authorization/ack commands here use explicit test
+  orchestration. Test files are NOT a production durable server store. Their fully
+  unattended persistence/lease/recovery signer integration remains unimplemented.
+- No replacement-operation protocol for expired/finalized-failed/uncertain operations.
+  Never clear their signature, infer non-execution from absence, or repay to fix DB.
+- Full Supabase Auth HTTP/browser/API/session-relink/market UI E2E not run. Actual
+  ownPaymentAttempts adapter + DB states tested; existing HTTP handler tests mock auth.
+- Before-persistence and some open/control-command crash boundaries not yet proven by
+  process kills. Concurrent release-vs-refund chain authorization race not exercised
+  as an integrated concurrent test (terminal replay/opposition checks differ).
+- Production authorities, issuer provider, credentials/TLS/psql runtime, monitoring,
+  actual independent personnel and Squads CPI not supplied/tested. Test keys do not
+  establish operational independence. Production catalog/cutover/grants need review.
+- Redemption E2E, policy items already unresolved (holiday calendar/loss liability/
+  rejected-pair disposition etc), legacy signed-transaction cutover and launch review.
+  Panda remains legacy direct, never escrow; Stripe dormant. Funding remains FALSE.
+
+VALIDATION / EVIDENCE:
+Normal npx --no-install tsc --noEmit exit0. npm test512total:510pass,2 unchanged FSC-copy
+assertion failures (shared invariants1940/1960);19files18pass/1failed. No intermittent
+market render failures this full run; earlier cause remains unproven and market-lane
+handoff from22f5ab1 still applies. Focused authority+Postgres suites22/22passed.
+npx --no-install next build --webpack exit0,40/40pages, existing optional Privy
+@farcaster/mini-app-solana warning. No ignoreBuildErrors/casts/test weakening. No Rust
+source changes or new compilation; actual validator loaded reviewed.so hash
+99aa6bec4e949de3484bc7fef0b70a83b040bdf92a1060871fe4de8d4c64743c (existing Agave2.1.0).
+No SQL migration reapplied/rewritten. New fixture/audit SQL execution ONLY isolated
+integration DB. OpenCode not used. No production/shared connection, push or deployment.
+
+Run evidence: Ubuntu /home/family/flexsoar-payment-db-69c6161-20261016T022841Z/
+integration-db-20261016T082030Z/ (schema/diff/hash/create/restore/empty proof, seeds,
+inspections, input snapshots, each exit/log). Helper /state/integrated-JXopR6/ retains
+public fixture metadata, actual signed envelopes/transactions, per-case checkpoints,
+results and dated failures; private ephemeral key files must not be printed/exported.
+Original resume065/discovery evidence and accepted final37 record remain separate.
+See tests/payment-integration/README.md for attested observe/resume commands.
+
+### Final integrated result and remaining stop (supersedes provisional status above)
+
+ACTUALLY EXECUTED:5 terminal sales (2direct,1escrow release,2full refunds), plus1funded
+escrow intentionally left in review and1unpaid opening/registration unresolved. Six
+actual two-buyer races: one principal debit per sale, rejected buyer debit0. Completed
+Card acknowledgements were verified and reconciled at original execution;5-sale
+read-only audit subsequently passed exact orders/claim ledger/cache/MYR/USDC/journal/
+consumption/outbox checks. No artificial acceptance markers in the old37-checkpoint DB.
+
+Case6 real5-minute lease expired; dedicated payment_integration_executor_b took over
+with a different lease UUID, same signature/bytes, recoveryOnly=true. Old executor's
+completion failed LEASE_LOST. Finalized observation found signature absent, Sale funded,
+original blockhash expired. No outcome broadcast, replacement or refund. Operation
+27bc0cae-1766-4295-b86c-6457289edd6b now DURABLY state=unknown, same original signature,
+last_error starts REVIEW_REQUIRED and forbids replacement/repayment. This used existing
+finishPaymentOperation RPC through executor_b, NOT an administrator table update.
+Principal1M remains in test escrow and conditional claim pending_vault. This is a
+successful fail-closed/review test, NOT a completed refund or settlement.
+
+Read-only03 audit initially failed parser ambiguity around CASE in IF. Original input,
+error, diff/hashes retained; ONLY parentheses added. Failed READ ONLY transaction
+rolled back; retry ONLY that audit exit0. No applied migration or predicate changed.
+Both preserved containers later had externally stopped, exit255/OOMKilled=false. The
+host guard refused to proceed. Exact IDs/configurations captured and ONLY those exact
+containers restarted; no recreate, reset, migration or initialization replay. New
+network namespace re-attested; network none/no ports/RO mounts remain intact.
+
+IMPORTANT ADDITIONAL RECOVERY BLOCKER (not hidden as a pass): a later full ACK-history
+recheck after restarts failed closed. Case0 getTransaction=null, signatureStatus=null;
+actual getBlock(156) returned-32001: block156 cleaned up, first available1084. No
+instruction/clock data fabricated from current owner state. Prior completed DB claim
+is still available and its immutable lifecycle evidence retained; the later archival
+reverification itself is BLOCKED. Financial terminal-state recovery still selects
+reconcile, including expired originals, without another transaction.
+
+Confirmed harness retention defect: Agave2.1 defaults to10000shreds. New starts now
+explicitly use --limit-ledger-size1000000 and require5GiB free (df showed~949GiB free).
+Actual updated startup succeeded; old pruned ACK still unavailable, as expected.
+This does NOT restore deleted blocks or prove production archival retention. Need
+an archival observer / durable verified-event retention window and tested pending-ACK
+recovery before launch. Do not relax finality/instruction checks or resend ACK/payment
+to conceal missing history. --observe-isolated-integration currently exits1 at that
+known archive gap after the other audit checks. --record-expiry-review-isolated-
+integration is a separate explicit mode, skips that supplemental archival recheck,
+and records ONLY the original expired operation's durable review obligation. It is
+not an all-scenarios acceptance command. No claim that every requested boundary passed.
+
+FINAL application validation (normal commands, no alias/config adaptation):
+- npx --no-install tsc --noEmit: exit0.
+- npm test:512total,507pass/5fail,18files pass/1fail. Two known FSC-copy assertions
+ at shared invariants1901/1960; additionally admin intake mock missing .maybeSingle(),
+ market renders2 missing .in(). Earlier full512 run510pass/2fail; do NOT call final run
+ a pass or erase either result. Focused authority+transport22/22passed.
+- Baseline-equivalent CONTROL only (NOT standard full validation): npx --no-install
+ vitest run --exclude tests/payment-authority-observer.test.ts ->499pass/2knownfail/
+ 501total. All old source/config/shared tests identical to22f5ab1. New test has no
+ global mocks or shared mutations; nondeterministic mock selection remains unresolved.
+- Targeted shared control:3selected,1pass/2market fail,244skipped. Not a full-suite pass.
+- npx --no-install next build --webpack: exit0,40/40pages. Existing optional Privy
+ @farcaster/mini-app-solana warning remains; runtime mini-app feature not verified.
+
+FOCUSED SHARED-TEST HANDOFF (market/admin/shared-test owners, no edits made):
+Two contract vi.mock factories253/2941 and two Supabase factories2925/2998 in
+invariants.test.ts disagree. The2925 .select() object has .eq() only (no .in(); nested
+.eq() no .maybeSingle()). Actual market load caught 'select(...).in is not a function'
+and rendered loadError; this suppresses the empty-state text expected3180/3186.
+Admin page64 reached real getConnectOnboardingStatus instead of its intended mock and
+failed missing maybeSingle. Market cached.ts imports contract functions at module
+scope and retains30s/300s entries. Baseline source unchanged. Consolidate per-module
+mocks, instrument actual factory selection, use explicit builder methods or targeted
+contract stubs, clearMarketCaches between renders; preserve assertions. Exact hoisting/
+cache/order trigger not proven; don't declare these3 failures pre-existing solely from
+this control or claim a payment fix solves them.
+
+Accepted DB AFTER runs/restart: schema normalized dump identical to initial source;
+final record still completed_at2026-10-16T07:34:00.635339+00:00,PID2138,version3/37;
+staff10/10active,orders28. No accepted rows/functions/staff modified. All financial/
+fixture writes targeted NEW integration DB only. Source dependency hashes still exact
+D98A62F311AF26DA6B39B095B1D19BA9D6C2CDE7843EBA6FB7A82F6A3201EC8A and
+1DEC156573D13BFCA04776527634BBDDD3765B6F5AAFB443599FCE70341DA56F.
+
+Evidence final-observe.log/exit0 =5-sale audit+opposite terminal rejection; remaining-1
+contains actual lease takeover plus first03failure;03-audit-retry.log/exit0 corrected
+read-only audit; durable-review.log/exit0 preserves unknown/review state; authority-
+history-diagnostic logs + authority-history-gap*.json contain actual archive failure;
+retention-startup-check confirms updated flag works but old gap stays blocked. Final
+application logs retained outside repo in Windows TEMP flexsoar-final-{tsc,tests,build}
+and flexsoar-baseline-control/final-focused/shared-focused logs.
+
+Next concrete work: review bounded control-operation context/plan RPCs and signer/
+worker integration; specify archival retention and recover the archived-evidence gap
+without new payments; review explicit replacement protocol for original expired/
+uncertain operations. Do NOT resolve the preserved review/registration cases by
+clearing signatures, altering evidence or creating another purchase of those claims.
+Public funding, production cutover, operational authorities and redemption remain blocked.
