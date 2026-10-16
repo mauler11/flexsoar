@@ -2478,3 +2478,130 @@ Human package/lock hashes unchanged (D98A62F311AF26DA6B39B095B1D19BA9D6C2CDE7843
 Funding const remains false. No new production TypeScript exports or frozen signatures.
 
 Final app validation: npx next build --webpack exit0,40/40 pages; existing optional Privy @farcaster/mini-app-solana warning persists. git diff --check exit0. Database execution, new regressions and37-checkpoint acceptance remain NOT RUN this turn because Docker is unavailable. No misleading migration-success claim.
+
+## ISOLATED DATABASE ACCEPTANCE COMPLETE (2026-10-16)
+
+Resumed after Docker recovery on branch track/payment-security from459e0ee. Exact
+preserved container ID71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92
+matched. It was stopped; inspected configuration BEFORE starting ONLY that container.
+Network none, no ports/privileged mode, exactly3 existing read-only audit mounts,
+official immutable image supabase/postgres@sha256:6058a6759ab9268cff8ee70641d61f1bd75953316281b76427cf5a6b4db2eafc.
+An initial guard expected the friendly image tag and stopped BEFORE startup/SQL;
+corrected guard checks the previously approved exact Config.Image AND image digest.
+Internal TCP127.0.0.1 / flexsoar_payment_v2_test / supabase_admin confirmed. Preflight
+proved064 present, original065/066 bodies still pending,03 committed, zero attempts/
+users/orders/checkpoints. No prior applied migration or03 rerun. No recreation/reset.
+
+ACTUAL MIGRATIONS:
+-065 COMMIT exit0. Function metadata/4 attachment catalog tuples preserved by checks.
+-066 COMMIT exit0. Original CHECK matched exactly; zero affected persisted attempts;
+ ONLY fee CHECK replaced and fully validated, other12 constraints preserved; initiation
+ metadata and quotient-only body replacement verified. MYR arithmetic unchanged.
+-067 NEW mechanical alias forward repair, COMMIT exit0 (see failures below).
+All79 explicit manifest files now committed (70 historical +059 through067).
+
+ACTUAL REGRESSION/CORE RESULTS:
+-08 shared-trigger tests PASSED exit0, earned terms_guard checkpoint after rollback.
+-09 PASSED exit0:12 independent exact-fee allocations through actual initiation,
+ copied actual production CHECK verification and wrong-fee/invalid-total rejection,
+ unchanged MYR snapshot assertions. Earned exact_fee checkpoint after rollback.
+-06 real SQL-authorized permit exported successfully, fixtures rolled back.
+ Offline production TypeScript encodePermit matched all690 bytes exactly. No SQL
+ expected values reused as encoder output. Public comparison artifact retained.
+-07 PASSED after equivalent regex syntax correction; reran primitive SDK vectors:
+ 10 encodes/7 decodes/10 LE64 vectors/11 rejection-strictness groups/full fixed Rust/TS
+ vector. Committed encoding checkpoint WITH actual SQL/TS comparison evidence.
+-10_contracts,20_outcomes_recovery,30_permissions all PASSED (exit0, forced deferred
+ checks then intentional fixture rollback + explicit successful completion).
+-35 setup COMMITTED;36 issuer,37 verifier,38 settler,39 executor,40 notifier all
+ PASSED using five separate real non-superuser LOGIN connections, their sole intended
+ memberships, session_user assertions, positive RPCs and rejected cross-role/direct
+ writes.46 exact result audit PASSED, including SELECT-only user permissions.
+-45 synthetic plan exported under real executor; Node generated a NEW ephemeral
+ valueless OFFLINE signed envelope, synthetic blockhash, no saved key/broadcast.
+ 47 signed storage PASSED exact persistence/idempotent readback/conflict rejection/
+ unknown-send preservation/direct-DML denial; earned signed_storage checkpoint.
+
+ACTUAL CONCURRENCY / RECOVERY:
+-40 duplicate setup COMMITTED.41/42 executed on persistent A/B backends in BOTH modes:
+ mode0 PIDs968/975; mode1 PIDs990/997. Actual pg_blocking_pids + pg_locks/activity
+ proved B waiting on A BEFORE A COMMIT. One matching order/consumption asserted.
+-50 race setup and70 immutable-expiry setup COMMITTED.51/52 financial cases PASSED:
+ conflicting_signature,conflicting_attempt,release_refund,refund_release,funding_cancel,
+ funding_revoke,revoked_funding,rollback. Each used real role-correct connections,
+ retained A transaction while B blocked, and inspected actual blocking before release.
+-58/59 terminal consumers ran separately for release_refund (PIDs1388/1395) and
+ refund_release (1444/1451), with real settler logins + actual blocking. Matching
+ canonical terminal receipts consumed once; adversarial opposite evidence rejected.
+ No two purported valid chain outcomes were fabricated.53 exact financial assertions
+ passed after each case, including order/owner/claim ledger/journal/outbox counts.
+-rollback case PIDs1571/1578: observed B blocking after A provisional financial writes,
+ then ROLLBACK A; same original A backend ran60 acknowledgement; B alone committed.
+-57/51/52 queue competition passed for operations,outbox: distinct dedicated A/B
+ logins simultaneously held transactions and got different SKIP LOCKED jobs. A third
+ persistent backend SELECT FOR UPDATE on A's job demonstrably blocked; saved lock
+ and3-backend overlap evidence before releasing A. B's nonblocking progress was
+ intentional SKIP LOCKED behavior, not described as B waiting.
+-operation_takeover/outbox_takeover: real separate original-A/B logins and backends,
+ actual row-lock probe while A open, A commit,54 expiration of EXACT synthetic lease,
+ B takeover,55 rejected stale completion under SAME original A login/backend.
+ All4 queue cases and2 stale checkpoints earned; no external work executed.
+-71 expiry/relink/lost-response recovery PASSED after natural wall-clock expiry
+ (>45sec since70 setup, immutable times untouched). Retained original wallet/permit,
+ reconciled exact evidence, repeated receipt and initiation returned original attempt.
+ These SQL/mocked-chain fixtures verify DB behavior, NOT actual chain observation.
+
+FINAL GATE EXECUTED SUCCESSFULLY:
+Before90 exactly34 original prerequisites +1 encoding +2 repair checkpoints =37.
+90 reran46/53 assertions, checked every required success/identity/backend, forced
+constraints and COMMITTED explicit final record:
+ scenario=final; login=supabase_admin; backend_pid=2138;
+ completed_at=2026-10-16T07:34:00.635339+00:00;
+ details={"suiteVersion":"payment-db-completeness-3","requiredCheckpoints":37}.
+Output: PAYMENT_DB_FINAL_ACCEPTANCE_COMPLETE. Final record is ADDITIONAL to37,
+not counted as a prerequisite. No checkpoint manually inserted or scenario skipped.
+
+NEW FAILURES PRESERVED / MECHANICAL CORRECTIONS:
+1) First07 failed regex compilation: Postgres rejects repetition count{1380}.
+ Entire acceptance transaction rolled back (payment_db_codec schema absent verified).
+ Changed ONLY regex to^[0-9a-f]+$ while retaining separate existing exact1380 length
+ assertion and every other comparison. Same accepted set, no weakened assertion.
+ Corrected diff + failed input/log + rollback evidence preserved; retried07 ONLY.
+2) First10 after fixes failed ambiguous column/local variable action in record_decision.
+ Complete fixture rollback verified before repair.067 qualifies ONLY the SELECT's
+ decisions.action with new unambiguous decision_row alias. All other fields/predicates/
+ locks/roles/errors unchanged. Original normalized body hash and complete metadata
+ checked; postflight proves EXACT2 alias replacements and metadata unchanged. This
+ fits standing mechanical name-collision authorization. Applied061 NOT edited.
+ Retried10 ONLY, then proceeded20+. No other repair or permission/constraint weakening.
+
+EVIDENCE retained outside repo at /home/family/flexsoar-payment-db-69c6161-20261016T022841Z/
+resume-065-20261016T072710Z/: before/after catalogs, source snapshots/hashes, results.tsv,
+all failure inputs/logs,07 rollback/diff,10 alias rollback, actual permit+comparison,
+synthetic signed envelope (NO key), individual real session transcripts,16 actual
+blocking evidence JSON records + queue overlap evidence, orchestrator source scripts,
+expiry setup time, before-final-counts.json,90 execution output,after-final.json and
+final-isolation.json. First failed image-name guard retained in preceding resume065
+folder; all earlier failures/environments retained. Final exact container still RUNNING
+and isolated; no cleanup, reset, migration replay or unrelated Docker changes.
+
+Remaining integration/release blockers: production deployment/schema/catalog parity
+unverified; no production identities, dedicated worker transports/credentials, issuer,
+real chain observer/sign-execute/reconcile-notify loop or operational recovery exercised
+by this database suite. Real Solana funding/release/refund and program entitlement
+reconciliation were NOT executed here. Full Solana-to-Postgres recovery is NOT proven.
+Existing on-chain/local-validator evidence is separate historical work, not rerun.
+Funding const false; only synthetic local fixture configuration exists. Stripe dormant.
+No shared/cloud/production DB, public-chain RPC/signing, operational keys, real money,
+email, push or deployment. Human dependency pair/exported diff unchanged. OpenCode not used.
+
+Application checks this turn:npx tsc --noEmit exit0; full npm test486 passed/4 failed/
+490total.2 known unchanged FSC-copy assertions +2 intermittent existing market render
+assertions (invariants3180/3186, expected 'Nothing listed yet'). Targeted market run
+PASSED2/2 (245 skipped in that file). Multiple hoisted contract mocks (253/2941) and
+module-level30s market cache exist; current evidence does NOT establish exact failure
+cause. No shared assertions, market code, mocks, cache behavior or dependencies changed.
+Do not report full app suite passed. Webpack completion below. SQL acceptance is
+independent of these unresolved app test failures. New production TS exports:none.
+
+Final application completion: npx next build --webpack exit0,40/40 pages; optional Privy @farcaster/mini-app-solana warning remains. git diff --check exit0. Full app test count remains486 passed/4 failed; isolated market2/2 passed. Database37-checkpoint acceptance COMMITTED independently. No claim of production payment readiness.

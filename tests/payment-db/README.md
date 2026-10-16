@@ -1,13 +1,15 @@
-# Payment-v2 database suite: Docker unavailable; forward repairs drafted
+# Payment-v2 database suite: ISOLATED ACCEPTANCE PASSED (2026-10-16)
 
-065 shared-trigger and066 exact-fee migrations are authored but NOT APPLIED. Docker
-Desktop Linux-engine pipe is absent on Windows; Ubuntu Docker command is unavailable.
-No database connection/SQL execution this turn. Restore Docker Desktop/Ubuntu
-integration without resetting the preserved environment, then reverify exact target.
-Last verified DB state:064 committed;05 primitives passed;06/10 rolled back;0 markers.
-New08/09 regression scripts are NOT RUN. Final gate now requires37 checkpoints,
-preserving all previous35. No database or full chain-to-database acceptance claimed.
-Earlier entries are historical; latest handoff records drafts and exact tool errors.
+The preserved isolated database passed all37 required checkpoints and committed90's
+explicit final record at2026-10-16T07:34:00.635339+00:00,backend2138,version3.
+All79 explicit migration files committed, including065/066 and mechanical alias067.
+Actual SQL-authorized690-byte permit matched production TypeScript encoding; primitive
+vectors, five dedicated worker logins, signed storage, real concurrent sessions,
+terminal consumption, rollback, queue/stale leases and expiry/relink all passed.
+16 actual blocking-evidence records retained. No success markers manually inserted.
+This is database-suite acceptance, NOT full Solana-to-database integration or production
+readiness. Funding remains disabled. Existing environment/logs preserved; no reset.
+Earlier sections are chronological history and do not supersede this result.
 
 ## Current stop: payment060 parser error after approved listing repair
 
@@ -575,3 +577,42 @@ invalid-total/wrong-fee rejection; unaffected MYR remains2000/100/1900. TEMP fix
 accepts optional total for these cases; unchanged callers retain5000000 and normal
 synthetic caps. No production caps/roles/funding changed. See latest handoff for full
 migration pre/postflight contracts and explicit tooling blocker.
+
+## Completed37-checkpoint run and mechanical corrections
+
+The exact preserved container was configuration-verified while stopped, then ONLY that
+container started. Internal TCP127.0.0.1 database flexsoar_payment_v2_test confirmed.
+065/066 committed with metadata/attachments/constraints preserved and CHECK validated.
+08/09 passed;06 actual permit export/offline TS comparison passed;07 encoding passed.
+10/20/30 passed;35 setup and all five actual worker login tests36–40 +46 passed;
+45/47 offline signed storage passed; both duplicate modes41/42 passed with actual
+blocking; all8 financial races and both terminal-consumer pairs passed with actual
+blocking; both SKIP LOCKED worker competitions passed with blocked third-party row
+probes; both expired takeovers/stale completions passed; natural expiry/relink71 passed.
+90 then required34 original +encoding1 +repairs2, asserted identities/backend evidence,
+and COMMITTED final record (supabase_admin,PID2138,2026-10-16T07:34:00.635339+00:00).
+Printed PAYMENT_DB_FINAL_ACCEPTANCE_COMPLETE. Final row is not one of37 prerequisites.
+
+First07 regex{1380} was invalid PostgreSQL regex syntax. Changed only to hex+ AND
+existing exact1380 length check; original semantics retained. Failed transaction's
+schema absence verified before retry. First10 then hit action variable/column collision.
+New forward067 qualifies only that selected decisions column with an unambiguous
+query alias, preserving all metadata and proving exact alias-only source replacements.
+Applied061 unchanged. Original errors/diffs/rollback evidence retained; failed stages
+alone retried. Successful migrations and03 were not rerun; no scenario/guard weakened.
+
+Full evidence in /home/family/flexsoar-payment-db-69c6161-20261016T022841Z/
+resume-065-20261016T072710Z/: per-session transcripts,16 blocking JSON records,
+3-backend queue overlap records, source snapshots/hashes, failures, metadata/catalogs,
+actual permit and offline comparison, valueless signed fixture with NO saved private
+key, exact final37 counts and committed final row. Environment remains running,
+network none/no ports/three read-only mounts, same immutable image and container ID.
+Do not rerun setup/fixtures on this completed target or delete evidence. Use a new
+separately authorized disposable target for a fresh replay. Never apply the historical
+compatibility repairs to production without independently reviewing its actual catalog.
+
+No further DB-suite blocker observed in this run. Remaining production schema/catalog,
+dedicated transport/identity and real chain-to-DB recovery verification remain open.
+No public-chain traffic, operational keys/funds/emails or shared DB used. Application
+validation is separate: current full suite486/490 (2 FSC +2 intermittent market-copy
+failures); targeted market2/2. No shared tests changed. See latest handoff for limits.

@@ -9,7 +9,7 @@ CREATE TEMP TABLE comparison_input(value jsonb);
 INSERT INTO comparison_input VALUES(:'comparison_json'::jsonb);
 DO $verify$ DECLARE j jsonb;BEGIN
  SELECT value INTO j FROM comparison_input;
- IF NOT (j ?& ARRAY['actual','expected','encoder','sha256','model']) OR j->>'actual' IS NULL OR j->>'expected' IS NULL OR j->>'actual' !~ '^[0-9a-f]{1380}$' OR j->>'actual' IS DISTINCT FROM j->>'expected' OR length(j->>'actual')<>1380 OR j->>'encoder' IS DISTINCT FROM 'production protocol-v2.ts encodePermit'
+ IF NOT (j ?& ARRAY['actual','expected','encoder','sha256','model']) OR j->>'actual' IS NULL OR j->>'expected' IS NULL OR j->>'actual' !~ '^[0-9a-f]+$' OR j->>'actual' IS DISTINCT FROM j->>'expected' OR length(j->>'actual')<>1380 OR j->>'encoder' IS DISTINCT FROM 'production protocol-v2.ts encodePermit'
  OR encode(sha256(decode(j->>'actual','hex')),'hex') IS DISTINCT FROM j->>'sha256' THEN RAISE EXCEPTION 'SQL/TS permit comparison failed';END IF;
  INSERT INTO payment_db_codec.completion(scenario,comparison) VALUES('encoding',j);
 END $verify$;
