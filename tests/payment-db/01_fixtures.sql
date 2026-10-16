@@ -8,7 +8,7 @@ BEGIN
  END;RAISE EXCEPTION 'expected rejection: %',statement;
 END $$;
 -- Synthetic rows only; no data copied from Panda, production, customer records or wallets.
-CREATE FUNCTION pg_temp.fixture(mode smallint,valid_seconds integer DEFAULT 600,record_evidence boolean DEFAULT true) RETURNS jsonb LANGUAGE plpgsql AS $$
+CREATE FUNCTION pg_temp.fixture(mode smallint,valid_seconds integer DEFAULT 600,record_evidence boolean DEFAULT true,p_total numeric DEFAULT 5000000) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE seller uuid:=gen_random_uuid();buyer uuid:=gen_random_uuid();model uuid:=gen_random_uuid();sku uuid:=gen_random_uuid();item uuid:=gen_random_uuid();card uuid:=gen_random_uuid();listing uuid:=gen_random_uuid();net uuid:=gen_random_uuid();sale uuid:=gen_random_uuid();u uuid;st uuid;enroller uuid;reviewer uuid;i int;role_name text;status jsonb;permit text;proof jsonb;event uuid;funded bigint:=extract(epoch FROM clock_timestamp())::bigint;
 BEGIN
  INSERT INTO public.users(id,auth_id,handle,email,country_code,solana_address) VALUES
@@ -37,10 +37,10 @@ BEGIN
  INSERT INTO payment_v2.inventory(card_id,item_id,card_commitment,pair_commitment,custody_version,mode,enrollment_evidence,enrolled_by,approved_by)
  VALUES(card,item,sha256(uuid_send(card)),sha256(uuid_send(item)),1,mode,sha256(uuid_send(item)),enroller,reviewer);
  INSERT INTO payment_v2.networks(id,genesis,program,config,mint,token_program,treasury,treasury_token,issuer,authority_epoch,policy_version,funding_enabled,max_trade_units,max_escrow_units)
- VALUES(net,sha256(uuid_send(net)),sha256(uuid_send(model)),sha256(uuid_send(sku)),sha256(uuid_send(item)),sha256(uuid_send(card)),sha256(uuid_send(listing)),sha256(uuid_send(sale)),sha256(uuid_send(reviewer)),1,'MY-USDC-ESCROW-1',true,50000000,100000000);
+ VALUES(net,sha256(uuid_send(net)),sha256(uuid_send(model)),sha256(uuid_send(sku)),sha256(uuid_send(item)),sha256(uuid_send(card)),sha256(uuid_send(listing)),sha256(uuid_send(sale)),sha256(uuid_send(reviewer)),1,'MY-USDC-ESCROW-1',true,greatest(50000000::numeric,p_total),greatest(100000000::numeric,p_total));
  INSERT INTO payment_v2.wallet_accounts(user_id,network_id,wallet,token_account,proof_digest) VALUES(seller,net,sha256(uuid_send(seller)),sha256(uuid_send(seller)||decode('01','hex')),sha256(uuid_send(seller))),
  (buyer,net,sha256(uuid_send(buyer)),sha256(uuid_send(buyer)||decode('01','hex')),sha256(uuid_send(buyer)));
- PERFORM public.fn_payment_v2_prepare_sale(listing,net,jsonb_build_object('id',sale,'saleAddress',payment_v2.b58(sha256(uuid_send(sale))),'escrowAddress',payment_v2.b58(sha256(uuid_send(sale)||decode('02','hex'))),'totalUnits','5000000','fxSnapshot',jsonb_build_object('myrSen',2000,'usdcBaseUnits','5000000','source','synthetic'),'validFrom',funded-10,'expiresAt',funded+valid_seconds));
+ PERFORM public.fn_payment_v2_prepare_sale(listing,net,jsonb_build_object('id',sale,'saleAddress',payment_v2.b58(sha256(uuid_send(sale))),'escrowAddress',payment_v2.b58(sha256(uuid_send(sale)||decode('02','hex'))),'totalUnits',p_total::text,'fxSnapshot',jsonb_build_object('myrSen',2000,'usdcBaseUnits',p_total::text,'source','synthetic'),'validFrom',funded-10,'expiresAt',funded+valid_seconds));
  proof:=jsonb_build_object('saleId',sale,'kind','opened','finality','finalized','sale',payment_v2.b58(sha256(uuid_send(sale))),'genesis',payment_v2.b58(sha256(uuid_send(net))),'program',payment_v2.b58(sha256(uuid_send(model))),'generation','1','revision','1','signature',repeat('2',88),'slot',1);
  PERFORM public.fn_payment_v2_record_lifecycle(proof);
  PERFORM set_config('request.jwt.claim.sub',buyer::text,true);

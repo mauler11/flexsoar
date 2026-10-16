@@ -1,12 +1,13 @@
-# Payment-v2 database suite: BLOCKED by shared trigger
+# Payment-v2 database suite: Docker unavailable; forward repairs drafted
 
-Forward064 committed (76 manifest files total);05 encoding primitive/wire vectors
-passed.06 actual permit export and10_contracts failed on shared terms_guard accessing
-NEW.resolved_event on a sales row. Both fixtures rolled back. No successful checkpoints.
-Original34 prerequisites remain, plus mandatory encoding verification: NEW TOTAL35.
-Actual SQL-authorized permit/TS comparison, dedicated logins/races and final gate are
-NOT RUN to completion. See latest handoff for exact evidence and forward-repair scope.
-Earlier sections are historical and do not supersede this checkpoint.
+065 shared-trigger and066 exact-fee migrations are authored but NOT APPLIED. Docker
+Desktop Linux-engine pipe is absent on Windows; Ubuntu Docker command is unavailable.
+No database connection/SQL execution this turn. Restore Docker Desktop/Ubuntu
+integration without resetting the preserved environment, then reverify exact target.
+Last verified DB state:064 committed;05 primitives passed;06/10 rolled back;0 markers.
+New08/09 regression scripts are NOT RUN. Final gate now requires37 checkpoints,
+preserving all previous35. No database or full chain-to-database acceptance claimed.
+Earlier entries are historical; latest handoff records drafts and exact tool errors.
 
 ## Current stop: payment060 parser error after approved listing repair
 
@@ -529,3 +530,48 @@ Separate demonstrated issue awaiting review: floor(total_units*500/10000) in app
 059/060 overcharges1 base unit at max-u64. No amount/constraint repair was made.
 Full evidence/proposals are in latest handoff. No database suite or end-to-end recovery
 acceptance claimed. Funding remains disabled. Logs and original environment retained.
+
+## Trigger/fee forward repairs and37-checkpoint resume (NOT EXECUTED)
+
+First restore Docker Desktop's Linux engine and Ubuntu WSL integration. Exact probes:
+
+```powershell
+docker version
+wsl.exe -d Ubuntu -- docker version
+docker inspect flexsoar-payment-db-69c6161-20261016T022841Z
+```
+
+Do not reset/recreate the container. Reverify ID71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92,
+network none, zero ports, exactly3 existing read-only audit mounts, then internal
+TCP127.0.0.1 target flexsoar_payment_v2_test. Capture before definitions/metadata,
+attachments/constraints and persisted attempts; affected financial rows must STOP.
+Use the existing Invoke-PaymentDb function above only AFTER these identity guards:
+
+```powershell
+# NOT YET EXECUTED. Stop and preserve transcript on every nonzero stage.
+Invoke-PaymentDb -f /audit/migrations/065_payment_v2_table_specific_terms.sql
+Invoke-PaymentDb -f /audit/migrations/066_payment_v2_exact_usdc_fee.sql
+# Then execute the already documented06 export -> offline TS comparison ->07 commands.
+Invoke-PaymentDb -f /audit/tests/payment-db/08_terms_guard.sql
+Invoke-PaymentDb -f /audit/tests/payment-db/09_exact_fee.sql
+Invoke-PaymentDb -f /audit/tests/payment-db/10_contracts.sql
+# Continue20/30, dedicated logins, signed storage, real separate-session races,
+# terminal/rollback/stale lease/expiry scenarios, preserving actual lock evidence.
+# Final command ONLY after every required success:
+Invoke-PaymentDb -f /audit/tests/payment-db/90_final_acceptance.sql
+```
+
+Never rerun applied059–064 or committed03. Do not rerun a successful08 (its private
+completion schema persists), or manually insert any checkpoint.08/09 force deferred
+constraints before fixture rollback and record completion ONLY afterward. Gate version3
+requires both repair records plus all previous35: NEW TOTAL37, excluding final record.
+No successful record currently exists for these authored checks. Runtime compilation,
+metadata preservation, CHECK validation and permissions/concurrency are still pending.
+
+08 covers allowed updates and forbidden terms across all4 shared-trigger tables,
+wrong-sale resolved events, and signature retention.09 checks12 independent expected
+fee/net vectors against actual initiation and a copied actual CHECK definition, with
+invalid-total/wrong-fee rejection; unaffected MYR remains2000/100/1900. TEMP fixture
+accepts optional total for these cases; unchanged callers retain5000000 and normal
+synthetic caps. No production caps/roles/funding changed. See latest handoff for full
+migration pre/postflight contracts and explicit tooling blocker.

@@ -2391,3 +2391,90 @@ no enabled network rows. No production/shared DB, public-chain calls, email, pus
 deployment. OpenCode not used. No TypeScript production exports/signatures changed.
 
 Final validation: npx next build --webpack exit0,40/40 pages; existing optional Privy @farcaster/mini-app-solana warning remains. git diff --check exit0. SQL migration064 and primitive regressions passed; actual-permit checkpoint and full35-checkpoint suite remain blocked, not accepted.
+
+## Authorized trigger/fee forward repairs drafted; Docker unavailable (2026-10-16)
+
+065_payment_v2_table_specific_terms.sql and066_payment_v2_exact_usdc_fee.sql are NEW,
+UNAPPLIED forward migrations. No existing migration, including applied064, edited.
+No SQL or database connection executed this turn. Execution blocked before identity
+verification: Windows docker inspect exited1 because dockerDesktopLinuxEngine named
+pipe does not exist; explicit Ubuntu invocation reports docker command unavailable.
+Thus current container identity/isolation/current record counts cannot be reverified
+and no claim is made that the server is presently running. No environment recreated,
+container/service started, integration setting changed or unrelated Docker resource
+altered. Last VERIFIED state remains b96d70d:064 committed,05 primitives passed,
+06/10 rolled back on shared-trigger field access; zero checkpoints/attempts/users/orders.
+
+Exact commands/errors:
+-docker inspect flexsoar-payment-db-69c6161-20261016T022841Z (Windows): exit1,
+ failed to connect to docker API at npipe:////./pipe/dockerDesktopLinuxEngine;
+ open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified.
+-wsl.exe -d Ubuntu -- bash <outside-repo script invoking docker version>:
+ The command 'docker' could not be found in this WSL 2 distro; enable Docker Desktop
+ WSL integration. WSL itself executes successfully as the existing Ubuntu user.
+An initial one-line evidence-copy command lost shell variable quoting and failed on
+root paths with permission denied; no DB calls or file overwrite occurred. Corrected
+LF script preserved actual Windows/Ubuntu error logs in the existing run directory.
+
+065 preserves the original resolved_event/signature predicates and errors, wrapping
+ONLY the2 operations-only IFs in nested IF TG_TABLE_NAME='operations'. Every shared
+trigger field reviewed: attempts.permit/authorized metadata are already nested;
+state exists on all4 attached tables; other terms use JSON field names, not missing
+record fields. No table/column/trigger attachment added, no disabled guard. Preflight
+checks normalized original-body hash and exactly4 attachments; postflight compares
+all function metadata except body and complete attachment catalog tuples unchanged.
+
+066 preserves function signature/owner/ACL/security/search path/attributes and all
+unaffected MYR integer arithmetic. Only2 USDC allocation expressions in initiate
+become exact numeric pg_catalog.div(total*500,10000). It transactionally locks attempts,
+identifies exactly1 original fee CHECK, compares its complete definition with a temp
+original-shape CHECK, refuses any affected persisted attempt, and replaces ONLY that
+CHECK using the same name/comment/inheritance property. ADD CHECK fully validates
+existing data; postflight requires convalidated=true and other constraints unchanged.
+No financial rows rewritten; existing u64 domains/total>0/total=net+fee preserved.
+Actual live attempt inspection and metadata comparisons remain PENDING until execution;
+last-known zero is historical evidence, not a fresh catalog result.
+
+New dedicated regressions (AUTHORED / NOT RUN):
+-08_terms_guard.sql exercises production trigger on sales/attempts/operations/outbox:
+ valid state/lease changes, immutable-term denial, permit denial, wrong-sale resolved
+ event rejection, same-sale acceptance, first signature then change/clear rejection.
+ Fixtures roll back with deferred checks forced, then explicit private success record.
+-09_exact_fee.sql:12 independent Python integer expected splits:1/19 zero-fee,20/21,
+ 39/40/41 boundaries,5000000 normal,2^53±1,max-u64-1/max-u64. Calls real initiation
+ for each, checks MYR snapshots unchanged, and tests copied ACTUAL production CHECKs
+ (including domain bounds) reject wrong fee and zero/negative/fractional/overflow totals.
+ Probe CHECK definitions must equal production CHECK definitions; this is no mirrored
+ fee implementation. After rollback only successful completion records persist.
+-01_fixtures.sql adds optional p_total default5000000 to the TEMP fixture ONLY, with
+ matching synthetic quote/FX terms and test network caps; existing3-argument calls
+ retain exactly their defaults. Production funding configuration is NOT enabled.
+-90_final_acceptance retains all35 prior prerequisites and requires BOTH new explicit
+ successes. New total37, suiteVersion3. No markers inserted; gate NOT RUN.
+
+Evidence in /home/family/flexsoar-payment-db-69c6161-20261016T022841Z/
+trigger-fee-20261016T071449Z/: engine/isolation attempt, Windows/Ubuntu Docker errors,
+Ubuntu exit code, draft065/066/08/09 copies + hashes. Original failures/DB/environment
+preserved. Draft SQL statically reviewed; no SQL compilation, grant, lock/concurrency,
+actual permit comparison or database acceptance claim. Full chain-to-DB integration
+also unverified. No public-chain signing/broadcast, shared/production connection,
+email, operational keys, dependency edits, push or deployment. OpenCode not used.
+
+Next concrete human action: start Docker Desktop's Linux engine and restore
+Settings -> Resources -> WSL Integration -> Ubuntu. Verify Client/Server using
+Windows docker version and wsl.exe -d Ubuntu -- docker version. Do not reset/recreate
+anything. Then resume under existing authorization: reverify exact preserved ID,
+network none/no ports/three read-only mounts/internal loopback named DB; inspect
+persisted attempts, capture definitions/ACLs; apply065 ONLY then066 ONLY; on success
+06 export + offline TS comparison +07 encoding acceptance,08 and09 regressions,
+10 then remaining worker/concurrent/recovery suite. Do not rerun successful prior
+migrations or03. Stop at first failure and preserve evidence; no manual markers.
+No fresh permission is required for these already-authorized steps once tools return.
+
+Application validation: npx tsc --noEmit exit0; npm test488 passed/2 unchanged known
+FSC-copy failures/490total. No additional market failures. Webpack result below.
+Human package/lock hashes unchanged (D98A62F311AF26DA6B39B095B1D19BA9D6C2CDE7843EBA6FB7A82F6A3201EC8A /
+1DEC156573D13BFCA04776527634BBDDD3765B6F5AAFB443599FCE70341DA56F), exported diff kept.
+Funding const remains false. No new production TypeScript exports or frozen signatures.
+
+Final app validation: npx next build --webpack exit0,40/40 pages; existing optional Privy @farcaster/mini-app-solana warning persists. git diff --check exit0. Database execution, new regressions and37-checkpoint acceptance remain NOT RUN this turn because Docker is unavailable. No misleading migration-success claim.
