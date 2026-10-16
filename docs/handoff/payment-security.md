@@ -1498,11 +1498,11 @@ contracts/negative-role/multi-session tests. Keep funding disabled. Then provisi
 dedicated connection transport and actual attestation/lifecycle verifiers, and run the
 full loopback program-observer-Postgres recovery scenarios. Production is blocked.
 
-## Review fixes after bb3943e — 2026-10-17 local session
+## Review fixes after bb3943e ï¿½ 2026-10-17 local session
 
 Status: executable application/offline changes plus REVISED UNAPPLIED DRAFTS; funding
 remains disabled. No SQL, database connection, public-chain action or email occurred.
-The user authorized revising059–063 as unapplied drafts. This session cannot establish
+The user authorized revising059ï¿½063 as unapplied drafts. This session cannot establish
 migration application state without a prohibited database connection. HUMAN MUST
 confirm these drafts have never been applied before using the revisions. If any was
 applied, preserve that deployed history and author/review forward migrations instead.
@@ -1600,7 +1600,7 @@ They need separately reviewed exact plan encodings/integration; remain fail-clos
 A stale executor can retain signed bytes after lease loss: database CAS cannot revoke
 a transaction; program Sale terminal/revision fencing is the final financial guard.
 
-Authored database verification — ALL NOT RUN:
+Authored database verification ï¿½ ALL NOT RUN:
 
 -35 setup plus36issuer/37verifier/38settler/39executor/40notifier/46results require FIVE
 actual non-superuser LOGIN connections, each ONLY one worker group. They test real
@@ -1612,7 +1612,7 @@ no credentials and refuses existing test role names. Two wrappers do not count.
 valueless ephemeral signature WITHOUT saving a key, and47 stages/retries/reads it and
 rejects changed validity. Synthetic blockhash must NEVER be broadcast. Exact human
 commands/order, authentication requirements and lease caveats are in payment-db README.
--50–57 add independent-session barriers for conflicting signature/attempt, canonical
+-50ï¿½57 add independent-session barriers for conflicting signature/attempt, canonical
 release vs adversarial refund (both orders), pending cancellation vs funding, finalized
 revoke vs contradictory funding, funded vs contradictory revoke, rollback after writes,
 competing operation/outbox workers and expired lease takeover/stale completion. Only ONE
@@ -1678,7 +1678,7 @@ Validation of this review:
   from staging. No dependency request/install/change, no SQL execution, DB connection,
   production credentials, public-chain signing/broadcast, emails, push or deployment.
 
-Next human action: confirm059–063 were never applied, review revisions and README,
+Next human action: confirm059ï¿½063 were never applied, review revisions and README,
 prepare a fresh disposable named loopback database with reviewed baseline roles/schema,
 then separately authorize/apply and run real-principal and multi-session tests exactly
 as documented. Capture first error/catalog/role/lock/results evidence for forward repair.
@@ -1701,7 +1701,7 @@ canonical terminal evidence, never two purported valid release/refund outcomes. 
 
 ## Database suite final completeness gate (after5c3db0e)
 
-Founder explicitly confirmed059–063 have NEVER been applied anywhere. No migration
+Founder explicitly confirmed059ï¿½063 have NEVER been applied anywhere. No migration
 file is changed in this follow-up; no SQL execution or database connection occurred.
 Starting HEAD was5c3db0e05a103208b1aece2781dfacf838de3949 on track/payment-security;
 HEAD..main was empty. Human dependency modifications and the pre-existing untracked
@@ -1716,7 +1716,7 @@ setup owner. PUBLIC/anon/authenticated/service_role have no access; workers get 
 helper execution, no direct table DML. This is trusted test instrumentation, not a
 financial RPC or a malicious-administrator-resistant audit system.
 
-Workers36–40 and signed-storage47 record success in their assertion transaction.
+Workers36ï¿½40 and signed-storage47 record success in their assertion transaction.
 Core10/20/30 and expiry71 record completion only AFTER successful assertion flow and
 intentional fixture rollback.46/53 now COMMIT successful checkpoint writes;53 still
 skips unfinished cases for incremental use. Final90 requires34 explicit successful
@@ -1790,7 +1790,7 @@ SQL/bootstrap authorization, create a NEW out-of-worktree local Supabase stack w
 empty app migrations/no seeds/no linked cloud project and loopback ports. Real auth
 schema/functions and roles are required; vanilla PostgreSQL alone or an auth stub is
 insufficient. Prepare the named flexsoar_payment_v2_test database using ONLY the fresh
-local bootstrap schema, then review/apply001–058,059–063 and03 explicitly. See README
+local bootstrap schema, then review/apply001ï¿½058,059ï¿½063 and03 explicitly. See README
 for default stack dbname versus named-test-target handling. No production/shared dump,
 credentials or data snapshot is needed. No database is claimed ready or verified.
 
@@ -1826,7 +1826,7 @@ https://docs.docker.com/desktop/setup/install/windows-install/ . Final90 additio
 requires complete current worker/race case inventories and retained terminal-consumer
 results so no zero-row loop can stand in for actual verification.
 
-## First actual isolated database run after69c6161 — BLOCKED before001
+## First actual isolated database run after69c6161 ï¿½ BLOCKED before001
 
 User explicitly authorized ONLY the disposable local DB, upstream bootstrap, isolated
 connections, historical/application migrations and synthetic tests. No shared/cloud DB
@@ -1874,16 +1874,16 @@ BOOTSTRAP_PREREQUISITE_MISSING: auth.jwt(); STOP before application migrations.
 Thus the reviewed preparation document's claim that this DB-only image alone provides
 all needed modern Auth helpers was incorrect.036 and053 depend on auth.jwt(). We did
 NOT proceed until those files failed later, fabricate a helper, skip a policy, change
-a guard, or recreate the environment. Historical001–058: NONE EXECUTED.059–063: NONE
+a guard, or recreate the environment. Historical001ï¿½058: NONE EXECUTED.059ï¿½063: NONE
 EXECUTED. Database fixtures/tests/dedicated workers/races/expiry/90: ALL NOT RUN.
 The34-checkpoint gate has NOT passed and no completion marker was inserted manually.
 
 Exact forward bootstrap repair PROPOSAL (NOT executed; requires review):
 Official Supabase Auth tagv2.197.0 resolves to commit
 4eee58f296d9698a1c2c0ae14d7a0b379c7622d3. Review and apply its function-only files:
-1.migrations/20220224000811_update_auth_functions.up.sql — canonical uid/role/email
+1.migrations/20220224000811_update_auth_functions.up.sql ï¿½ canonical uid/role/email
   support null-safe individual claims plus request.jwt.claims JSON fallback.
-2.migrations/20220531120530_add_auth_jwt_function.up.sql — canonical jwt() returns
+2.migrations/20220531120530_add_auth_jwt_function.up.sql ï¿½ canonical jwt() returns
   JSON from request.jwt.claim or request.jwt.claims, with upstream deprecation comments.
 https://github.com/supabase/auth/tree/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/migrations
 Render ONLY the Namespace template as auth; execute as real supabase_auth_admin owner
@@ -1995,7 +1995,7 @@ FIRST FAILURE: file25,022b_permissions_lockdown.sql, psql exit3 at line233:
 022b: 1 function(s) now have multiple arities.
 Stopped immediately;022b's BEGIN..COMMIT transaction rolled back. Catalog proves its
 fn_require_self_or_admin creation absent and fn_purchase_card_with_credit removal
-rolled back. No022c or later historical file,059–063, fixture, dedicated worker,
+rolled back. No022c or later historical file,059ï¿½063, fixture, dedicated worker,
 signed envelope, concurrent session, terminal, stale lease, expiry or90 was run.
 No manual success checkpoint. Payment_v2 schema does not exist. Final acceptance NOT MET.
 
@@ -2021,7 +2021,7 @@ step at THIS post022 database state to retire EXACTLY obsolete4-arg fn_list_card
 RESTRICT after asserting exact identity/owner/body/dependency evidence above. Preserve
 canonical3-arg geography-derived function and its grants. No CASCADE, data deletion,
 blanket overload drop, changed assertion, historical edit or manually marked success.
-Then rerun unchanged022b and resume only after it succeeds, without replaying001–022.
+Then rerun unchanged022b and resume only after it succeeds, without replaying001ï¿½022.
 No payment migration was applied, so there is no payment-v2 schema repair yet. User's
 instruction prohibits further unreviewed repairs; no drop/repair beyond approved Auth
 files occurred. This is historical compatibility, not permission to rewrite history.
@@ -2092,7 +2092,7 @@ retired ONLY4-arg; full canonical definition/owner/ACL comparison passed; COMMIT
 Successful evidence at listing-repair-20261016T025811Z/ includes SQL/hash/result/isolation.
 No CASCADE, broad grant, policy weakening, historical edit or unrelated DROP.
 
-Resumed fixed manifest at022b ONLY. Original001–022 successful files were not rerun.
+Resumed fixed manifest at022b ONLY. Original001ï¿½022 successful files were not rerun.
 Unchanged022b passed.022c through058 and059 also passed. Current unique successful
 manifest files:71/75 (all70 historical files plus059). Later031/032 replaced3-arg
 listing as explicitly encoded by unchanged history; canonical preservation was verified
@@ -2105,7 +2105,7 @@ The PL/pgSQL IF condition needs the CASE expression parenthesized to keep its in
 THEN within the expression parse boundary. Captured060 log and original failed SQL.
 060's BEGIN transaction rolled back entirely: catalog confirms require_role(name) and
 prepare_sale(uuid,uuid,jsonb) absent;059 records schema remains committed. Networks0,
-attempts0. No061–063 or tests executed; no manual success checkpoint. No repair beyond
+attempts0. No061ï¿½063 or tests executed; no manual success checkpoint. No repair beyond
 approved overload DROP was executed. No public/customer data or Panda imported.
 
 Source correction DRAFTED, NOT EXECUTED: one line of failed/unapplied060 now reads
@@ -2113,7 +2113,7 @@ Source correction DRAFTED, NOT EXECUTED: one line of failed/unapplied060 now rea
 No custody interpretation, ownership rule, role, grant, amount or predicate changed.
 Applied059 and ALL historical files untouched.060 correction is a reviewable pending
 revision, NOT claimed SQL-compiled/passed. After review/authorization retry060 only,
-then061–063 and full suite on success. Do NOT reapply059 (its schema already exists),
+then061ï¿½063 and full suite on success. Do NOT reapply059 (its schema already exists),
 skip failure or label migration successful. A forward migration is unnecessary for060
 because its complete transaction rolled back and no060 object persisted.
 
@@ -2151,10 +2151,10 @@ Final validation completion: npx next build --webpack exited0 with40/40pages and
 route/trace output. Existing optional Privy @farcaster/mini-app-solana warning persists;
 no suppression or dependency change. git diff --check exited0. Final Docker inspection
 still shows exact ID running, networknone, PortBindings{}. Next action is review of
-one-line unapplied060 correction and explicit permission to retry060, then061–063 on
+one-line unapplied060 correction and explicit permission to retry060, then061ï¿½063 on
 success.059 must remain untouched. No database-suite or full-chain acceptance claimed.
 
-## Isolated execution update: 060–062 committed; 063 blocked (2026-10-16)
+## Isolated execution update: 060ï¿½062 committed; 063 blocked (2026-10-16)
 
 Reverified container flexsoar-payment-db-69c6161-20261016T022841Z, exact ID
 71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92,
@@ -2178,11 +2178,11 @@ from t to tr in that block (SELECT tr.tgname, JOIN ... tr.tgrelid/tr.tgfoid, pre
 NOT tr.tgisinternal). Keep the loop variable t and DROP TRIGGER operands unchanged.
 No repair source change or retry was made; permissions/locking/selection must remain
 identical. After approval, revise only rolled-back 063 and retry only 063, then suite.
-Do not rewrite successful 059–062. Do not execute tests before final permissions apply.
+Do not rewrite successful 059ï¿½062. Do not execute tests before final permissions apply.
 
 Evidence: /home/family/flexsoar-payment-db-69c6161-20261016T022841Z/
 migrations-retry-20261016T040807Z/ contains corrected.diff, corrected.sha256,
-060–063 inputs/logs, results.tsv, 063-failed-input.sql, 063-failed.sha256 and
+060ï¿½063 inputs/logs, results.tsv, 063-failed-input.sql, 063-failed.sha256 and
 063-rollback-catalog.txt. Earlier errors/evidence preserved. An initial WSL git lookup
 failed because the worktree .git points to a Windows path; no SQL ran in that attempt.
 Windows git inspected the commit; Linux diff compared the preserved failed input.
@@ -2202,7 +2202,7 @@ its SELECT/JOIN/predicate references in DO $triggers$. Loop record t, returned f
 selection predicates and DROP behavior are unchanged. Diff inspected. No other SQL
 source change. Reverified exact preserved container ID, network none, no published
 ports and three read-only audit mounts. Database/inet_server_addr/session_user were
-flexsoar_payment_v2_test/127.0.0.1/supabase_admin. Preflight confirmed 059–062 objects
+flexsoar_payment_v2_test/127.0.0.1/supabase_admin. Preflight confirmed 059ï¿½062 objects
 persist and 063 terms_guard/configuration_history absent. An initial preflight used
 an incorrect claim_operations(text,integer) catalog signature and refused BEFORE
 migration execution; correcting that evidence query to actual(uuid,integer) passed.
@@ -2216,7 +2216,7 @@ execution output and exit0. Original 063 failure/rollback evidence remains untou
 Tests actually executed: 03_completion_setup.sql COMMIT exit0; 10_contracts.sql
 FAILED exit3 at line7, before its substantive financial assertions. Its fixture
 inserts handles pv2-s-/pv2-b-/pv2-st- plus complete UUIDs, exceeding historical007's
-users_handle_format (3–24 characters). Entire10 transaction rolled back: zero users,
+users_handle_format (3ï¿½24 characters). Entire10 transaction rolled back: zero users,
 attempts and orders; zero successful checkpoints. 03's private acceptance schema
 remains committed. No manual completion records. No20/30, worker login, signed-storage,
 race, terminal, stale lease, expiry/relink or final gate execution. Gate NOT PASSED.
@@ -2242,4 +2242,3 @@ market failures. Webpack outcome recorded below. Application checks do not prove
 suite or full Solana-to-Postgres recovery acceptance.
 
 Final application validation: npx next build --webpack exit0,40/40 pages. Existing optional Privy @farcaster/mini-app-solana warning remains; no suppression/dependency edits. git diff --check passed. Only063 alias references and the two named documentation files are included in this task commit.
-
