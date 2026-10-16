@@ -3009,3 +3009,94 @@ without new payments; review explicit replacement protocol for original expired/
 uncertain operations. Do NOT resolve the preserved review/registration cases by
 clearing signatures, altering evidence or creating another purchase of those claims.
 Public funding, production cutover, operational authorities and redemption remain blocked.
+
+## 2026-10-16 — retained evidence and acknowledgement recovery milestone
+
+This milestone adds a restart-safe acknowledgement recovery path and fixes the
+PostgreSQL evidence transport discovered during actual isolated integration.
+
+- `lib/db/payment-v2-workers.ts` exports
+  `recoverCommittedClaimAcknowledgement(settler, verifier, eventId)`. It requires
+  distinct dedicated settler/verifier identities. For a committed corresponding
+  receipt it returns the existing result without requesting historical RPC data.
+  For an unconsumed acknowledgement, it reads retained verifier evidence, checks
+  the finalized transaction and exact acknowledgement instruction against the
+  immutable consumption context, then commits lifecycle state through the
+  verifier. Missing or never-verified history remains review-blocked; the path
+  does not sign, broadcast, or query an archive.
+- `lib/solana/v2-evidence.ts` now accepts the PostgreSQL `bytea` base64 wire form
+  (76-column line wrapping), normalizes it, and checks stored slot/block-time
+  values against the retained transaction metadata. This preserves exact bytes
+  and rejects malformed wrapping or metadata conflicts.
+- `lib/api/contract.ts` additively exports the recovery adapter; frozen contracts
+  are unchanged.
+- New forward migration `073_payment_v2_evidence_decision_column.sql` fixes a
+  confirmed PL/pgSQL name collision by qualifying decision-table columns. It was
+  applied transactionally only to `flexsoar_payment_v2_integration_test`.
+  Post-apply verification retained owner `payment_v2_owner`, verifier-only
+  execute grant plus owner/postgres grants, `search_path=pg_catalog`, and
+  SECURITY DEFINER. Migration SHA256:
+  `1103FB7B004AC6B2C15824CE591BD647B32BD0A86A6F92660A826DA3448677C8`.
+
+Actual integrated checks completed in the isolated helper used for the existing
+integration database: a held direct-sale acknowledgement was recovered from
+retained verified evidence and lifecycle state was consumed exactly once; a
+committed acknowledgement receipt was returned again without fresh chain history;
+a fresh seller-held escrow reached finalized release, acknowledgement and
+available customer claim; and dedicated settler/verifier sessions exercised the
+recovery contracts and cross-role denial. Database state showed one ACK evidence
+record and one lifecycle consumption for each completed sale. The customer
+status adapter returned the available state only after reconciliation. Restart
+recovery did not request a second payment or acknowledgement signature.
+
+Historical recovery distinctions remain strict:
+
+1. A corresponding committed receipt is returned after authorization and
+   correspondence checks without requiring historical RPC availability.
+2. Retained evidence that passed finalized-chain verification can be consumed
+   after a process restart; the verifier checks the original transaction bytes,
+   network and exact instruction.
+3. A signature or transaction for which verification never completed cannot be
+   promoted from a signature string, current ownership, or harness log.
+
+The archive adapter was exercised against a separately retained local snapshot
+while primary observation was simulated unavailable. The local ledger was not
+pruned. This proves adapter-path behavior only, not a production archive
+provider's retention or availability. The previously pruned acknowledgement has
+an authorized committed receipt path, but independent historical re-verification
+remains unavailable; no missing execution metadata was fabricated. The expired
+escrow and unresolved registration remain blocked, with no replacement operation.
+
+Verification: focused production tests `npx --no-install vitest run
+ tests/payment-context-evidence.test.ts tests/payment-v2.test.ts` — 2 files,
+58/58 passed. `npx tsc --noEmit` — exit 0. `npx next build --webpack` — exit 0,
+40 pages generated; the existing optional Privy
+`@farcaster/mini-app-solana` warning remains. `npm test` — 512 total, 507 passed,
+5 failed: two FSC copy assertions at `tests/invariants.test.ts:1901,1960`;
+one admin intake assertion encounters a mock lacking `.maybeSingle()`; two
+market empty-state assertions encounter a mock lacking `.in()`. No shared tests
+were changed. The focused market failure is consistent with the mock error, but
+its test-owner repair remains separate. These are not reported as a clean full
+suite. No Rust source changed, so Rust verification was not rerun.
+
+The isolated database's previous accepted `flexsoar_payment_v2_test` record
+remains unchanged at 37 checkpoints. The integration database's completed direct
+and escrow sales have one corresponding order/claim/accounting result; all
+operations remain synthetic and local. Database acceptance does not prove
+Postgres/Solana atomicity, production archive retention, browser recovery,
+redemption, production authority readiness, or launch safety. Public funding
+remains disabled. No OpenCode use.
+
+### Latest validation rerun (supersedes earlier flaky full-suite counts)
+
+On the final source state for this milestone: `npx tsc --noEmit` exited 0;
+`npm test` ran 520 tests with 518 passing and 2 failing, both the stale FSC
+copy expectations at `tests/invariants.test.ts:1901,1960`; and
+`npx next build --webpack` exited 0 with 40 pages generated. The build reports
+the unresolved optional `@farcaster/mini-app-solana` import from Privy and the
+existing missing-Stripe-secret diagnostic during static collection. Earlier
+full-suite runs intermittently showed three additional shared-test mock failures
+(admin `.maybeSingle()` and market `.in()`); they did not recur in this latest
+full run. The focused market control did reproduce `.in()` absence. Keep those
+mock issues with their owning test lane; no shared assertions or mock files were
+changed here.

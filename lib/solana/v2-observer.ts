@@ -3,6 +3,7 @@ import { decodePermit, equalBytes, encodePermit, validatePermit, type PermitV2 }
 import { base58Encode, base58Decode } from './base58';
 import { discriminator, v2Addresses } from './v2-sdk';
 import { TOKEN_PROGRAM_ID } from './sdk';
+import { acquireFinalizedEvidence,LocalFinalizedRpcSource,validateRetainedFinalizedEvidence,type FinalizedTransactionSource,type VerifiedTransactionEvidence } from './v2-evidence';
 export interface SaleSnapshot { address: string; permit: PermitV2; state: number; fundedSlot: number; fundedAt: bigint; outcomeSlot: number; decisionRevision: bigint }
 export function localRpc(url: string): string {
   const u = new URL(url);
@@ -68,7 +69,7 @@ export async function inspectV2Transaction(tx: V2Transaction, signature: string,
 }
 /** Read-only loopback observer. No signing, token creation, broadcasting or DB calls. */
 export class LocalV2Observer {
-  constructor(private url: string, readonly program: string, readonly genesis: string, private request: typeof fetch=fetch) {localRpc(url);new PublicKey(program);if(base58Decode(genesis).length!==32)throw new Error('invalid genesis identity');}
+  constructor(private url: string, readonly program: string, readonly genesis: string, private request: typeof fetch=fetch,private archive:FinalizedTransactionSource|null=null) {localRpc(url);new PublicKey(program);if(base58Decode(genesis).length!==32)throw new Error('invalid genesis identity');}
   private async rpc(method: string, params: unknown[]): Promise<unknown> {
     const response=await this.request(localRpc(this.url),{method:'POST',redirect:'error',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:'v2-observe',method,params})});
     if(!response.ok)throw new Error(`RPC HTTP ${response.status}`);
@@ -83,16 +84,27 @@ export class LocalV2Observer {
   }
   async evidence(s: SaleSnapshot, kind: OutcomeKind): Promise<{signature:string;slot:number}> {
     const slot=(kind==='funded'||kind==='direct')?s.fundedSlot:s.outcomeSlot;
-    // Retained slot indexes the original block even after account-history spam.
-    // An archival gap stays unresolved; it must not become a second payment.
-    const raw=await this.rpc('getBlock',[slot,{encoding:'jsonParsed',commitment:'finalized',transactionDetails:'full',rewards:false,maxSupportedTransactionVersion:0}]);
-    if(!raw||typeof raw!=='object'||!('transactions' in raw)||!Array.isArray(raw.transactions)||raw.transactions.length>10000)throw new Error('missing/oversized archival block');
-    for(const row of raw.transactions) {
-      if(row.meta?.err!==null)continue;
-      const signature=row.transaction?.signatures?.[0];if(typeof signature!=='string')continue;
-      try {await inspectV2Transaction({...row,slot} as V2Transaction,signature,s,kind);return {signature,slot};}
-      catch { /* Other instructions can touch this sale in the same slot. No evidence is consumed. */ }
+    // Read primary history first, then the explicitly configured archive. Each
+    // candidate is instruction/account checked; no absence is treated as proof.
+    const blocks:Array<{source:string;value:unknown}>=[];
+    try{blocks.push({source:'primary',value:await this.rpc('getBlock',[slot,{encoding:'jsonParsed',commitment:'finalized',transactionDetails:'full',rewards:false,maxSupportedTransactionVersion:0}])});}catch{}
+    if(this.archive?.getBlock)try{blocks.push({source:'archive',value:await this.archive.getBlock(slot)});}catch{}
+    const matches:Array<{signature:string;source:string}>=[];
+    for(const block of blocks){const raw=block.value;if(!raw||typeof raw!=='object'||!('transactions' in raw)||!Array.isArray(raw.transactions)||raw.transactions.length>10000)continue;
+      for(const row of raw.transactions){if(row.meta?.err!==null)continue;const signature=row.transaction?.signatures?.[0];if(typeof signature!=='string')continue;
+        try{await inspectV2Transaction({...row,slot} as V2Transaction,signature,s,kind);matches.push({signature,source:block.source});}
+        catch{ /* Other transactions in this slot are not evidence for this sale. */ }
+      }
     }
+    if(matches.length>1&&new Set(matches.map(m=>m.signature)).size>1)throw new Error('conflicting finalized primary/archive transaction matches');
+    if(matches.length)return {signature:matches[0].signature,slot};
     throw new Error('payment history unavailable; retain unresolved obligation');
+  }
+  async captureEvidence(s:SaleSnapshot,kind:OutcomeKind,attemptId:string,networkId:string):Promise<VerifiedTransactionEvidence>{
+    const found=await this.evidence(s,kind),primary=new LocalFinalizedRpcSource(this.url,'local-primary',this.request);
+    return acquireFinalizedEvidence(primary,this.archive,{networkId,genesis:this.genesis,program:this.program,signature:found.signature,subjectKind:'payment_event',subjectId:attemptId,subjectAction:kind},(tx,signature)=>inspectV2Transaction(tx,signature,s,kind));
+  }
+  async validateRetainedEvidence(value:Record<string,unknown>,s:SaleSnapshot,kind:OutcomeKind,attemptId:string,networkId:string):Promise<VerifiedTransactionEvidence>{
+    return validateRetainedFinalizedEvidence(value,{networkId,genesis:this.genesis,program:this.program,signature:String(value.signature??''),subjectKind:'payment_event',subjectId:attemptId,subjectAction:kind},(tx,signature)=>inspectV2Transaction(tx,signature,s,kind));
   }
 }

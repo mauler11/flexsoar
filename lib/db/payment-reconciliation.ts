@@ -2,11 +2,14 @@ import { decodePermit, encodePermit, equalBytes } from '@/lib/solana/protocol-v2
 import { base58Encode } from '@/lib/solana/base58';
 import type { SaleSnapshot, OutcomeKind } from '@/lib/solana/v2-observer';
 import { paymentRpc, type PaymentRpc } from './payment-v2';
-import { paymentWorkerIdentity } from './payment-v2-workers';
+import { paymentWorkerIdentity,paymentAttemptContext,persistVerifiedPaymentEvidence,readVerifiedPaymentEvidence } from './payment-v2-workers';
+import type { VerifiedTransactionEvidence } from '@/lib/solana/v2-evidence';
 export interface PaymentObserver {
   readonly genesis: string; readonly program: string;
   scan(): Promise<SaleSnapshot[]>;
   evidence(sale: SaleSnapshot, kind: OutcomeKind): Promise<{signature:string;slot:number}>;
+  captureEvidence(sale:SaleSnapshot,kind:OutcomeKind,attemptId:string,networkId:string):Promise<VerifiedTransactionEvidence>;
+  validateRetainedEvidence(value:Record<string,unknown>,sale:SaleSnapshot,kind:OutcomeKind,attemptId:string,networkId:string):Promise<VerifiedTransactionEvidence>;
 }
 /** Production orchestration with durable RPC receipts. No in-memory checkpoint,
  * signing, refund execution or notification delivery masquerades as recovery. */
@@ -33,15 +36,20 @@ export async function reconcilePayments(client: PaymentRpc, observer: PaymentObs
       if(typeof binding.permitHex!=='string'||!/^[a-f0-9]{1380}$/.test(binding.permitHex)||!Array.isArray(binding.appliedKinds)||binding.appliedKinds.some(k=>!['funded','direct','released','refunded'].includes(k)))throw new Error('invalid recovery binding');
       const expected=decodePermit(Buffer.from(binding.permitHex,'hex'));
       if(!equalBytes(encodePermit(expected),encodePermit(sale.permit))||base58Encode(expected.domain)!==observer.genesis||base58Encode(expected.program)!==observer.program)throw new Error('immutable attempt/chain mismatch');
+      const attemptContext=await paymentAttemptContext(client,base58Encode(expected.attempt),observer.genesis,observer.program);
+      if(typeof attemptContext.attemptId!=='string'||!/^[0-9a-f-]{36}$/i.test(attemptContext.attemptId)||typeof attemptContext.networkId!=='string'||attemptContext.permitHex!==binding.permitHex||attemptContext.genesis!==observer.genesis||attemptContext.program!==observer.program||attemptContext.sale!==sale.address)throw new Error('verifier attempt context mismatch');
       const kinds: OutcomeKind[]=sale.permit.mode===1?['direct']:sale.state===4?['funded','released']:sale.state===5?['funded','refunded']:['funded'];
       for(const kind of kinds){
         if(binding.appliedKinds.includes(kind))continue;
-        const evidence=await observer.evidence(sale,kind);
+        const stored=await readVerifiedPaymentEvidence(client,'payment_event',attemptContext.attemptId,kind);
+        const evidence=stored?await observer.validateRetainedEvidence(stored,sale,kind,attemptContext.attemptId,String(attemptContext.networkId)):
+          await observer.captureEvidence(sale,kind,attemptContext.attemptId,String(attemptContext.networkId));
+        const evidenceId=stored&&typeof stored.id==='string'?stored.id:await persistVerifiedPaymentEvidence(client,evidence);
         const expectedSlot=kind==='funded'||kind==='direct'?sale.fundedSlot:sale.outcomeSlot;
-        if(evidence.slot!==expectedSlot)throw new Error('verified evidence slot mismatch');
+        if(evidence.slot!==expectedSlot||evidence.signature!==evidence.parsedRpcResult.transaction.signatures[0]||evidence.networkId!==String(attemptContext.networkId))throw new Error('verified evidence slot/identity mismatch');
         const event=await paymentRpc(client,'fn_payment_v2_record_verified_event',{
           p_event:{genesis:observer.genesis,program:observer.program,sale:sale.address,attempt:base58Encode(expected.attempt),kind,
-            signature:evidence.signature,slot:evidence.slot,fundedAtSeconds:String(sale.fundedAt),permitHex:binding.permitHex,decisionRevision:String(kind==='funded'||kind==='direct'?0:sale.decisionRevision),finality:'finalized'},
+            signature:evidence.signature,slot:evidence.slot,fundedAtSeconds:String(sale.fundedAt),permitHex:binding.permitHex,decisionRevision:String(kind==='funded'||kind==='direct'?0:sale.decisionRevision),finality:'finalized',evidenceId},
         });
         if(typeof event!=='string'||!event)throw new Error('missing verified event ID');
         await paymentRpc(settler,'fn_payment_v2_reconcile_event',{p_event_id:event});

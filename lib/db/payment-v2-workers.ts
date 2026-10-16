@@ -1,6 +1,11 @@
 /** Typed contracts for dedicated database-login adapters. No service-role fallback,
  * signing, network sends, or notification delivery. Provisioning remains required. */
 import { paymentRpc, type PaymentRpc, type PaymentOperation } from './payment-v2';
+import type { VerifiedTransactionEvidence } from '@/lib/solana/v2-evidence';
+import { validateRetainedFinalizedEvidence } from '@/lib/solana/v2-evidence';
+import { claimAcknowledgementInstruction } from '@/lib/solana/v2-context';
+import { inspectAuthorityTransaction } from '@/lib/solana/v2-authority-observer';
+import { base58Decode } from '@/lib/solana/base58';
 function uuid(value:string):void { if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))throw new Error('durable UUID required'); }
 function object(value:unknown):Record<string,unknown> {if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('invalid payment context');return value as Record<string,unknown>;}
 export interface PaymentSaleTerms {id:string;saleAddress:string;escrowAddress:string;totalUnits:string;fxSnapshot:Record<string,unknown>;validFrom:string;expiresAt:string}
@@ -15,6 +20,58 @@ export async function authorizePaymentAttempt(issuer:PaymentRpc,attemptId:string
 }
 export async function paymentOperationContext(executor:PaymentRpc,operation:Pick<PaymentOperation,'id'|'leaseId'>):Promise<Record<string,unknown>>{
  uuid(operation.id);uuid(operation.leaseId);return object(await paymentRpc(executor,'fn_payment_v2_operation_context',{p_operation_id:operation.id,p_lease_id:operation.leaseId}));
+}
+export async function paymentIssuerContext(issuer:PaymentRpc,saleId:string,action:'open_sale'|'revoke_sale'):Promise<Record<string,unknown>>{
+ uuid(saleId);return object(await paymentRpc(issuer,'fn_payment_v2_issuer_context',{p_sale_id:saleId,p_action:action}));
+}
+export async function paymentVerifierContext(verifier:PaymentRpc,kind:'attempt'|'decision'|'lifecycle',subjectId:string):Promise<Record<string,unknown>>{
+ uuid(subjectId);return object(await paymentRpc(verifier,'fn_payment_v2_verifier_context',{p_kind:kind,p_subject_id:subjectId}));
+}
+export async function paymentAttemptContext(verifier:PaymentRpc,attempt:string,genesis:string,program:string):Promise<Record<string,unknown>>{
+ if(!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(attempt)||!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(genesis)||!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(program))throw new Error('immutable chain attempt context required');
+ return object(await paymentRpc(verifier,'fn_payment_v2_attempt_context',{p_attempt:attempt,p_genesis:genesis,p_program:program}));
+}
+export async function paymentAcknowledgementContext(settler:PaymentRpc,eventId:string):Promise<Record<string,unknown>>{
+ uuid(eventId);return object(await paymentRpc(settler,'fn_payment_v2_ack_context',{p_event_id:eventId}));
+}
+/** Reconciles a claim acknowledgement from its already retained, previously
+ * verified finalized transaction. This path never broadcasts or fetches history.
+ * If verification evidence was never retained, it remains a manual review case. */
+export async function recoverCommittedClaimAcknowledgement(settler:PaymentRpc,verifier:PaymentRpc,eventId:string):Promise<{kind:'receipt';receipt:Record<string,unknown>}|{kind:'reconciled';signature:string;claim:'available'|'quarantined'}>{
+ uuid(eventId);
+ if(settler===verifier)throw new Error('Dedicated settler and verifier connections required');
+ const [settlerLogin,verifierLogin]=await Promise.all([
+  paymentWorkerIdentity(settler,'payment_v2_settler'),paymentWorkerIdentity(verifier,'payment_v2_verifier'),
+ ]);
+ if(settlerLogin===verifierLogin)throw new Error('Dedicated settler and verifier must use distinct database logins');
+ const context=await paymentAcknowledgementContext(settler,eventId);
+ if(context.eventId!==eventId||typeof context.saleId!=='string'||typeof context.generation!=='string'||typeof context.revision!=='string'||typeof context.sale!=='string'||typeof context.genesis!=='string'||typeof context.program!=='string'||typeof context.networkId!=='string'||typeof context.cardCommitment!=='string'||!['direct','released','refunded'].includes(String(context.kind)))throw new Error('invalid committed acknowledgement context');
+ if(context.receipt!==null&&context.receipt!==undefined){
+  const receipt=object(context.receipt);
+  if(receipt.saleId!==context.saleId||receipt.kind!=='acknowledged'||receipt.outcome!==context.kind||typeof receipt.signature!=='string'||!/^[1-9A-HJ-NP-Za-km-z]{80,96}$/.test(receipt.signature))throw new Error('conflicting committed acknowledgement receipt');
+  return {kind:'receipt',receipt};
+ }
+ const stored=await readVerifiedPaymentEvidence(verifier,'lifecycle',context.saleId,'acknowledged');
+ if(!stored)throw new Error('PAYMENT_V2_ACK_HISTORY_UNVERIFIED_REVIEW_REQUIRED');
+ if(typeof stored.signature!=='string'||typeof stored.id!=='string'||typeof stored.slot!=='string'||typeof stored.blockTime!=='string')throw new Error('invalid retained acknowledgement evidence');
+ const expected={networkId:context.networkId,genesis:context.genesis,program:context.program,signature:stored.signature,subjectKind:'lifecycle' as const,subjectId:context.saleId,subjectAction:'acknowledged'};
+ const instruction=await claimAcknowledgementInstruction(context);
+ const evidence=await validateRetainedFinalizedEvidence(stored,expected,(transaction,signature)=>inspectAuthorityTransaction(transaction,signature,instruction));
+ const cardCommitment=Buffer.from(base58Decode(context.cardCommitment)).toString('hex');
+ if(cardCommitment.length!==64||evidence.slot!==Number(stored.slot)||evidence.blockTime!==Number(stored.blockTime))throw new Error('retained acknowledgement metadata mismatch');
+ await recordPaymentLifecycle(verifier,{saleId:context.saleId,kind:'acknowledged',finality:'finalized',sale:context.sale,genesis:context.genesis,program:context.program,generation:context.generation,revision:context.revision,outcome:context.kind,cardCommitment,signature:evidence.signature,slot:evidence.slot,executedAtSeconds:String(evidence.blockTime),evidenceId:stored.id});
+ return {kind:'reconciled',signature:evidence.signature,claim:context.kind==='refunded'?'quarantined':'available'};
+}
+/** Persist only after the configured finalized observer checked this exact
+ * transaction against an immutable context. The DB digest is integrity evidence,
+ * not an independent chain-finality oracle. */
+export async function persistVerifiedPaymentEvidence(verifier:PaymentRpc,evidence:VerifiedTransactionEvidence):Promise<string>{
+ uuid(evidence.networkId);uuid(evidence.subjectId);
+ if(evidence.formatVersion!==1||evidence.finality!=='finalized'||!['primary','archive'].includes(evidence.sourceKind)||!/^[-A-Za-z0-9._:]{1,96}$/.test(evidence.sourceLabel)||!/^([0-9a-f]{64})$/.test(evidence.transactionDigest)||!/^([0-9a-f]{64})$/.test(evidence.messageDigest)||!evidence.parsedRpcResult||typeof evidence.parsedRpcResult!=='object')throw new Error('invalid verified evidence envelope');
+ const id=await paymentRpc(verifier,'fn_payment_v2_store_chain_evidence',{p_evidence:evidence});if(typeof id!=='string')throw new Error('missing durable evidence id');uuid(id);return id;
+}
+export async function readVerifiedPaymentEvidence(verifier:PaymentRpc,subjectKind:string,subjectId:string,subjectAction:string):Promise<Record<string,unknown>|null>{
+ uuid(subjectId);const value=await paymentRpc(verifier,'fn_payment_v2_read_chain_evidence',{p_subject_kind:subjectKind,p_subject_id:subjectId,p_subject_action:subjectAction});return value===null?null:object(value);
 }
 /** Reports transport state only AFTER stageSignedOperation has durably stored the
  * complete envelope. Database rejects signature-only submission. Unknown/submitted

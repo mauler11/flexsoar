@@ -41,10 +41,18 @@ export function validatePermit(p: PermitV2, executionTime: bigint): void {
   if (equalBytes(p.buyer, p.seller) || equalBytes(p.buyer, p.treasury) || equalBytes(p.seller, p.treasury)) throw new Error('payment roles overlap');
 }
 export function equalBytes(a: Uint8Array, b: Uint8Array): boolean { return a.length === b.length && a.every((v, i) => v === b[i]); }
+/** Deterministic Card-acknowledgement bytes, versioned independently of JSON key order. */
+export interface ConsumptionBindingV1 { networkId:string;eventId:string;saleId:string;attemptId:string;orderId:string;kind:'funded'|'direct'|'released'|'refunded';genesis:Uint8Array;proofDigest:Uint8Array }
+export function encodeConsumptionBindingV1(c:ConsumptionBindingV1):Uint8Array {
+  const uuid=(value:string)=>{if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))throw new Error('invalid consumption UUID');return Uint8Array.from(Buffer.from(value.replaceAll('-',''),'hex'));};
+  if(!['funded','direct','released','refunded'].includes(c.kind)||c.genesis.length!==32||c.proofDigest.length!==32)throw new Error('invalid consumption binding');
+  return Buffer.concat([Buffer.from('FLEXSOAR-CONSUMPTION-V1\0','utf8'),Buffer.from(uuid(c.networkId)),Buffer.from(uuid(c.eventId)),Buffer.from(uuid(c.saleId)),Buffer.from(uuid(c.attemptId)),Buffer.from(uuid(c.orderId)),Buffer.from(c.kind,'utf8'),Buffer.from(c.genesis),Buffer.from(c.proofDigest)]);
+}
+export async function consumptionDigestV1(c:ConsumptionBindingV1):Promise<Uint8Array>{return new Uint8Array(await crypto.subtle.digest('SHA-256',Buffer.from(encodeConsumptionBindingV1(c))));}
 /** Transaction cosigning, not an offline detached permit: issuer and buyer sign
  * the instruction containing these bytes. Funding remains disabled in app. */
 export async function permitDigest(p: PermitV2): Promise<Uint8Array> {
-  return new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(encodePermit(p))));
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', Buffer.from(encodePermit(p))));
 }
 export interface AttestationV2 { sale: Uint8Array; attempt: Uint8Array; pair: Uint8Array; evidence: Uint8Array; revision: bigint; action: number }
 export function encodeAttestation(a: AttestationV2): Uint8Array {

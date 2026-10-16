@@ -11,6 +11,7 @@ import { dispatchReview, PAYMENT_POLICY_V1, paymentPolicyDigest } from '../lib/s
 import { ownPaymentAttempts, recordPaymentDecision, initiatePaymentAttempt, FUNDING_AVAILABLE, type PaymentRpc } from '../lib/db/payment-v2';
 import { reconcilePayments, type PaymentObserver } from '../lib/db/payment-reconciliation';
 import { SolanaBuyPanel } from '../components/market/SolanaBuyPanel';
+import type { VerifiedTransactionEvidence } from '../lib/solana/v2-evidence';
 
 const b=(n:number)=>new Uint8Array(32).fill(n),key=(n:number)=>new PublicKey(b(n)).toBase58();
 function vector(): PermitV2 {return {
@@ -108,26 +109,30 @@ describe('actual v2 instruction and outcome verifier',()=>{
   it('does not invent evidence when original archival block is unavailable',async()=>{
     const {s}=await fixture();const rpc=vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({result:null})));
     const observer=new LocalV2Observer('http://127.0.0.1:8899',new PublicKey(s.permit.program).toBase58(),base58Encode(s.permit.domain),rpc);
-    await expect(observer.evidence(s,'funded')).rejects.toThrow('archival');
+    await expect(observer.evidence(s,'funded')).rejects.toThrow('history unavailable');
   });
 });
 describe('durable production recovery orchestration (RPC doubles are NOT Postgres proofs)',()=>{
   it('requires separately provisioned verifier and settler connections before observation',async()=>{
-    const client={rpc:vi.fn()},observer:PaymentObserver={genesis:'g',program:'p',scan:vi.fn(),evidence:vi.fn()};
+    const client={rpc:vi.fn()},observer:PaymentObserver={genesis:'g',program:'p',scan:vi.fn(),evidence:vi.fn(),captureEvidence:vi.fn(),validateRetainedEvidence:vi.fn()};
     await expect(reconcilePayments(client,observer)).rejects.toThrow('Dedicated verifier');
     await expect(reconcilePayments(client,observer,20,client)).rejects.toThrow('Dedicated verifier');
     expect(observer.scan).not.toHaveBeenCalled();expect(client.rpc).not.toHaveBeenCalled();
   });
   async function setup(kind:OutcomeKind='released'){
-    const {s}=await fixture(kind);const applied:string[]=[];const rpc=vi.fn<PaymentRpc['rpc']>().mockImplementation(async(name,args)=>{
+    const {s}=await fixture(kind);const applied:string[]=[],retained=new Map<string,Record<string,unknown>>();let eventKind='funded';const rpc=vi.fn<PaymentRpc['rpc']>().mockImplementation(async(name,args)=>{
       if(name==='fn_payment_v2_worker_identity')return {data:{login:String(args.p_required_role)+'-login',role:args.p_required_role,superuser:false},error:null};
       if(name==='fn_payment_v2_begin_scan')return {data:{leaseId:'lease',afterAddress:null},error:null};
       if(name==='fn_payment_v2_finish_scan')return {data:null,error:null};
       if(name==='fn_payment_v2_recovery_binding')return {data:{permitHex:Buffer.from(encodePermit(s.permit)).toString('hex'),appliedKinds:[...applied]},error:null};
-      if(name==='fn_payment_v2_record_verified_event')return {data:(args.p_event as {kind:string}).kind,error:null};
-      if(name==='fn_payment_v2_reconcile_event'){applied.push(String(args.p_event_id));return {data:'order',error:null};}throw new Error('unexpected RPC');
+      if(name==='fn_payment_v2_attempt_context')return {data:{attemptId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',networkId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',permitHex:Buffer.from(encodePermit(s.permit)).toString('hex'),genesis:base58Encode(s.permit.domain),program:new PublicKey(s.permit.program).toBase58(),sale:s.address},error:null};
+      if(name==='fn_payment_v2_read_chain_evidence')return {data:retained.get(String(args.p_subject_action))??null,error:null};
+      if(name==='fn_payment_v2_store_chain_evidence'){const evidence=args.p_evidence as Record<string,unknown>;eventKind=String(evidence.subjectAction);retained.set(eventKind,{...evidence,id:'cccccccc-cccc-4ccc-8ccc-cccccccccccc'});return {data:'cccccccc-cccc-4ccc-8ccc-cccccccccccc',error:null};}
+      if(name==='fn_payment_v2_record_verified_event'){eventKind=String((args.p_event as {kind:string}).kind);return {data:'dddddddd-dddd-4ddd-8ddd-dddddddddddd',error:null};}
+      if(name==='fn_payment_v2_reconcile_event'){applied.push(eventKind);return {data:'order',error:null};}throw new Error('unexpected RPC');
     });
-    const observer:PaymentObserver={program:new PublicKey(s.permit.program).toBase58(),genesis:base58Encode(s.permit.domain),scan:async()=>[s],evidence:vi.fn(async(_s,k)=>({signature:k,slot:k==='funded'||k==='direct'?123:125}))};return {rpc,observer,applied,s};
+    const evidence=(k:OutcomeKind):VerifiedTransactionEvidence=>({formatVersion:1,subjectKind:'payment_event',subjectId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',subjectAction:k,networkId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',genesis:base58Encode(s.permit.domain),program:new PublicKey(s.permit.program).toBase58(),signature:k,slot:k==='funded'||k==='direct'?123:125,blockTime:1234,finality:'finalized',sourceKind:'primary',sourceLabel:'offline-test',transactionBase64:'AA==',transactionDigest:'a'.repeat(64),messageDigest:'b'.repeat(64),rpcResult:{transaction:['AA==','base64'],slot:123,blockTime:1234,meta:{err:null}},parsedRpcResult:{transaction:{signatures:[k],message:{accountKeys:[],instructions:[]}},slot:123,blockTime:1234,meta:{err:null}}});
+    const observer:PaymentObserver={program:new PublicKey(s.permit.program).toBase58(),genesis:base58Encode(s.permit.domain),scan:async()=>[s],evidence:vi.fn(async(_s,k)=>({signature:k,slot:k==='funded'||k==='direct'?123:125})),captureEvidence:vi.fn(async(_s,k)=>evidence(k)),validateRetainedEvidence:vi.fn(async(value)=>value as unknown as VerifiedTransactionEvidence)};return {rpc,observer,applied,s};
   }
   it.each(['funded','released','refunded','direct'] as const)('restores %s after browser/process restart; retry consumes no new money',async kind=>{
     const {rpc,observer}=await setup(kind);const one=await reconcilePayments({rpc},observer,20,{rpc});expect(one.failed).toEqual([]);expect(one.processed).toBe(kind==='released'||kind==='refunded'?2:1);

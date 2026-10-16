@@ -315,3 +315,48 @@ Only run when the original operation is available for its dedicated lease. Norma
 observe mode deliberately fails at the known pruned ACK; do not reinterpret that
 exit1 as acceptance. Updated retention startup was actually exercised, not merely
 prepared. No new Rust compilation was needed because the program source is unchanged.
+
+## 2026-10-16 retained-evidence / acknowledgement recovery run
+
+The authorized integration database received forward migration
+`073_payment_v2_evidence_decision_column.sql` only. It qualifies the decision
+columns that collided with the PL/pgSQL `action` variable; owner, ACL, search
+path and SECURITY DEFINER state were checked after application. SHA256:
+`1103FB7B004AC6B2C15824CE591BD647B32BD0A86A6F92660A826DA3448677C8`.
+The accepted `flexsoar_payment_v2_test` database and its 37-checkpoint record
+were read-only verified and not modified.
+
+Production adapters now recover acknowledgement lifecycle consumption from
+retained, finalized verifier evidence. Already committed receipts return after
+correspondence checks without fetching historical chain data. Never-verified
+history remains blocked. PostgreSQL base64 line wrapping is normalized only
+after strict structural checks, then the stored bytes and slot/block-time
+metadata are compared with the transaction evidence.
+
+Actual isolated scenarios covered retained-evidence lifecycle recovery,
+receipt-only recovery without fresh primary history, seller-held release through
+acknowledgement, distinct settler/verifier identities, and cross-role denial.
+The previously pruned acknowledgement could return its already committed
+receipt, but could not be independently reverified: the missing old block was
+not synthesized. A separate local archive adapter was exercised while primary
+observation was simulated unavailable; the ledger itself was not pruned, so no
+provider-retention claim follows. The expired escrow and unresolved registration
+remain review-blocked.
+
+Application validation: focused payment suites 58/58 passed; typecheck exit 0;
+webpack build exit 0 (40 pages; optional Privy mini-app package warning).
+`npm test` was not clean: 507/512 passed. Two stale FSC-copy expectations and
+three market/admin mock failures remain in `tests/invariants.test.ts`; the admin
+mock lacks `.maybeSingle()`, and the market mock lacks `.in()`. No shared
+assertions were edited. Database tests from this run are integrated scenarios,
+not another execution of the 37-checkpoint historical acceptance suite. No Rust
+source changed. Public funding remains disabled.
+
+Latest standard validation on this source state supersedes earlier flaky totals:
+`npx tsc --noEmit` exit 0; `npm test` 518/520 (the two remaining failures are
+FSC-copy expectations at `tests/invariants.test.ts:1901,1960`);
+`npx next build --webpack` exit 0, 40 pages generated. Optional Privy
+`@farcaster/mini-app-solana` import and missing-Stripe-secret static-collection
+message remain. Earlier runs intermittently showed the admin/market mock errors
+(described above); they were not present in this latest full run. The focused
+market control still reproduced its `.in()` mock deficiency.
