@@ -2153,3 +2153,44 @@ no suppression or dependency change. git diff --check exited0. Final Docker insp
 still shows exact ID running, networknone, PortBindings{}. Next action is review of
 one-line unapplied060 correction and explicit permission to retry060, then061–063 on
 success.059 must remain untouched. No database-suite or full-chain acceptance claimed.
+
+## Isolated execution update: 060–062 committed; 063 blocked (2026-10-16)
+
+Reverified container flexsoar-payment-db-69c6161-20261016T022841Z, exact ID
+71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92,
+network none, no published ports, and exactly three read-only audit mounts.
+Internal connection: flexsoar_payment_v2_test / 127.0.0.1 / supabase_admin.
+Reviewed bbbf315: executable diff only parenthesizes the CASE expression in 060.
+059 remained committed; require_role and prepare_sale were absent before retry.
+Corrected diff, hash, per-stage input and results preserved outside the repository.
+
+Retried ONLY 060, then 061 and 062: each COMMIT, psql exit 0. No historical migration
+or 059 was rerun. Unique completed manifest files now 74/75.
+063 failed, psql exit 3 at line 130: record "t" is not assigned yet. Its DO $triggers$
+block declares record t and also aliases pg_trigger as t. PL/pgSQL resolves t.tgname
+to the unassigned record, preventing the query from running. Entire 063 rolled back:
+terms_guard() and configuration_history absent; both legacy automatic triggers remain.
+Networks and attempts remain zero. 060 require_role and 061 reconcile_event persist.
+
+STOP: this is PL/pgSQL variable/alias name resolution, not a SQL grammar error.
+Proposed narrowly scoped repair for review: rename only the pg_trigger query alias
+from t to tr in that block (SELECT tr.tgname, JOIN ... tr.tgrelid/tr.tgfoid, predicate
+NOT tr.tgisinternal). Keep the loop variable t and DROP TRIGGER operands unchanged.
+No repair source change or retry was made; permissions/locking/selection must remain
+identical. After approval, revise only rolled-back 063 and retry only 063, then suite.
+Do not rewrite successful 059–062. Do not execute tests before final permissions apply.
+
+Evidence: /home/family/flexsoar-payment-db-69c6161-20261016T022841Z/
+migrations-retry-20261016T040807Z/ contains corrected.diff, corrected.sha256,
+060–063 inputs/logs, results.tsv, 063-failed-input.sql, 063-failed.sha256 and
+063-rollback-catalog.txt. Earlier errors/evidence preserved. An initial WSL git lookup
+failed because the worktree .git points to a Windows path; no SQL ran in that attempt.
+Windows git inspected the commit; Linux diff compared the preserved failed input.
+
+Database suite: NONE executed. Dedicated workers, signed storage, concurrent sessions,
+terminal consumption, stale leases, expiry/relink and 34-checkpoint final gate NOT RUN.
+No completion checkpoints or acceptance record created. Application checks not rerun
+this documentation-only turn; preceding bbbf315 results were tsc 0, webpack 0, npm test
+488 passed/2 known FSC-copy failures of 490. These do not establish DB correctness.
+Funding remains disabled. No dependency or implementation change, no shared DB access,
+public-chain activity, push or deployment. OpenCode not used.

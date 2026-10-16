@@ -425,3 +425,15 @@ and03 explicitly as above. Do not run the repository's migration directory via a
 automatic reset, wildcard runner or default seeds. No database currently exists that
 this session has established as ready, and no single install command alone can prove
 the required isolated schema identity.
+## Latest execution checkpoint (2026-10-16; supersedes earlier stop notes)
+
+Corrected 060, unchanged 061 and 062 committed successfully in the preserved isolated
+container. 059 and historical files were not rerun. 74/75 manifest files completed.
+063 rolled back on line 130: unassigned record t, caused by collision between its
+DO $triggers$ record variable and pg_trigger query alias. No tests were executed.
+The 34-checkpoint gate remains NOT RUN. Do not start tests with 063 unapplied.
+Next approval needed: rename only that query alias to tr, preserving the selected
+triggers and loop/DROP behavior; then retry 063 only. This name-resolution repair
+was not treated as authorized by the SQL syntax-only exception. See latest handoff
+for full failure, rollback evidence and proposed correction. Successful 059–062
+must not be edited/reapplied. Existing final acceptance command remains unchanged.
