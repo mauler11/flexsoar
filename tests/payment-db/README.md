@@ -1,10 +1,11 @@
-# Payment-v2 database suite: NOT RUN
+# Payment-v2 database suite: BLOCKED at first fixture
 
-Payment database tests remain NOT RUN. The reviewed Auth AND listing-overload repairs
-committed. All70 historical files through058 and payment records059 have now applied:
-71 completed files.060 failed and rolled back;061â€“063 and this test directory have not
-executed. A one-line060 syntax correction is drafted but NOT executed. TypeScript tests
-do not load these files; passing app tests prove no database permission/lock guarantee.
+All 75 reviewed migration files have committed in the preserved isolated database.
+03_completion_setup.sql committed; 10_contracts.sql failed and rolled back on the
+historical handle-length constraint. Zero acceptance checkpoints are recorded.
+Remaining scenarios and the 34-checkpoint gate are NOT RUN. See the latest execution
+section below for evidence and the proposed fixture repair. Earlier sections retain
+the chronological failure history and do not supersede this checkpoint.
 
 ## Current stop: payment060 parser error after approved listing repair
 
@@ -435,5 +436,21 @@ The 34-checkpoint gate remains NOT RUN. Do not start tests with 063 unapplied.
 Next approval needed: rename only that query alias to tr, preserving the selected
 triggers and loop/DROP behavior; then retry 063 only. This name-resolution repair
 was not treated as authorized by the SQL syntax-only exception. See latest handoff
-for full failure, rollback evidence and proposed correction. Successful 059–062
+for full failure, rollback evidence and proposed correction. Successful 059ï¿½062
 must not be edited/reapplied. Existing final acceptance command remains unchanged.
+
+## Latest actual execution: 063 committed, fixture length blocker
+
+All75 manifest files have committed, including the approved alias-only063 correction.
+03_completion_setup committed.10_contracts failed at fixture creation: seller/buyer/
+staff handles exceed historical users_handle_format's24-character limit. Its complete
+transaction rolled back (zero users/orders/attempts), and acceptance has ZERO markers.
+No remaining tests, dedicated logins, concurrency scenarios or34-checkpoint gate ran.
+Migration completion is NOT database acceptance. Earlier NOT RUN notes above describe
+prior checkpoints, not the current03/10 execution.
+
+Proposed next approval: shorten ONLY synthetic handle construction in01_fixtures and
+50_races_setup (also has race- plus full UUID), retaining UUID identities, constraints
+and expectations. Then retry10 ONLY and continue20 onward. Do not rerun committed03,
+059ï¿½063 or historical migrations. This fixture-data repair was NOT made/executed under
+the syntax/alias-only exception. Full evidence and precise paths are in latest handoff.

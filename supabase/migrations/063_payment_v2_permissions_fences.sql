@@ -123,8 +123,8 @@ END $fences$;
 -- Remove automatic receipt/authentication/unlock and generic first-order intake behavior.
 -- Historical rows are preserved. Every old vault lifecycle function is retired below.
 DO $triggers$ DECLARE t record;BEGIN
- FOR t IN SELECT c.relname,t.tgname FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_proc f ON f.oid=t.tgfoid
- WHERE c.relnamespace='public'::regnamespace AND NOT t.tgisinternal AND f.proname IN('trg_open_vault_intake','trg_hold_card_pending_vault') LOOP
+ FOR t IN SELECT c.relname,tr.tgname FROM pg_trigger tr JOIN pg_class c ON c.oid=tr.tgrelid JOIN pg_proc f ON f.oid=tr.tgfoid
+ WHERE c.relnamespace='public'::regnamespace AND NOT tr.tgisinternal AND f.proname IN('trg_open_vault_intake','trg_hold_card_pending_vault') LOOP
   EXECUTE format('DROP TRIGGER %I ON public.%I',t.tgname,t.relname);
  END LOOP;
 END $triggers$;

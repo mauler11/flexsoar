@@ -2194,3 +2194,52 @@ this documentation-only turn; preceding bbbf315 results were tsc 0, webpack 0, n
 488 passed/2 known FSC-copy failures of 490. These do not establish DB correctness.
 Funding remains disabled. No dependency or implementation change, no shared DB access,
 public-chain activity, push or deployment. OpenCode not used.
+
+## Execution update: 063 committed; first fixture blocked (2026-10-16)
+
+The explicitly approved 063 correction changes ONLY pg_trigger alias t to tr and
+its SELECT/JOIN/predicate references in DO $triggers$. Loop record t, returned fields,
+selection predicates and DROP behavior are unchanged. Diff inspected. No other SQL
+source change. Reverified exact preserved container ID, network none, no published
+ports and three read-only audit mounts. Database/inet_server_addr/session_user were
+flexsoar_payment_v2_test/127.0.0.1/supabase_admin. Preflight confirmed 059–062 objects
+persist and 063 terms_guard/configuration_history absent. An initial preflight used
+an incorrect claim_operations(text,integer) catalog signature and refused BEFORE
+migration execution; correcting that evidence query to actual(uuid,integer) passed.
+Both preflight logs retained; no application behavior was changed by this correction.
+
+063 retry COMMIT exit0. ALL75 manifest migrations now committed. No successful stage
+was rerun. Evidence at /home/family/flexsoar-payment-db-69c6161-20261016T022841Z/
+063-retry-20261016T041422Z/ includes isolation, corrected input/diff/hash, preflight,
+execution output and exit0. Original 063 failure/rollback evidence remains untouched.
+
+Tests actually executed: 03_completion_setup.sql COMMIT exit0; 10_contracts.sql
+FAILED exit3 at line7, before its substantive financial assertions. Its fixture
+inserts handles pv2-s-/pv2-b-/pv2-st- plus complete UUIDs, exceeding historical007's
+users_handle_format (3–24 characters). Entire10 transaction rolled back: zero users,
+attempts and orders; zero successful checkpoints. 03's private acceptance schema
+remains committed. No manual completion records. No20/30, worker login, signed-storage,
+race, terminal, stale lease, expiry/relink or final gate execution. Gate NOT PASSED.
+
+STOP: fixing synthetic data length is neither SQL syntax nor a variable/alias
+collision. Proposed review repair: in01_fixtures.sql use short role prefixes plus
+first20 hex UUID characters (remove hyphens) for seller/buyer/staff handles, retaining
+full UUID primary/auth identities and all constraints/assertions. The same defect is
+present in50_races_setup.sql's race- plus UUID handle; use the same bounded scheme
+there too. No fixture repair was made or executed. Do not weaken historical007.
+After explicit approval, retry10 only, then remaining suite; do not rerun03 or any
+migration. Test fixtures have not established any settlement/permission guarantee.
+
+Suite evidence: suite-20261016T041435Z/ contains03/10 input/output/exits, preserved
+01-fixtures-failed.sql, failed-input.sha256 and rollback-catalog.txt. No environment
+reset, broad grants, constraint changes or production/shared connection. Funding const
+remains false, zero enabled networks. Human package/lock hashes unchanged; exported
+diff preserved. OpenCode not used. No new TypeScript exports or contract signatures.
+
+Application verification this turn: npx tsc --noEmit exit0; npm test (JSON reporter)
+488 passed/2 failed/490 total, ONLY unchanged known FSC-copy assertions. No additional
+market failures. Webpack outcome recorded below. Application checks do not prove SQL
+suite or full Solana-to-Postgres recovery acceptance.
+
+Final application validation: npx next build --webpack exit0,40/40 pages. Existing optional Privy @farcaster/mini-app-solana warning remains; no suppression/dependency edits. git diff --check passed. Only063 alias references and the two named documentation files are included in this task commit.
+
