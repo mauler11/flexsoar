@@ -157,3 +157,5 @@ Payment security v2 local verification (no installation performed by agent):
   reviewed locally built .so. No default production wallets or public devnet.
 - No new npm package is needed by v2 SDK/harness; existing @solana/web3.js suffices.
   Real Postgres integration awaits HUMAN-authored schema in an isolated project.
+
+- PostgreSQL client psql 17.11 (SYSTEM EXECUTABLE, not an npm package) -- required by dedicated payment worker transport. Already available in the pinned isolated helper image; provision explicitly for a future worker runtime. No manifest/lockfile installation or Vercel worker activation performed.

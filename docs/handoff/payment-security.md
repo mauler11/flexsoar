@@ -2605,3 +2605,155 @@ Do not report full app suite passed. Webpack completion below. SQL acceptance is
 independent of these unresolved app test failures. New production TS exports:none.
 
 Final application completion: npx next build --webpack exit0,40/40 pages; optional Privy @farcaster/mini-app-solana warning remains. git diff --check exit0. Full app test count remains486 passed/4 failed; isolated market2/2 passed. Database37-checkpoint acceptance COMMITTED independently. No claim of production payment readiness.
+
+## Integration transport/topology work; full payment scenarios BLOCKED (2026-10-16)
+
+Started at1c8f88ba2b7c531cc399c90a4829dd58a8571590, track/payment-security, no main
+divergence. Human manifest/lock pair and untracked exported diff preserved. Read rules,
+current protocol/DB/observer/signed-operation/reconciliation implementations and test
+instructions. No production funding switch, frozen signature or Rust program changed.
+
+EXECUTABLE WORK IMPLEMENTED:
+-lib/db/payment-postgres.ts: native PostgreSQL/psql PaymentRpc transport with explicit
+ host/port/database/dedicated LOGIN/role configuration. No inherited libpq credentials,
+ Supabase/admin fallback or arbitrary SQL/RPC surface. One transaction per RPC, SET
+ LOCAL ROLE to its sole worker role, server session_user match BEFORE RPC, then actual
+ fn_payment_v2_worker_identity (rejects superusers/unsafe memberships). Five role-specific
+ RPC whitelists preserve exact named arguments; psql quotes JSON values, no shell.
+ Credential password only in child environment, never argv/SQL. Require verified TLS
+ off literal loopback; do not silently round unsafe integer input/output. SQL errors
+ surfaced without dumping executable argv; disconnect/timeout/invalid COMMIT response
+ stays PAYMENT_DB_OUTCOME_UNKNOWN, original identity recovery only, never repay/resign.
+ Exports: PaymentWorkerRole; PaymentPostgresConfig;
+ createPaymentPostgresTransport(config:PaymentPostgresConfig):PaymentRpc.
+-tests/payment-postgres.test.ts:11 tests of production implementation with ONLY process
+ boundary mocked. Includes role/endpoint/whitelist restrictions, actual SQL transaction
+ framing, credential isolation, quoted hostile values, identity mismatch, unknown
+ response-loss semantics and unsafe-number rejection.11/11 PASSED. These mocks are NOT
+ chain/DB integration proof. An initial test double lacked Node execFile's custom
+ promisify.child contract (3 failures); fixed double to model that real API, not source
+ safety assertions. Actual helper transport also independently passes.
+-tests/payment-integration/: guarded additive LOGIN fixture, read-only TS test loader,
+ real transport smoke, opt-in helper creation script and actual local topology probe.
+ create-helper.sh passes bash -n; new helper creation itself used the equivalent
+ archived exercised shell invocation. Script never starts DB bootstrap/migrations.
+
+ACTUAL ENVIRONMENT AND TOPOLOGY:
+-Preserved DB container71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92,
+ name flexsoar-payment-db-69c6161-20261016T022841Z, running, network none, no published
+ ports, exact3 original read-only audit mounts. Accepted final row unchanged:
+2026-10-16T07:34:00.635339+00:00,37 prerequisites. No old fixtures/records repurposed.
+-New helper flexsoar-payment-integration-20261016T075407Z shares EXACT DB network
+ namespace (readlink IDs compared), user1000:1000, read-only root, all capabilities
+ dropped,no-new-privileges,no ports/no Docker socket/no app env/root-repository mount.
+ Existing immutable official supabase/postgres digest6058a675... used, entrypoint
+ overridden to sleep (NO automatic database/bootstrap SQL). No image/dependency install.
+ Read-only mounts: Node binary, Agave bin, Ubuntu runtime LIBRARIES, reviewed.so,
+ current worktree lib/integration tests/node_modules. No node_modules copying. Only
+ newly created /state evidence directory and /tmp tmpfs writable. Host glibc loader
+ used explicitly for existing Linux tools in musl/Nix base; no system config altered.
+ Namespace contains ONLY lo and empty routing table. Live listeners recorded at
+ ports5432/18899/18900/18901/18902. Agave2.1 wildcard sockets are confined to ONLY
+ loopback by network namespace; no claim they all bind literal127.0.0.1.
+-Versions: Node22.14.0,Agave validator2.1.0,psql17.11; WSL Ubuntu26.04.1 x86_64.
+ Existing Cargo1.85.1 found, Rust/SBF NOT rerun because program unchanged.
+ Reviewed.so /home/family/.cache/flexsoar-v2-local-build/flexsoar_settlement.so
+ SHA25699aa6bec4e949de3484bc7fef0b70a83b040bdf92a1060871fe4de8d4c64743c.
+
+ACTUAL CHECKS COMPLETED:
+-00_worker_logins.sql committed ADDITIVE5 separate synthetic non-superuser LOGINs:
+ payment_integration_issuer/verifier/settler/executor/notifier. Each NOINHERIT and
+ exactly one existing payment_v2 worker membership. No admin identity in app workers.
+ Original staff, users, wallets, orders, accepted roles/checkpoints unchanged. Do NOT
+ rerun00 on this instance; it refuses existing LOGIN names. No production credentials.
+-transport-smoke.mjs PASSED for all5 through REAL psql connections and production
+ adapters; server identity and membership checks passed. Cross-role/unexpected RPC
+ arguments rejected before execution. Old accepted SQL tests were NOT rerun.
+-topology-probe.mjs: actual local validator, reviewed program loaded, valueless local
+ airdrop FINALIZED with err=null; actual program executable account verified; production
+ LocalV2Observer read finalized genesis/account data, zero sales. Actual production
+ reconcilePayments -> dedicated verifier/settler RPC connection rejected the unconfigured
+ genesis/program network as PAYMENT_V2_NETWORK_UNKNOWN. This is EXPECTED FAIL CLOSED,
+ NOT a successful financial reconciliation. No invented proof JSON/commit digest.
+ Two corrected HTTP-only runs exited0; latest /state/probe-tL0LD2 has live-bindings and
+ topology-result. First run completed assertions but web3 subscription kept reconnecting
+ after its child stopped. Terminated ONLY exact probe Node PID656, preserved log and
+ initial source; replaced confirmation subscription with HTTP status polling requiring
+ FINALIZED (no finality relaxation). Every retry used a NEW ledger; none reset/deleted.
+ Owned validator stopped after probe; helper remains idle, DB still running/isolated.
+
+SUBSTANTIVE PRESERVATION BLOCKER / REQUIRED NEXT ENVIRONMENT APPROVAL:
+060 funding_configuration requires one GLOBAL active receiver/authenticator/inventory/
+reviewer/release/guardian/reconciler, exactly3 governor persons and10 distinct active
+staff keys. Accepted DB already contains EXACTLY that set;01 old fixture makes its
+public_key=sha256(uuid_send(user_id)), NOT a generated Ed25519 Keypair with a retained
+private key. These accepted identities cannot sign actual local-chain attestations.
+A new10-key set would violate global counts; deactivating/replacing existing rows
+would alter the accepted run, explicitly forbidden. No such mutation attempted.
+Current authorization says SQL/tests against EXISTING disposable isolated database;
+no second database created silently and no global staff-scope schema change made.
+
+Smallest concrete proposal: approve NEW flexsoar_payment_v2_integration_test in the
+SAME existing isolated PostgreSQL container, same network namespace/no ports. Copy
+ONLY reviewed schema (public/auth/payment_v2/extensions) from LOCAL synthetic DB,
+NOT accepted data, NOT production snapshot; exclude all payment_db_* test schemas.
+Seed ONLY reviewed static reference configuration from checked-in sources (policies,
+tier/condition bands/platform config as required), then NEW uniquely identified
+users/Items/Cards/listings and separately generated ephemeral role/governance keys.
+Do not clone staff/orders/wallets/checkpoints or modify originals. Keep old target
+strict guard unchanged; add separate integration-only named-target/namespace guards.
+This avoids changing authoritative production staff semantics just for testing.
+No additional npm dependency required; psql executable is required in worker runtime.
+
+ADDITIONAL IMPLEMENTATION STILL REQUIRED, NOT CLAIMED DONE:
+-Trusted attestation/lifecycle verification against durable immutable bindings, including
+ opening/revocation/ack context and authorized staff keys. Verifier currently has no
+ bounded RPC to read pending decision/issuer/lifecycle contexts; executor context RPC
+ cannot be borrowed by the verifier. Propose narrow role-specific immutable-context
+ RPC contracts for issuer/verifier rather than broad private-table grants.
+-Existing exit_plan/signed storage and inspectSignedOperation are explicitly limited
+ to execute_outcome/one fee signature/8 nonsigning instruction accounts. Opening,
+ receipt/authentication/release authorization, governed refund, acknowledgement need
+ reviewed bounded plans and exact multi-signer persistence/verification contracts.
+ No arbitrary signing, broad withdrawal or unsupported success substituted here.
+-Sale-mode funding,real95/5 reconciliation,release/refund exclusivity,real competing
+ buyers,all requested crash/lease/response-loss recovery injections and real recovery
+ API/UI are NOT RUN as coupled scenarios. Browser/session wallet relinking not tested
+ against real chain here. Existing37-checkpoint synthetic DB acceptance remains a
+ separate earlier result; no new integrated success marker was inserted.
+
+SCENARIO CLASSIFICATION:
+Real dedicated worker transport5/5: ACTUAL COMPONENT PASS.
+Namespace/RPC/faucet/DB connectivity/finalized program observer: ACTUAL LOCAL PASS.
+Unconfigured chain network -> DB authority refusal: ACTUAL FAIL-CLOSED PASS.
+Transport loss/unsafe data controls11 tests: MOCKED PROCESS BOUNDARY PASS.
+Direct sale/escrow+receipt/auth/release/governed refund: BLOCKED/UNIMPLEMENTED integration.
+All9 failure boundaries/actual competing buyers/recovery API+UI: BLOCKED/NOT RUN.
+Expired/finalized-failed operation handling: existing offline checks only; no actual
+ coupled-operation expiry/replacement experiment or relaxation this turn.
+
+Evidence NEW directory /home/family/flexsoar-payment-db-69c6161-20261016T022841Z/
+integration-discovery-20261016T074634Z/: baseline/after DB proof, helper inspections,
+shared-namespace IDs, actual transport logs, original cleanup failure, corrected probe
+logs/exit codes, unique helper-state ledgers/configs/public results/live-bindings,
+source snapshots/hashes. Previous resume065 evidence and final record untouched.
+
+Validation: normal npx tsc --noEmit exit0; npm test499 passed/2 known unchanged FSC-copy
+failures/501total (11 new tests). No intermittent market failures THIS full run; prior
+2 targeted tests passing did not establish full-suite pass. Read-only market handoff:
+shared invariants has duplicate hoisted contract mock factories253/2941, assertions
+3180/3186 expect empty state; market/cached.ts has module30s listing cache and exported
+clearMarketCaches. Cause remains unproven. Market/shared-test owners should instrument
+mock resolution, loadError and cache lifetime in a dedicated authorized test change;
+do not weaken assertions or infer this SQL/transport code fixes the intermittent issue.
+Webpack result recorded below. Funding constant false, Stripe dormant. Redemption E2E,
+operational staff/key provider/Squads authority arrangements,production cutover/catalog
+parity and full chain-to-database recovery remain launch blockers. No production keys,
+shared/cloud DB, public-chain calls, real funds, emails, push or deployment. OpenCode
+not used. Human dependency hashes unchanged; exported diff preserved.
+
+Final review tightened the NEW LOGIN fixture's target guard with explicit inet_server_addr() IS NULL rejection (three-valued SQL safety). Actual earlier execution used verified TCP127.0.0.1, so its result is unaffected. Original executed fixture input/hash retained separately from future strengthened source; fixture NOT rerun (LOGINs already exist). No applied migration/function/grant changed by this source guard edit.
+
+Final validation: npx next build --webpack exit0,40/40 pages, existing optional Privy @farcaster/mini-app-solana warning; git diff --check exit0. Financial integration remains blocked, not completed or launch-ready.
+
+Ephemeral-key metadata clarification: Node bootstrap keys were not saved. Agave automatically created12 private test key files across the3 NEW probe ledgers, all mode0600. Only filenames/stat metadata were inspected, never contents; no operational wallet files mounted/read, no key material copied into reports/repository. Metadata recorded separately. Helper credential-related environment variable-name inspection found none; no values were printed.
