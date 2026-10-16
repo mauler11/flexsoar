@@ -3010,7 +3010,7 @@ uncertain operations. Do NOT resolve the preserved review/registration cases by
 clearing signatures, altering evidence or creating another purchase of those claims.
 Public funding, production cutover, operational authorities and redemption remain blocked.
 
-## 2026-10-16 — retained evidence and acknowledgement recovery milestone
+## 2026-10-16 ï¿½ retained evidence and acknowledgement recovery milestone
 
 This milestone adds a restart-safe acknowledgement recovery path and fixes the
 PostgreSQL evidence transport discovered during actual isolated integration.
@@ -3068,10 +3068,10 @@ remains unavailable; no missing execution metadata was fabricated. The expired
 escrow and unresolved registration remain blocked, with no replacement operation.
 
 Verification: focused production tests `npx --no-install vitest run
- tests/payment-context-evidence.test.ts tests/payment-v2.test.ts` — 2 files,
-58/58 passed. `npx tsc --noEmit` — exit 0. `npx next build --webpack` — exit 0,
+ tests/payment-context-evidence.test.ts tests/payment-v2.test.ts` ï¿½ 2 files,
+58/58 passed. `npx tsc --noEmit` ï¿½ exit 0. `npx next build --webpack` ï¿½ exit 0,
 40 pages generated; the existing optional Privy
-`@farcaster/mini-app-solana` warning remains. `npm test` — 512 total, 507 passed,
+`@farcaster/mini-app-solana` warning remains. `npm test` ï¿½ 512 total, 507 passed,
 5 failed: two FSC copy assertions at `tests/invariants.test.ts:1901,1960`;
 one admin intake assertion encounters a mock lacking `.maybeSingle()`; two
 market empty-state assertions encounter a mock lacking `.in()`. No shared tests
@@ -3100,3 +3100,67 @@ full-suite runs intermittently showed three additional shared-test mock failures
 full run. The focused market control did reproduce `.in()` absence. Keep those
 mock issues with their owning test lane; no shared assertions or mock files were
 changed here.
+
+## 2026-10-16 - evidence fallback classification and wire-message binding
+
+Confirmed and corrected two verifier defects in `lib/solana/v2-evidence.ts`.
+
+Source acquisition now has explicit `EvidenceSourceUnavailableError` and
+`EvidenceValidationError` categories. Only typed transport/service unavailability
+or an absent transaction allows trying the next source. Validation and instruction
+inspection errors stop acquisition; wrong genesis, malformed data, mismatched
+signatures/metadata, parsed-message mismatch, lookup failure and conflicting
+observations cannot be hidden by a later archive result. A verified primary
+transaction remains usable when the optional archive is unavailable. Local RPC
+unavailability is recognized from fetch transport failure, HTTP 429/5xx, and an
+explicit Solana service/history error-code allowlist; malformed JSON, HTTP client
+errors and unknown RPC errors are invalid evidence. Arbitrary source exceptions
+are not reclassified.
+
+Both live acquisition and retained-evidence recovery use the same binding path.
+It deserializes and canonically reserializes the signed transaction; supports
+legacy and v0 messages and rejects other versions; binds every signature from
+both RPC representations; compares the raw compiled JSON message (header,
+blockhash, static account keys, lookup references, ordered compiled program
+indices/account indices/data) to the serialized bytes; and checks jsonParsed
+account addresses plus signer/writable flags derived from message header and
+validated lookup state. Parsed instruction order/program IDs and exposed account
+addresses/data must match the derived compiled message. Parsed inner token
+transfers are checked against their compiled instruction index, accounts and
+amount. The existing financial execution metadata and instruction-scoped
+payment verification remain in force.
+
+For v0 lookup tables, local RPC acquisition reads the actual table account at a
+finalized context no earlier than the transaction slot. Validation checks the
+Address Lookup Table Program owner, serialized table data digest, active state,
+lookup indices, extension slot and exact loaded addresses reported by the
+transaction metadata. Missing or historically inconsistent table state fails
+closed. The trust boundary remains the configured RPC/archive verifier: hashes
+and signatures bind content but do not independently prove execution or
+finality.
+
+No SQL/schema change was needed: the existing evidence RPC stores and digests
+`parsedRpcResult` as JSONB and accepts additive fields. New evidence retains the
+compiled RPC result and lookup account proofs within that existing JSON object.
+Old pending evidence without those fields cannot pass the stronger validator and
+must remain review-blocked; an already committed, correspondence-checked receipt
+still returns without requesting history. This task did not alter that receipt
+path or resolve the pruned acknowledgement's independent re-verification gap.
+
+Offline focused regressions: `npx --no-install vitest run
+ tests/payment-context-evidence.test.ts tests/payment-v2.test.ts` - 2 files,
+63/63 passed. Cases cover absent/typed-unavailable sources; invalid primary with
+valid archive; invalid archive after valid primary; optional archive outage;
+conflicting valid-shaped observations; arbitrary exceptions; legacy, v0 and
+lookup-table messages; missing/tampered lookup proof; and parsed program ID,
+data, account, account order, signer/writable and full-signature-list tampering
+on both acquisition and retained recovery.
+
+Normal validation: `npx tsc --noEmit` exit 0; `npm test` 523/525, with only the
+two existing stale FSC-copy assertions failing at `tests/invariants.test.ts:1901`
+and `:1960`; `npx next build --webpack` exit 0, 40 pages generated. Build still
+reports Privy's optional `@farcaster/mini-app-solana` resolution warning and the
+existing missing-Stripe-secret message during static collection. No shared tests
+were modified. These are offline tests; no chain or database was accessed for
+this correction, so production RPC compatibility and database integration of the
+additional JSON evidence fields remain unverified here.

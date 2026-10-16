@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { Keypair, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
+import { AddressLookupTableAccount, AddressLookupTableProgram, Keypair, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
 import { base58Encode } from '@/lib/solana/base58';
 import { encodePermit, type PermitV2 } from '@/lib/solana/protocol-v2';
 import { claimAcknowledgementInstruction, decisionInstructionFromContext, openSaleInstructionFromContext, revokeSaleInstructionFromContext } from '@/lib/solana/v2-context';
-import { acquireFinalizedEvidence, parseFinalizedRpcJson, validateRetainedFinalizedEvidence, type FinalizedRpcResult, type FinalizedTransactionSource, type ParsedFinalizedRpcResult } from '@/lib/solana/v2-evidence';
+import { acquireFinalizedEvidence, EvidenceSourceUnavailableError, EvidenceValidationError, LocalFinalizedRpcSource, parseFinalizedRpcJson, validateRetainedFinalizedEvidence, type FinalizedRpcResult, type FinalizedTransactionSource, type ParsedFinalizedRpcResult } from '@/lib/solana/v2-evidence';
 import { v2Addresses } from '@/lib/solana/v2-sdk';
 import { encodeConsumptionBindingV1 } from '@/lib/solana/protocol-v2';
 import { recoverCommittedClaimAcknowledgement } from '@/lib/db/payment-v2-workers';
@@ -26,15 +26,39 @@ function authorityOpenContext(): Record<string, unknown> {
   return {formatVersion:1,action:'open_sale',program,config:base58Encode(p.config),sale:addresses.sale.toBase58(),escrow:addresses.escrow.toBase58(),genesis:base58Encode(p.domain),saleCommitment:base58Encode(p.saleId),cardCommitment:base58Encode(p.card),pairCommitment:base58Encode(p.pair),seller:base58Encode(p.seller),sellerToken:base58Encode(p.sellerToken),treasury:base58Encode(p.treasury),treasuryToken:base58Encode(p.treasuryToken),mint:base58Encode(p.mint),tokenProgram:base58Encode(p.tokenProgram),totalUnits:'100',validFrom:'1',expiresAt:'9',generation:'1',revision:'1',custodyVersion:'1',mode:1,actor:base58Encode(p.issuer),templateHex:Buffer.from(encodePermit(p)).toString('hex')};
 }
 
-function signedSample() {
-  const payer=Keypair.generate(),recipient=Keypair.generate().publicKey;
-  const msg=new TransactionMessage({payerKey:payer.publicKey,recentBlockhash:base58Encode(k(21)),instructions:[SystemProgram.transfer({fromPubkey:payer.publicKey,toPubkey:recipient,lamports:1})]}).compileToV0Message();
-  const transaction=new VersionedTransaction(msg);transaction.sign([payer]);
-  const signature=base58Encode(transaction.signatures[0]);
-  const encoded=Buffer.from(transaction.serialize()).toString('base64');
-  const wire:FinalizedRpcResult={slot:42,blockTime:1234,transaction:[encoded,'base64'],meta:{err:null},version:0};
-  const parsed:ParsedFinalizedRpcResult={slot:42,blockTime:1234,transaction:{signatures:[signature],message:{accountKeys:[{pubkey:payer.publicKey.toBase58(),signer:true,writable:true}],instructions:[]}},meta:{err:null}};
-  return {signature,wire,parsed};
+function signedSample(mode:'legacy'|'v0'|'lookup'='v0') {
+  const payer=Keypair.generate(),recipient=Keypair.generate(),tableKey=Keypair.generate().publicKey;
+  const recentBlockhash=base58Encode(k(21));
+  const instruction=mode==='lookup'
+    ?SystemProgram.transfer({fromPubkey:payer.publicKey,toPubkey:recipient.publicKey,lamports:1})
+    :SystemProgram.createAccount({fromPubkey:payer.publicKey,newAccountPubkey:recipient.publicKey,lamports:1,space:0,programId:SystemProgram.programId});
+  let lookupTable:AddressLookupTableAccount|undefined,lookupProof:ParsedFinalizedRpcResult['lookupTableEvidence'][number]|undefined;
+  if(mode==='lookup'){
+    const tableData=Buffer.alloc(56+32);tableData.writeUInt32LE(1,0);tableData.writeBigUInt64LE(BigInt('18446744073709551615'),4);tableData.writeBigUInt64LE(BigInt(0),12);tableData[20]=0;tableData[21]=0;recipient.publicKey.toBuffer().copy(tableData,56);
+    lookupTable=new AddressLookupTableAccount({key:tableKey,state:AddressLookupTableAccount.deserialize(tableData)});
+    lookupProof={address:tableKey.toBase58(),owner:AddressLookupTableProgram.programId.toBase58(),contextSlot:42,dataBase64:tableData.toString('base64'),dataDigest:createHash('sha256').update(tableData).digest('hex')};
+  }
+  const builder=new TransactionMessage({payerKey:payer.publicKey,recentBlockhash,instructions:[instruction]});
+  const message=mode==='legacy'?builder.compileToLegacyMessage():builder.compileToV0Message(lookupTable?[lookupTable]:[]);
+  const transaction=new VersionedTransaction(message);transaction.sign(mode==='lookup'?[payer]:[payer,recipient]);
+  const signature=base58Encode(transaction.signatures[0]),bytes=Buffer.from(transaction.serialize()),version=transaction.message.version;
+  const staticKeys=version==='legacy'?transaction.message.accountKeys:transaction.message.staticAccountKeys;
+  const compiled=version==='legacy'?transaction.message.instructions.map(ix=>({programIdIndex:ix.programIdIndex,accounts:[...ix.accounts],data:ix.data})):
+    transaction.message.compiledInstructions.map(ix=>({programIdIndex:ix.programIdIndex,accounts:[...ix.accountKeyIndexes],data:base58Encode(ix.data)}));
+  const addressTableLookups=version==='legacy'?[]:transaction.message.addressTableLookups.map(x=>({accountKey:x.accountKey.toBase58(),writableIndexes:[...x.writableIndexes],readonlyIndexes:[...x.readonlyIndexes]}));
+  const loadedWritable=mode==='lookup'?[recipient.publicKey.toBase58()]:[],loadedReadonly:string[]=[];
+  const keyRows=staticKeys.map((key,index)=>({pubkey:key.toBase58(),signer:index<transaction.message.header.numRequiredSignatures,
+    writable:index<transaction.message.header.numRequiredSignatures?index<transaction.message.header.numRequiredSignatures-transaction.message.header.numReadonlySignedAccounts:index<staticKeys.length-transaction.message.header.numReadonlyUnsignedAccounts}));
+  if(mode==='lookup')keyRows.push({pubkey:recipient.publicKey.toBase58(),signer:false,writable:true});
+  const rawMessage={header:transaction.message.header,accountKeys:staticKeys.map(x=>x.toBase58()),recentBlockhash,
+    instructions:compiled,addressTableLookups};
+  const meta={err:null,...(mode==='lookup'?{loadedAddresses:{writable:loadedWritable,readonly:loadedReadonly}}:{})};
+  const parsed:ParsedFinalizedRpcResult={slot:42,blockTime:1234,transaction:{signatures:transaction.signatures.map(base58Encode),message:{accountKeys:keyRows,
+    instructions:compiled.map(ix=>({programId:keyRows[ix.programIdIndex].pubkey,accounts:ix.accounts.map(index=>keyRows[index].pubkey),data:ix.data}))}},meta,
+    compiledRpcResult:{slot:42,blockTime:1234,version:version==='legacy'?'legacy':version,transaction:{signatures:transaction.signatures.map(base58Encode),message:rawMessage},meta},
+    lookupTableEvidence:lookupProof?[lookupProof]:[]};
+  const wire:FinalizedRpcResult={slot:42,blockTime:1234,transaction:[bytes.toString('base64'),'base64'],meta,version:version==='legacy'?'legacy':version};
+  return {signature,wire,parsed,transaction};
 }
 
 function source(label:string,genesis:string,sample:ReturnType<typeof signedSample>):FinalizedTransactionSource {
@@ -87,15 +111,90 @@ describe('payment operation contexts and retained finalized evidence',()=>{
     expect((await validateRetainedFinalizedEvidence(retained,expected,inspect)).signature).toBe(sample.signature);
     await expect(validateRetainedFinalizedEvidence({...retained,networkId:'66666666-2222-4333-8444-555555555555'},expected,inspect)).rejects.toThrow(/integrity mismatch/);
     await expect(acquireFinalizedEvidence(primary,source('archive:wrong',base58Encode(k(53)),sample),expected,inspect)).rejects.toThrow(/genesis mismatch/);
-    await expect(acquireFinalizedEvidence(primary,source('archive:corrupt',genesis,{...sample,wire:{...sample.wire,meta:{err:{InstructionError:[0,'Custom']}}}}),expected,inspect)).rejects.toThrow(/conflict/);
+    await expect(acquireFinalizedEvidence(primary,source('archive:corrupt',genesis,{...sample,wire:{...sample.wire,meta:{err:{InstructionError:[0,'Custom']}}}}),expected,inspect)).rejects.toThrow(/invalid finalized/);
   });
 
   it('rejects wrong message identity and conflicting primary/archive evidence',async()=>{
-    const sample=signedSample(),other=signedSample(),genesis=base58Encode(k(61)),expected={networkId:uuid,genesis,program:publicKey(62).toBase58(),signature:sample.signature,subjectKind:'attestation' as const,subjectId:uuid,subjectAction:'receipt'};
+    const sample=signedSample(),genesis=base58Encode(k(61)),expected={networkId:uuid,genesis,program:publicKey(62).toBase58(),signature:sample.signature,subjectKind:'attestation' as const,subjectId:uuid,subjectAction:'receipt'};
     const inspect=(_tx:unknown,sig:string)=>{if(sig!==sample.signature)throw new Error('signature does not bind expected instruction');};
+    const other={...sample,wire:{...sample.wire,slot:43,blockTime:1235},parsed:{...sample.parsed,slot:43,blockTime:1235,compiledRpcResult:{...sample.parsed.compiledRpcResult,slot:43,blockTime:1235}}};
     const primary=source('primary',genesis,sample),archive=source('archive:different',genesis,other);
-    await expect(acquireFinalizedEvidence(primary,archive,expected,inspect)).rejects.toThrow(/signature mismatch|conflict/);
+    await expect(acquireFinalizedEvidence(primary,archive,expected,inspect)).rejects.toThrow(/conflict/);
     await expect(acquireFinalizedEvidence({ ...primary,getTransaction:async()=>null },null,expected,inspect)).rejects.toThrow(/history unavailable/);
+  });
+
+  it('falls back only for absent or explicitly unavailable sources',async()=>{
+    const sample=signedSample(),genesis=base58Encode(k(65)),expected={networkId:uuid,genesis,program:publicKey(66).toBase58(),signature:sample.signature,subjectKind:'lifecycle' as const,subjectId:uuid,subjectAction:'opened'},inspect=()=>{};
+    const absent={...source('primary-absent',genesis,sample),getTransaction:async()=>null};
+    expect((await acquireFinalizedEvidence(absent,source('archive:absent-fallback',genesis,sample),expected,inspect)).sourceKind).toBe('archive');
+    const unavailable={...source('primary-unavailable',genesis,sample),getGenesisHash:async()=>{throw new EvidenceSourceUnavailableError('primary-unavailable','getGenesisHash');}};
+    expect((await acquireFinalizedEvidence(unavailable,source('archive:unavailable-fallback',genesis,sample),expected,inspect)).sourceKind).toBe('archive');
+    const optionalArchive={...source('archive:offline',genesis,sample),getGenesisHash:async()=>{throw new EvidenceSourceUnavailableError('archive:offline','getGenesisHash');}};
+    expect((await acquireFinalizedEvidence(source('primary-valid',genesis,sample),optionalArchive,expected,inspect)).sourceKind).toBe('primary');
+    const arbitrary={...source('primary-bug',genesis,sample),getTransaction:async()=>{throw new Error('programmer bug');}};
+    await expect(acquireFinalizedEvidence(arbitrary,source('archive:must-not-hide-bug',genesis,sample),expected,inspect)).rejects.toThrow('programmer bug');
+  });
+
+  it('classifies only explicit transport/service failures as source unavailability',async()=>{
+    const httpUnavailable=new LocalFinalizedRpcSource('http://127.0.0.1:8899','local-primary',async()=>new Response('unavailable',{status:503}));
+    await expect(httpUnavailable.getGenesisHash()).rejects.toBeInstanceOf(EvidenceSourceUnavailableError);
+    const rpcUnavailable=new LocalFinalizedRpcSource('http://127.0.0.1:8899','local-primary',async()=>new Response(JSON.stringify({jsonrpc:'2.0',id:'x',error:{code:-32009,message:'history unavailable'}}),{status:200}));
+    await expect(rpcUnavailable.getGenesisHash()).rejects.toBeInstanceOf(EvidenceSourceUnavailableError);
+    const malformed=new LocalFinalizedRpcSource('http://127.0.0.1:8899','local-primary',async()=>new Response('{bad json',{status:200}));
+    await expect(malformed.getGenesisHash()).rejects.toThrow(/malformed source JSON/);
+    const unknownError=new LocalFinalizedRpcSource('http://127.0.0.1:8899','local-primary',async()=>new Response(JSON.stringify({jsonrpc:'2.0',id:'x',error:{code:-32603,message:'internal error'}}),{status:200}));
+    await expect(unknownError.getGenesisHash()).rejects.not.toBeInstanceOf(EvidenceSourceUnavailableError);
+  });
+
+  it('never lets valid archive evidence conceal invalid primary evidence, or vice versa',async()=>{
+    const sample=signedSample(),genesis=base58Encode(k(67)),expected={networkId:uuid,genesis,program:publicKey(68).toBase58(),signature:sample.signature,subjectKind:'lifecycle' as const,subjectId:uuid,subjectAction:'opened'},inspect=()=>{};
+    const invalidPrimary={...sample,parsed:structuredClone(sample.parsed)};invalidPrimary.parsed.transaction.message.instructions[0].programId=publicKey(69).toBase58();
+    await expect(acquireFinalizedEvidence(source('primary-invalid',genesis,invalidPrimary),source('archive:valid',genesis,sample),expected,inspect)).rejects.toBeInstanceOf(EvidenceValidationError);
+    await expect(acquireFinalizedEvidence(source('primary-invalid',genesis,invalidPrimary),source('archive:valid',genesis,sample),expected,inspect)).rejects.toThrow(/program id mismatch/);
+    const invalidArchive={...sample,parsed:structuredClone(sample.parsed)};invalidArchive.parsed.transaction.message.instructions[0].data='111';
+    await expect(acquireFinalizedEvidence(source('primary-valid',genesis,sample),source('archive:invalid',genesis,invalidArchive),expected,inspect)).rejects.toThrow(/instruction data mismatch/);
+    const wrongGenesis={...source('archive:wrong-network',base58Encode(k(70)),sample)};
+    await expect(acquireFinalizedEvidence(source('primary-valid',genesis,sample),wrongGenesis,expected,inspect)).rejects.toThrow(/genesis mismatch/);
+    const malformed={...sample,wire:{...sample.wire,transaction:['not base64!','base64'] as [string,'base64']}};
+    await expect(acquireFinalizedEvidence(source('primary-malformed',genesis,malformed),source('archive:valid',genesis,sample),expected,inspect)).rejects.toThrow(/base64|transaction/);
+    await expect(acquireFinalizedEvidence(source('primary-inspect-fails',genesis,sample),source('archive:valid',genesis,sample),expected,()=>{throw new Error('instruction verifier rejection');})).rejects.toThrow('instruction verifier rejection');
+  });
+
+  it('binds all parsed message fields to signed wire bytes on acquisition and retained recovery',async()=>{
+    const sample=signedSample(),genesis=base58Encode(k(71)),expected={networkId:uuid,genesis,program:publicKey(72).toBase58(),signature:sample.signature,subjectKind:'lifecycle' as const,subjectId:uuid,subjectAction:'opened'},inspect=()=>{};
+    const retained=await acquireFinalizedEvidence(source('primary-bind',genesis,sample),null,expected,inspect);
+    const mutations:Array<[string,(parsed:ParsedFinalizedRpcResult)=>void,RegExp]>=[
+      ['program id',p=>{p.transaction.message.instructions[0].programId=publicKey(73).toBase58();},/program id mismatch/],
+      ['instruction data',p=>{p.transaction.message.instructions[0].data='111';},/instruction data mismatch/],
+      ['account',p=>{p.transaction.message.instructions[0].accounts![0]=publicKey(74).toBase58();},/account order mismatch/],
+      ['account order',p=>{p.transaction.message.instructions[0].accounts!.reverse();},/account order mismatch/],
+      ['signer privilege',p=>{p.transaction.message.accountKeys[0].signer=!p.transaction.message.accountKeys[0].signer;},/privileges mismatch/],
+      ['writable privilege',p=>{p.transaction.message.accountKeys[0].writable=!p.transaction.message.accountKeys[0].writable;},/privileges mismatch/],
+      ['signature list',p=>{p.transaction.signatures[1]=base58Encode(k(75));},/signature list mismatch/],
+    ];
+    for(const [label,mutate,pattern] of mutations){
+      const altered={...sample,parsed:structuredClone(sample.parsed)};mutate(altered.parsed);
+      await expect(acquireFinalizedEvidence(source(`primary-${label.replaceAll(' ','-')}`,genesis,altered),null,expected,inspect),`acquisition should reject changed ${label}`).rejects.toThrow(pattern);
+      const retainedAltered={...retained,parsedRpcResult:structuredClone(retained.parsedRpcResult)};mutate(retainedAltered.parsedRpcResult);
+      await expect(validateRetainedFinalizedEvidence(retainedAltered,expected,inspect),`retained recovery should reject changed ${label}`).rejects.toThrow(pattern);
+    }
+    const alteredCompiled={...sample,parsed:structuredClone(sample.parsed)};alteredCompiled.parsed.compiledRpcResult.transaction.message.instructions[0].data='111';
+    await expect(acquireFinalizedEvidence(source('primary-compiled-data',genesis,alteredCompiled),null,expected,inspect)).rejects.toThrow(/compiled RPC message/);
+  });
+
+  it('accepts supported legacy, v0 and proven lookup-table messages and rejects missing or changed lookup proof',async()=>{
+    const genesis=base58Encode(k(76)),inspect=()=>{};
+    for(const mode of ['legacy','v0','lookup'] as const){
+      const sample=signedSample(mode),expected={networkId:uuid,genesis,program:publicKey(77).toBase58(),signature:sample.signature,subjectKind:'lifecycle' as const,subjectId:uuid,subjectAction:'opened'};
+      const result=await acquireFinalizedEvidence(source(`primary-${mode}`,genesis,sample),null,expected,inspect);
+      expect((await validateRetainedFinalizedEvidence(result,expected,inspect)).signature).toBe(sample.signature);
+      if(mode==='lookup'){
+        const absent={...sample,parsed:{...sample.parsed,lookupTableEvidence:[]}};
+        await expect(acquireFinalizedEvidence(source('primary-no-lookup-proof',genesis,absent),null,expected,inspect)).rejects.toThrow(/lookup table evidence/);
+        const changed={...result,parsedRpcResult:structuredClone(result.parsedRpcResult)};changed.parsedRpcResult.lookupTableEvidence[0].dataBase64=Buffer.alloc(88).toString('base64');
+        await expect(validateRetainedFinalizedEvidence(changed,expected,inspect)).rejects.toThrow(/lookup table|digest/);
+      }
+    }
   });
 
   it('consumes retained ACK evidence through distinct worker adapters without a chain lookup',async()=>{
@@ -107,7 +206,7 @@ describe('payment operation contexts and retained finalized evidence',()=>{
     const tx=new VersionedTransaction(new TransactionMessage({payerKey:actor.publicKey,recentBlockhash:b58(k(77)),instructions:[instruction]}).compileToV0Message());tx.sign([actor]);
     const bytes=Buffer.from(tx.serialize()),signature=b58(tx.signatures[0]),staticKeys=tx.message.staticAccountKeys,required=tx.message.header.numRequiredSignatures,roSigned=tx.message.header.numReadonlySignedAccounts,roUnsigned=tx.message.header.numReadonlyUnsignedAccounts;
     const accountKeys=staticKeys.map((key,index)=>({pubkey:key.toBase58(),signer:index<required,writable:index<required-roSigned||index>=required&&index<staticKeys.length-roUnsigned}));
-    const compiled=tx.message.compiledInstructions[0],parsed={slot:55,blockTime:1234,transaction:{signatures:[signature],message:{accountKeys,instructions:[{programId:staticKeys[compiled.programIdIndex].toBase58(),accounts:compiled.accountKeyIndexes.map(i=>staticKeys[i].toBase58()),data:b58(compiled.data)}]}},meta:{err:null}};
+    const compiled=tx.message.compiledInstructions[0],rawInstruction={programIdIndex:compiled.programIdIndex,accounts:[...compiled.accountKeyIndexes],data:b58(compiled.data)},compiledRpcResult={slot:55,blockTime:1234,version:0,transaction:{signatures:[signature],message:{header:tx.message.header,accountKeys:staticKeys.map(k=>k.toBase58()),recentBlockhash:tx.message.recentBlockhash,instructions:[rawInstruction],addressTableLookups:[]}},meta:{err:null}},parsed={slot:55,blockTime:1234,transaction:{signatures:[signature],message:{accountKeys,instructions:[{programId:staticKeys[compiled.programIdIndex].toBase58(),accounts:compiled.accountKeyIndexes.map(i=>staticKeys[i].toBase58()),data:b58(compiled.data)}]}},meta:{err:null},compiledRpcResult,lookupTableEvidence:[]};
     const rpcResult={slot:55,blockTime:1234,transaction:[bytes.toString('base64'),'base64'] as [string,'base64'],meta:{err:null},version:0};
     const encoded=bytes.toString('base64'),wrapped=encoded.match(/.{1,76}/g)!.join('\n');
     const evidence={id:uuid,formatVersion:1,subjectKind:'lifecycle',subjectId:saleId,subjectAction:'acknowledged',networkId,genesis:b58(genesis),program:programKey.toBase58(),signature,slot:'55',blockTime:'1234',finality:'finalized',sourceKind:'primary',sourceLabel:'test-primary',transactionBase64:wrapped,transactionDigest:createHash('sha256').update(bytes).digest('hex'),messageDigest:createHash('sha256').update(tx.message.serialize()).digest('hex'),rpcResult,parsedRpcResult:parsed,rpcResultDigest:'cd'.repeat(32)};
