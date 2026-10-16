@@ -1,6 +1,50 @@
 # Payment-v2 database drafts: NOT RUN
 
-SQL authoring was authorized; SQL execution was not. No file in this directory has been executed. No SQL parser, database, container, migration runner, seed or catalog connection was used. TypeScript tests do not load these files. Passing application tests do not prove any grant, constraint, trigger or lock here.
+Payment database tests remain NOT RUN. An explicitly authorized isolated run has now
+started the official database image and performed bootstrap catalog checks, but stopped
+BEFORE application migration001 because auth.jwt() is absent. No file in this test
+directory or application migration has executed. TypeScript tests do not load these
+files; passing application tests do not prove any grant, constraint, trigger or lock.
+
+## Actual isolated bootstrap blocker after69c6161
+
+Container `flexsoar-payment-db-69c6161-20261016T022841Z` is preserved, not reset.
+ID:71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92.
+Official supabase/postgres:17.11.0.004 digest:
+sha256:6058a6759ab9268cff8ee70641d61f1bd75953316281b76427cf5a6b4db2eafc.
+Actual image entrypoint/init scripts were copied and reviewed before first startup.
+Runtime inspection confirms network none, no published ports, privileged=false and
+only the three exact read-only /audit mounts. TCP catalog checks INSIDE this container
+confirm flexsoar_payment_v2_test,127.0.0.1:5432,session_user=supabase_admin, PostgreSQL17.11,
+the real API roles/publication, pgcrypto installed and citext available. There are zero
+public application tables and zero auth.users rows. The bootstrap's auth.uid/role/email
+exist and are owned by supabase_auth_admin; auth.jwt() does NOT exist.
+
+The explicit read-only prerequisite assertion failed with psql exit3:
+BOOTSTRAP_PREREQUISITE_MISSING: auth.jwt(). No historical or payment migration was
+attempted. Historical036 and053 require this helper. The DB-only image is therefore
+NOT by itself a complete modern Auth bootstrap for this suite. Do not insert a shim,
+skip those policies, weaken guards or recreate this environment to conceal the failure.
+
+Repair PROPOSAL, NOT executed: review the exact official Supabase Auth function-only
+migrations at commit4eee58f296d9698a1c2c0ae14d7a0b379c7622d3 (tagv2.197.0):
+- migrations/20220224000811_update_auth_functions.up.sql
+- migrations/20220531120530_add_auth_jwt_function.up.sql
+Source: https://github.com/supabase/auth/tree/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/migrations
+Render ONLY the upstream Namespace template as auth, apply forward to this isolated
+target under the real supabase_auth_admin owner after review/authorization, preserve
+existing helper ownership/ACLs, and verify exact definitions, API execution rights,
+legacy individual-claim and JSON-claims behavior. Do not mark the entire GoTrue history
+applied or modify historical FlexSoar files. This is partial function bootstrap for
+database tests, not verified full GoTrue/HTTP integration. Re-run the full prerequisite
+check before001. No payment migration needs a forward repair yet: none was applied.
+
+Evidence directory (Ubuntu):
+/home/family/flexsoar-payment-db-69c6161-20261016T022841Z/
+It retains image metadata/digest, actual entrypoint/init sources, isolation inspection,
+bootstrap logs, bootstrap catalog/ownership, preflight result and exit code, and an
+explicit migration-sequence NOT STARTED record. A preliminary connection-refused probe
+before readiness is separately retained. The container/data remain available for review.
 
 ## Human preparation, after review
 

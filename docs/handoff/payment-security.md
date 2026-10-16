@@ -1825,3 +1825,119 @@ WSL2.7.14.0/kernel6.18.33.2-2. Official Docker Windows/WSL installation guidance
 https://docs.docker.com/desktop/setup/install/windows-install/ . Final90 additionally
 requires complete current worker/race case inventories and retained terminal-consumer
 results so no zero-row loop can stand in for actual verification.
+
+## First actual isolated database run after69c6161 — BLOCKED before001
+
+User explicitly authorized ONLY the disposable local DB, upstream bootstrap, isolated
+connections, historical/application migrations and synthetic tests. No shared/cloud DB
+access was authorized or performed. Starting branch/HEAD: track/payment-security at
+69c616130622f200a6f578474c2a44185d965b21; HEAD..main empty. Human dependency pair and
+payment-security-5c3db0e.diff preserved byte-for-byte; no environment/credential files read.
+
+Windows AND Ubuntu Docker Client/Server verified29.8.2. Pulled official image
+supabase/postgres:17.11.0.004, resolved immutable digest:
+sha256:6058a6759ab9268cff8ee70641d61f1bd75953316281b76427cf5a6b4db2eafc.
+Image entrypoint docker-entrypoint.sh, Cmd postgres -D /etc/postgresql, PGDATA
+/var/lib/postgresql/data and actual migrate.sh/init files were inspected BEFORE
+startup. Inspection used a NEVER-STARTED container; its metadata/zero StartedAt was
+archived and that configuration-only object removed before configuring the same name
+with exact approved mounts. No failed DB/data was removed or recreated. The first and
+only executed database container is:
+- name:flexsoar-payment-db-69c6161-20261016T022841Z
+- ID:71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92
+- preserved RUNNING/healthy for review, no reset/cleanup.
+
+Before startup AND after bootstrap, inspected JSON assertions confirmed network none,
+no port bindings/exposed runtime ports, privileged=false, and exactly three bind mounts,
+all read-only: /audit/hba.conf, /audit/migrations, /audit/tests/payment-db. No repository
+root, environment file, Docker socket or unrelated volume/network mounted/modified.
+Main server listens only127.0.0.1:5432. All connections used docker exec with explicit
+PGHOST=127.0.0.1, PGPORT5432, PGDATABASE=flexsoar_payment_v2_test, PGUSER=supabase_admin.
+The container-only HBA permits socket/loopback test logins; it changes no host/global
+configuration. Built-in upstream pg_cron/pg_net initialization is image bootstrap, not
+application workers; no job, HTTP request, notification, email or chain action invoked.
+No external network is available inside the container.
+
+Actual upstream bootstrap executed initdb and official bundled migrations, reaching
+ready/healthy PostgreSQL17.11. A preliminary pre-readiness TCP probe returned connection
+refused and is preserved separately, not treated as a migration failure. Catalog checks
+then succeeded and verified exact DB/address/session identity, API roles and real grants,
+pgcrypto1.3 in extensions, citext1.6 available but not yet installed (001 would install),
+supabase_realtime publication, zero public application tables, zero auth.users rows.
+Postgres role is NOT superuser; supabase_admin IS superuser. Auth uid/role/email helpers
+are owned by supabase_auth_admin, with PUBLIC execute and API schema access. Authenticator
+is a member of anon/authenticated/service_role, not an invented worker/owner role.
+
+FIRST BLOCKING FAILURE: auth.jwt() is absent from this image's DB-only bootstrap.
+Explicit READ ONLY prerequisite assertion failed with psql exit3:
+BOOTSTRAP_PREREQUISITE_MISSING: auth.jwt(); STOP before application migrations.
+Thus the reviewed preparation document's claim that this DB-only image alone provides
+all needed modern Auth helpers was incorrect.036 and053 depend on auth.jwt(). We did
+NOT proceed until those files failed later, fabricate a helper, skip a policy, change
+a guard, or recreate the environment. Historical001–058: NONE EXECUTED.059–063: NONE
+EXECUTED. Database fixtures/tests/dedicated workers/races/expiry/90: ALL NOT RUN.
+The34-checkpoint gate has NOT passed and no completion marker was inserted manually.
+
+Exact forward bootstrap repair PROPOSAL (NOT executed; requires review):
+Official Supabase Auth tagv2.197.0 resolves to commit
+4eee58f296d9698a1c2c0ae14d7a0b379c7622d3. Review and apply its function-only files:
+1.migrations/20220224000811_update_auth_functions.up.sql — canonical uid/role/email
+  support null-safe individual claims plus request.jwt.claims JSON fallback.
+2.migrations/20220531120530_add_auth_jwt_function.up.sql — canonical jwt() returns
+  JSON from request.jwt.claim or request.jwt.claims, with upstream deprecation comments.
+https://github.com/supabase/auth/tree/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/migrations
+Render ONLY the Namespace template as auth; execute as real supabase_auth_admin owner
+in THIS preserved isolated DB after review, preserving existing helper ACLs/ownership.
+Verify exact source/namespace/ownership, API execution rights, both claims formats and
+missing/empty settings. Do not insert a permissive auth shim, mark all GoTrue migrations
+applied, run an Auth HTTP server, or claim full auth integration. No payment forward
+migration is necessary yet because no payment migration was applied. Re-run preflight
+before starting the explicit001..063 manifest. User instruction forbids executing an
+unreviewed repair; none was executed. No historical file modified.
+
+Preserved evidence directory (Ubuntu):
+/home/family/flexsoar-payment-db-69c6161-20261016T022841Z/
+- pull.log,image-digest.txt,image-metadata.json: actual image identity.
+- docker-entrypoint.sh,upstream-init/,image-postgresql.conf: actual startup source.
+- never-started-inspection.json,inspection-object-removal.txt: pre-start inspection lifecycle.
+- container-id.txt,configured-before-start.json,runtime-isolation.json: isolation evidence.
+- bootstrap.log,bootstrap-final.log: retained init/startup SQL logs.
+- bootstrap-catalog-attempt1-connection-refused.txt: early readiness transport probe.
+- bootstrap-catalog.txt,auth-ownership-after-stop.txt: actual catalog/role/function evidence.
+- bootstrap-preflight-result.txt,bootstrap-preflight.exit: explicit missing-function failure3.
+- migration-sequence-status.txt: explicit application sequence NOT STARTED.
+No PGDATA, private keys or other key material were read/exported. Automatic upstream
+local key initialization is confined to this test image; no operational wallet/key used.
+
+Only source files changed this task:
+- tests/payment-db/README.md: actual first-run blocker, evidence identity and reviewed-repair prerequisite.
+- docs/handoff/payment-security.md: this verified run record and remaining blockers.
+No new export, TypeScript, Rust, historical/payment migration or assertion edits.
+
+Application validation (separate from the DB bootstrap):
+- npx tsc --noEmit: exit0.
+- npm test -- --reporter=json --outputFile=<OS TEMP>/flexsoar-isolated-bootstrap-app-tests.json:
+  exit1,486 passed /4 failed /490 total. Two unchanged PricePayout FSC assertions plus
+  BOTH Market page signed-out empty-state assertions at invariants.test.ts3180/3186.
+  They expected Nothing listed yet in rendered HTML. No application/shared-test source
+  was changed. Do NOT report this run as the previous488/2 baseline.
+- Targeted npx --no-install vitest run tests/invariants.test.ts -t 'Market page'
+  --reporter=verbose: exit0,2 passed /245 skipped. Additional full-suite render failures
+  are therefore unresolved interaction/intermittence, not established production regressions.
+  Inspection found TWO hoisted mocks for the same contract module (lines253,2941), only
+  the later overriding getListings to []; cached.ts retains module-level results. This
+  is a plausible interaction to investigate, not a proven cause. No shared assertion
+  weakened and no market-lane edit. Relevant owner: market/shared-test track.
+- Webpack final completion will be recorded below. No app credentials were supplied.
+- Funding remains compile-time false; Stripe containment unchanged. No payments, wallet
+  signatures, broadcasts, emails, pushes, deployments or unrelated Docker changes.
+- OpenCode was not used. DB/full Solana?Postgres recovery guarantees remain UNVERIFIED.
+
+Final validation completion: npx next build --webpack exited0, generated40/40pages and
+completed routes/build traces. Existing optional Privy @farcaster/mini-app-solana resolver
+warning persists; Stripe key absent as expected, no credentials supplied. No suppression,
+dependency edit or source workaround. git diff --check exited0 (line-ending notices only).
+Next concrete action: review/authorize the pinned official Auth function-only forward
+bootstrap described above in the PRESERVED container, then repeat prerequisites before
+any historical/application migrations. No unreviewed repair or further SQL transition
+was executed after the catalog stop. The database-suite/full-chain acceptance is not met.
