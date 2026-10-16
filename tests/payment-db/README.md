@@ -1,12 +1,53 @@
 # Payment-v2 database drafts: NOT RUN
 
-Payment database tests remain NOT RUN. An explicitly authorized isolated run has now
-started the official database image and performed bootstrap catalog checks, but stopped
-BEFORE application migration001 because auth.jwt() is absent. No file in this test
-directory or application migration has executed. TypeScript tests do not load these
-files; passing application tests do not prove any grant, constraint, trigger or lock.
+Payment database tests remain NOT RUN. The explicitly reviewed Auth repair has now
+committed and passed verification.24 historical files applied successfully through022;
+022b failed and rolled back. No later migration,059–063 or file in this test directory
+has executed. TypeScript tests do not load these files; passing application tests do
+not prove any grant, constraint, trigger or lock.
 
-## Actual isolated bootstrap blocker after69c6161
+## Current stop: historical022b multiple listing arities
+
+Same preserved container/ID/digest below, no recreation/reset. The two authorized official
+Auth files at commit4eee58f296d9698a1c2c0ae14d7a0b379c7622d3 were fetched with their
+original source/hashes retained, rendered ONLY Namespace→auth, and executed in order
+as actual connection identity supabase_auth_admin in one transaction. COMMIT succeeded.
+Existing uid/role/email owners and ACLs were compared and unchanged; new jwt is owned
+by supabase_auth_admin and is NOT SECURITY DEFINER. No explicit grants were added;
+its effective ACL follows the existing upstream defaults. Tests verified individual
+claims, JSON fallback, singular/plural jwt, missing/empty settings, API schema/execution
+rights and actual calls under anon/authenticated/service_role, zero app/Auth data and
+unchanged auth.schema_migrations. Full bootstrap preflight then passed.
+
+The fixed75-file manifest stopped at file25,022b_permissions_lockdown.sql, psql exit3:
+`022b: 1 function(s) now have multiple arities` (line233). Exactly24 preceding files
+committed (001 through022, including019a/b/c);022b's complete transaction rolled back.
+Catalog diagnosis found:
+- fn_list_card(uuid,uuid,integer): canonical geography-derived body from019c.
+- fn_list_card(uuid,uuid,integer,payout_method): obsolete default-cash body from014.
+014 drops the original3-arg and creates4-arg.019c recreates3-arg without dropping4-arg.
+022 removes purchase overloads only;022b correctly refuses the remaining listing pair.
+031 would later drop both, but executing it out of order is NOT a repair for this stop.
+No later file was attempted or marked successful. Catalog confirms022b's guard creation
+and dead purchase-function drop rolled back; payment_v2 schema does not exist.
+
+NEXT REPAIR PROPOSAL ONLY: after review/authorization, retire EXACTLY the obsolete
+public.fn_list_card(uuid,uuid,integer,public.payout_method), using RESTRICT, as a separate
+forward compatibility step in THIS DB's current post022 state. Verify exact identities/
+owners/bodies/dependencies first, keep the canonical3-arg geography body and its rights,
+then rerun unchanged022b and continue only on success. No historical edits, assertion
+exception, CASCADE, blanket overload drop, data cleanup or success-marker insertion.
+Actual catalog reports zero dependent objects for the obsolete4-arg function. Body
+SHA256s for review:3-arg e3d880decc1b277f84bac789ff28a00d8158852271a765c0ad221cc83ec0e7d0;
+4-arg111d3b253c4b4f3c70cb3a372d773314ceab21627216ae6473bfc0e058341095.
+No such repair has executed.34-checkpoint acceptance and full recovery remain unverified.
+
+Run evidence now also contains auth-repair-*/ (source/rendered files, hashes, transaction,
+before/after/claim verification and exit codes) and migrations-*/ (explicit manifest,
+per-file source hashes/logs, results.tsv, first-failure.txt, catalog/dependency diagnosis
+and preserved runtime inspection). Keep earlier failure evidence. Do not replay001.
+
+## Earlier bootstrap blocker after69c6161 — now resolved by authorized repair
 
 Container `flexsoar-payment-db-69c6161-20261016T022841Z` is preserved, not reset.
 ID:71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92.
@@ -26,7 +67,8 @@ attempted. Historical036 and053 require this helper. The DB-only image is theref
 NOT by itself a complete modern Auth bootstrap for this suite. Do not insert a shim,
 skip those policies, weaken guards or recreate this environment to conceal the failure.
 
-Repair PROPOSAL, NOT executed: review the exact official Supabase Auth function-only
+Original repair proposal, subsequently authorized and executed as recorded above:
+the exact official Supabase Auth function-only
 migrations at commit4eee58f296d9698a1c2c0ae14d7a0b379c7622d3 (tagv2.197.0):
 - migrations/20220224000811_update_auth_functions.up.sql
 - migrations/20220531120530_add_auth_jwt_function.up.sql

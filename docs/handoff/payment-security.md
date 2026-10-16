@@ -1941,3 +1941,120 @@ Next concrete action: review/authorize the pinned official Auth function-only fo
 bootstrap described above in the PRESERVED container, then repeat prerequisites before
 any historical/application migrations. No unreviewed repair or further SQL transition
 was executed after the catalog stop. The database-suite/full-chain acceptance is not met.
+
+## Authorized Auth repair and first historical failure (after3cb6996)
+
+User authorized ONLY the two reviewed official Auth files in the EXISTING isolated
+container, then resumption of the already-reviewed migration/test manifest. Reverified
+container71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92,
+name flexsoar-payment-db-69c6161-20261016T022841Z, network none/no published ports,
+three exact read-only mounts and actual DB flexsoar_payment_v2_test over127.0.0.1:5432.
+No container recreated/reset; earlier logs and initial failure are retained. Image digest
+remains6058a6759ab9268cff8ee70641d61f1bd75953316281b76427cf5a6b4db2eafc.
+Starting branch/HEAD: track/payment-security at3cb6996a1302c0d8f718da3ba17b36b056dd3e92;
+HEAD..main empty. Human package pair/exported diff preserved. No historical source edit.
+
+Fetched from official supabase/auth at EXACT commit
+4eee58f296d9698a1c2c0ae14d7a0b379c7622d3, in this order:
+-20220224000811_update_auth_functions.up.sql:
+ SHA2565b72022d73e64a8e474d2122ac42f299bb7ce4d59755cdcc78e72abfe5d47dc0.
+-20220531120530_add_auth_jwt_function.up.sql:
+ SHA25691d2d5e47f19e65a63ec411f6cbb18755ec1792cb4249694dc261ef59cc78a10.
+Preserved raw sources/hashes and rendered copies; ONLY Namespace template replaced by
+auth. Executed via actual session_user supabase_auth_admin, one stop-on-error transaction.
+Recorded preexisting helper owner/ACLs and auth.schema_migrations before execution.
+Within transaction compared all three old owners/ACLs unchanged, verified new jwt owner
+supabase_auth_admin, LANGUAGEsql STABLE, returnsjsonb, prosecdef=false. No broad GRANT
+or SECURITY DEFINER wrapper was issued. New jwt ACL inherits the existing upstream
+creation defaults (PUBLIC execute plus postgres/owner/dashboard_user entries), observed
+and recorded rather than silently changed. Schema USAGE plus function EXECUTE checks
+passed for anon/authenticated/service_role.
+
+Auth verification and COMMIT succeeded, exit0:
+- uid/role/email individual claim GUCs return synthetic expected values.
+- Empty individual settings fall back to request.jwt.claims JSON.
+- jwt reads request.jwt.claim and request.jwt.claims; singular takes precedence.
+- Missing/empty settings give NULL as upstream defines; '{}' gives empty JSON with
+  NULL uid/role/email fields; jwt does not manufacture JSON from individual claims.
+- Existing ownership/ACLs unchanged; no application tables/Auth users introduced.
+- auth.schema_migrations exact seven-version array unchanged; no unrelated GoTrue
+  migration version was inserted. No Auth HTTP service was started.
+Post-commit full bootstrap preflight passed, exit0: exact target/identity, real API
+roles, uid/role/email/jwt present, pgcrypto installed/citext available, publication,
+zero application/Auth data. Actually invoked all helpers with synthetic JSON claims
+under SET LOCAL ROLE anon, authenticated and service_role in a rolled-back read-only
+transaction; returned values asserted. This is effective API-role execution testing,
+NOT a substitute for dedicated worker connection tests (still not reached).
+
+Historical application: the approved preparation document's EXPLICIT75-file manifest
+was compared to git69c6161's tracked migration list. No wildcard runner/default seed,
+no global wrapping transaction, no file modification. Each file has its own source
+SHA256, stdout/stderr log and recorded exit.24 files exited0/committed:
+001_schema through018_condition_grades (18files),019a/019b/019c,020,021,022.
+FIRST FAILURE: file25,022b_permissions_lockdown.sql, psql exit3 at line233:
+022b: 1 function(s) now have multiple arities.
+Stopped immediately;022b's BEGIN..COMMIT transaction rolled back. Catalog proves its
+fn_require_self_or_admin creation absent and fn_purchase_card_with_credit removal
+rolled back. No022c or later historical file,059–063, fixture, dedicated worker,
+signed envelope, concurrent session, terminal, stale lease, expiry or90 was run.
+No manual success checkpoint. Payment_v2 schema does not exist. Final acceptance NOT MET.
+
+Precise cause (source AND live isolated catalog):
+014_fixes.sql281 drops3-arg fn_list_card and283 creates4-arg with payout defaultcash.
+019c_settlement.sql324 recreates3-arg geography-derived fn_list_card WITHOUT removing
+014's4-arg.022 drops old purchase overloads only.022b's no-multiple-arities assertion
+therefore correctly finds fn_list_card twice. Later031 drops both, but cannot be run
+out of order to bypass this failed historical assertion.
+Actual remaining signatures, owner supabase_admin, both SECURITY DEFINER:
+-public.fn_list_card(uuid,uuid,integer),3-arg body SHA256
+ e3d880decc1b277f84bac789ff28a00d8158852271a765c0ad221cc83ec0e7d0.
+-public.fn_list_card(uuid,uuid,integer,public.payout_method),4-arg body SHA256
+ 111d3b253c4b4f3c70cb3a372d773314ceab21627216ae6473bfc0e058341095.
+pg_depend reports ZERO dependent objects for4-arg. Current public schema24tables,
+public.users0rows, auth.users0rows. These are reference/schema-only migrations, no
+customer records. Old local historical privileges are not yet hardened by022b/v2;
+network-none/no app server/funding-disabled state remains essential. No source-only
+finding is claimed to prove a production exploit or loss.
+
+NEXT REPAIR PROPOSAL (NOT EXECUTED): review/authorize a separate forward compatibility
+step at THIS post022 database state to retire EXACTLY obsolete4-arg fn_list_card with
+RESTRICT after asserting exact identity/owner/body/dependency evidence above. Preserve
+canonical3-arg geography-derived function and its grants. No CASCADE, data deletion,
+blanket overload drop, changed assertion, historical edit or manually marked success.
+Then rerun unchanged022b and resume only after it succeeds, without replaying001–022.
+No payment migration was applied, so there is no payment-v2 schema repair yet. User's
+instruction prohibits further unreviewed repairs; no drop/repair beyond approved Auth
+files occurred. This is historical compatibility, not permission to rewrite history.
+
+New evidence under original run directory:
+-auth-repair-20261016T024714Z/: pinned raw/rendered upstream source, SHA256s,
+ repair-transaction.sql, before.txt, repair-result.txt/repair.exit0,
+ post-repair-preflight.txt/post-repair-preflight.exit0, isolation-before.json.
+-migrations-20261016T024929Z/: explicit-manifest.txt,source-hashes.txt,results.tsv,
+ each file.log,first-failure.txt,failure-catalog.txt,listing-overload-diagnosis.txt,
+ preserved-container-after-stop.json. Initial bootstrap failure evidence remains.
+Container/data are preserved RUNNING, no unrelated Docker resource touched.
+
+Source changes this task:
+-tests/payment-db/README.md: current repaired Auth state, actual historical stop and exact next repair proposal.
+-docs/handoff/payment-security.md: this execution/verification/provenance record.
+No production code, frozen export, SQL historical/payment migration, dependency or test
+assertion changed. No new API exports. No Auth service, application worker, shared/cloud
+connection, operational key, public-chain RPC/signing/broadcast, email, push or deployment.
+Compile-time funding remainsfalse. OpenCode was not used.
+
+Relevant application checks (NOT database acceptance):
+-npx tsc --noEmit: exit0.
+-npm test -- --reporter=json --outputFile=<OS TEMP>/flexsoar-auth-repair-app-tests.json:
+ exit1,488 passed /2 failed /490total, only unchanged shared FSC-copy assertions.
+ Prior run's two market-render failures did not recur; no source fix was made and
+ their intermittent/shared-test interaction is not declared resolved.
+-Webpack result will be appended on completion. Database-suite acceptance and complete
+ Solana?Postgres recovery remain UNVERIFIED; no inference from application mocks/tests.
+
+Final application validation: npx next build --webpack exited0,40/40pages and complete
+route/build-trace output. Existing optional Privy @farcaster/mini-app-solana warning
+remains; no dependency/configuration suppression. git diff --check exited0. All requested
+Auth checks succeeded; historical022b is the NEW stop. Environment and failed transaction
+evidence retained, no further repair executed. Next approval is specifically the obsolete
+4-arg listing overload retirement and unchanged022b retry, not another Auth repair.
