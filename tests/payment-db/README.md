@@ -1,11 +1,11 @@
-# Payment-v2 database suite: BLOCKED at first fixture
+# Payment-v2 database suite: BLOCKED by production codec defect
 
-All 75 reviewed migration files have committed in the preserved isolated database.
-03_completion_setup.sql committed; 10_contracts.sql failed and rolled back on the
-historical handle-length constraint. Zero acceptance checkpoints are recorded.
-Remaining scenarios and the 34-checkpoint gate are NOT RUN. See the latest execution
-section below for evidence and the proposed fixture repair. Earlier sections retain
-the chronological failure history and do not supersede this checkpoint.
+All75 reviewed migration files and03_completion_setup have committed. After authorized
+synthetic-handle corrections,10_contracts was retried ONLY and rolled back again, now
+with PAYMENT_V2_LIFECYCLE_CONTEXT. Diagnostic calls show Base58 round-trip corruption
+and le64 full-range corruption in applied060's numeric division. Zero successful
+checkpoints; later scenarios and34-checkpoint gate remain NOT RUN. See latest handoff
+for exact evidence and forward-repair proposal. Earlier sections are historical.
 
 ## Current stop: payment060 parser error after approved listing repair
 
@@ -454,3 +454,19 @@ Proposed next approval: shorten ONLY synthetic handle construction in01_fixtures
 and expectations. Then retry10 ONLY and continue20 onward. Do not rerun committed03,
 059�063 or historical migrations. This fixture-data repair was NOT made/executed under
 the syntax/alias-only exception. Full evidence and precise paths are in latest handoff.
+
+## Latest retry: handle fix applied; codec repair requires review
+
+01_fixtures and50_races_setup now construct valid24-character synthetic handles with
+short role prefixes and21/22 UUID hex characters. Full UUID identities and uniqueness
+constraints remain unchanged; collision fails loudly. No other fixture terms changed.
+03 and all migrations were NOT rerun.10 retry failed at lifecycle context; complete
+rollback verified.50 was not executed. Completion count remains0; gate NOT RUN.
+
+Applied060 b58/unb58 fail all10 tested32-byte round trips. trunc(n/divisor) is not
+exact integer division at these sizes. le64(max_u64) and le64(-1) also return incorrect
+bytes. Proposed next approved work: a reviewed NEW064 forward repair using exact div
+quotients, preserving ownership/grants/guards, with independent cross-language vectors.
+Do not alter applied060, weaken lifecycle matching, choose accommodating fixture keys,
+or skip10. After separately approved isolated repair, retry10 only, then20 onward.
+Full evidence: fixture-retry-20261016T042158Z/ in the preserved run directory.

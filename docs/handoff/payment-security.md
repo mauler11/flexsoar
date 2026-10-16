@@ -2242,3 +2242,62 @@ market failures. Webpack outcome recorded below. Application checks do not prove
 suite or full Solana-to-Postgres recovery acceptance.
 
 Final application validation: npx next build --webpack exit0,40/40 pages. Existing optional Privy @farcaster/mini-app-solana warning remains; no suppression/dependency edits. git diff --check passed. Only063 alias references and the two named documentation files are included in this task commit.
+
+## Synthetic handle correction and substantive codec blocker (2026-10-16)
+
+Authorized fixture edits ONLY:01_fixtures seller/buyer use s-/b- plus22 UUID hex
+characters; staff uses st- plus21;50_races_setup competing buyer uses r- plus22.
+All handles are24 valid characters. Full UUID primary/auth/relationship identities
+unchanged; existing uniqueness constraints remain strict, so a collision raises an
+error (no ON CONFLICT, ignored error or silent identity reuse). No amounts, evidence,
+roles, timings, ownership, production logic or assertions changed.
+
+Reverified preserved container exact ID71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92,
+network none/no ports/exactly3 read-only audit mounts; internal TCP127.0.0.1,
+flexsoar_payment_v2_test,session_user supabase_admin.03 completion schema persisted;
+users/orders/attempts/checkpoints zero before retry. No migration or03 rerun.
+
+Retried10_contracts ONLY: psql exit3 at line7, now PAYMENT_V2_LIFECYCLE_CONTEXT inside
+fixture's fn_payment_v2_record_lifecycle call. Previous handle-length error cleared.
+Entire10 rolled back again: users/orders/attempts/checkpoints remain zero. No20 or
+later suite stage executed; no dedicated worker/race/terminal/stale lease/expiry/
+signed-storage test and no90 gate. No checkpoint manually inserted.75 migration
+files remain committed,03 committed; database acceptance NOT ACHIEVED.
+
+Read-only diagnostics found a production codec defect: all10 SHA256-derived32-byte
+samples fail unb58(b58(raw))=raw. Both applied060 helpers use trunc(n/divisor), and
+Postgres numeric division rounds before truncation for sufficiently large operands.
+For n=48635463943209834798109823479812349789123984798123984798123984798123984798,
+trunc(n/58)-div(n,58)=1 and trunc(n/256)-div(n,256)=1. This corrupts identity
+bindings and explains why fixture lifecycle context cannot safely progress.
+Additional actual le64 calls show shared defect:5000000 encodes404b4c0000000000
+correctly, but18446744073709551615 and-1 encodeff00000000000000 instead of
+ffffffffffffffff. This affects canonical permit integers, not synthetic display data.
+
+STOP: production encoding changes are outside fixture/syntax/alias authorization.
+Concrete next repair proposal: NEW forward migration064 replacing ONLY integer
+quotient steps in b58/unb58/le64 with exact pg_catalog.div(n,divisor), preserving
+signatures, owners, ACLs, search paths, leading-zero handling, range checks and all
+other behavior. Do NOT rewrite applied060 or reapply059–063. Add independent known
+Rust/TypeScript Base58/u64 vectors, leading-zero/all-zero/max-key cases and full-range
+u64/i64 cases before replaying10. Review any persisted derived values before broader
+use; this synthetic DB currently has zero networks/attempts/orders/users. No codec
+repair authored or executed under this task. Authorization/review is required for
+that semantic forward repair and its isolated execution. Never adjust fixture keys
+or expected outcomes to hide the codec defect.
+
+Preserved evidence: /home/family/flexsoar-payment-db-69c6161-20261016T022841Z/
+fixture-retry-20261016T042158Z/ contains isolation/preflight, corrected01/50 inputs,
+fixture.diff/hashes,10 input/output/exit, diagnostics.txt (rollback counts and10 failed
+round trips),integer-division-cause.txt (catalog helper bodies and exact quotient
+errors),le64-diagnostics.txt. Prior fixture/migration failures and environment kept.
+50's corrected file was NOT executed, because10 failed first.
+
+Application checks:npx tsc --noEmit exit0;npm test JSON reporter488 passed/2 failed/
+490total, ONLY unchanged FSC-copy assertions; no additional market failures. Build
+completion below. Human manifest/lock hashes remain D98A62F311AF26DA6B39B095B1D19BA9D6C2CDE7843EBA6FB7A82F6A3201EC8A
+and1DEC156573D13BFCA04776527634BBDDD3765B6F5AAFB443599FCE70341DA56F. Exported diff
+preserved; funding const false. No production/shared DB access, public-chain activity,
+external side effects, push or deployment. OpenCode not used. No TS exports added.
+
+Final validation: npx next build --webpack exit0,40/40 pages, existing optional Privy @farcaster/mini-app-solana warning. git diff --check exit0. No checks bypassed.

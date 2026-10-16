@@ -17,7 +17,7 @@ INSERT INTO payment_db_races.cases VALUES
 DO $prepare$ DECLARE c record;d jsonb;p jsonb;cmd jsonb;buyer uuid;status jsonb;BEGIN
  FOR c IN SELECT name,f FROM payment_db_races.cases LOOP
   IF c.name='conflicting_attempt' THEN
-   buyer:=gen_random_uuid();INSERT INTO public.users(id,auth_id,handle,email,country_code,solana_address) VALUES(buyer,buyer,'race-'||buyer,buyer||'@example.invalid','MY',payment_v2.b58(sha256(uuid_send(buyer))));
+   buyer:=gen_random_uuid();INSERT INTO public.users(id,auth_id,handle,email,country_code,solana_address) VALUES(buyer,buyer,'r-'||left(replace(buyer::text,'-',''),22),buyer||'@example.invalid','MY',payment_v2.b58(sha256(uuid_send(buyer))));
    INSERT INTO payment_v2.wallet_accounts VALUES(buyer,(c.f->>'network')::uuid,sha256(uuid_send(buyer)),sha256(uuid_send(buyer)||decode('01','hex')),sha256(uuid_send(buyer)));
    PERFORM set_config('request.jwt.claim.sub',buyer::text,true);
    status:=public.fn_payment_v2_initiate((c.f->>'listing')::uuid,gen_random_uuid(),'MY-USDC-ESCROW-1','834ca943173d4db87622426e161eeb17afcdbac94e37368e6f697430961925c5');

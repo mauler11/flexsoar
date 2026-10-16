@@ -12,11 +12,11 @@ CREATE FUNCTION pg_temp.fixture(mode smallint,valid_seconds integer DEFAULT 600,
 DECLARE seller uuid:=gen_random_uuid();buyer uuid:=gen_random_uuid();model uuid:=gen_random_uuid();sku uuid:=gen_random_uuid();item uuid:=gen_random_uuid();card uuid:=gen_random_uuid();listing uuid:=gen_random_uuid();net uuid:=gen_random_uuid();sale uuid:=gen_random_uuid();u uuid;st uuid;enroller uuid;reviewer uuid;i int;role_name text;status jsonb;permit text;proof jsonb;event uuid;funded bigint:=extract(epoch FROM clock_timestamp())::bigint;
 BEGIN
  INSERT INTO public.users(id,auth_id,handle,email,country_code,solana_address) VALUES
- (seller,seller,'pv2-s-'||seller,'seller-'||seller||'@example.invalid','MY',payment_v2.b58(sha256(uuid_send(seller)))),
- (buyer,buyer,'pv2-b-'||buyer,'buyer-'||buyer||'@example.invalid','MY',payment_v2.b58(sha256(uuid_send(buyer))));
+ (seller,seller,'s-'||left(replace(seller::text,'-',''),22),'seller-'||seller||'@example.invalid','MY',payment_v2.b58(sha256(uuid_send(seller)))),
+ (buyer,buyer,'b-'||left(replace(buyer::text,'-',''),22),'buyer-'||buyer||'@example.invalid','MY',payment_v2.b58(sha256(uuid_send(buyer))));
  FOR i IN 1..10 LOOP
   u:=gen_random_uuid();st:=gen_random_uuid();role_name:=(ARRAY['inventory','reviewer','receiver','authenticator','release','governor','governor','governor','guardian','reconciler'])[i];
-  INSERT INTO public.users(id,auth_id,handle,email,country_code) VALUES(u,u,'pv2-st-'||u,'staff-'||u||'@example.invalid','MY');
+  INSERT INTO public.users(id,auth_id,handle,email,country_code) VALUES(u,u,'st-'||left(replace(u::text,'-',''),21),'staff-'||u||'@example.invalid','MY');
   -- One shared configured staff set across fixtures, to preserve exactly three governance persons.
   IF (role_name='governor' AND (SELECT count(1) FROM payment_v2.staff WHERE role='governor')<3) OR (role_name<>'governor' AND NOT EXISTS(SELECT 1 FROM payment_v2.staff WHERE role=role_name)) THEN
    INSERT INTO payment_v2.staff(id,user_id,person_id,role,public_key) VALUES(st,u,u,role_name,sha256(uuid_send(u)));
