@@ -2301,3 +2301,93 @@ preserved; funding const false. No production/shared DB access, public-chain act
 external side effects, push or deployment. OpenCode not used. No TS exports added.
 
 Final validation: npx next build --webpack exit0,40/40 pages, existing optional Privy @farcaster/mini-app-solana warning. git diff --check exit0. No checks bypassed.
+
+## Forward codec repair executed; new trigger and fee blockers (2026-10-16)
+
+064_payment_v2_exact_integer_encoding.sql is the next available migration and has
+COMMITTED in the preserved isolated database (psql exit0). Applied060 was NOT edited.
+Only3 quotient expressions changed: b58/unb58/le64 now use pg_catalog.div with numeric
+operands instead of divide-then-truncate. No bigint/float casts or range/signedness
+changes. Migration snapshots the entire pg_proc metadata excluding prosrc, checks it
+unchanged afterward, and checks source replacement is EXACTLY those3 expressions.
+This verifies existing OIDs, ownership, ACLs, signatures, search paths, volatility,
+strictness, security and remaining attributes were retained. Original 060 bodies,
+ACL metadata and reproduced10/10 broken roundtrips/broken max-u64 saved before repair.
+
+Reverified exact existing container ID71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92,
+network none/no published ports/exact3 read-only audit mounts; internal loopback,
+named flexsoar_payment_v2_test,session_user supabase_admin. All payment_v2 tables
+EXCEPT seeded policies were empty before repair, as were public users/orders and
+completion records. Thus no persisted codec-derived records were rewritten. Historical
+migrations,059–063 and03 were not rerun. Total manifest files committed now76.
+
+New regression sources:
+-04_sdk_encoding_vectors.sql: offline expected constants generated using installed
+ bs58@4.0.1, Solana PublicKey and Node Buffer BigInt encoders, not SQL helpers.
+-05_encoding.sql: PASSED exit0, transaction ROLLBACK.10 independent SDK encodings
+ (32-byte zero/FF/leading-zero/ascending/public keys and3 deterministic64-byte signature
+ strings),7 independent SDK decodings,10 requested LE64 vectors (including2^53±1,
+ max-i64/max-u64/-1/min-i64),11 rejection/strictness assertion groups, and complete
+ 690-byte SQL-composed permit matching the existing Rust independent_wire_vector and
+ production TypeScript encodePermit output. Decoder32-byte restriction unchanged.
+-make-encoding-vectors.mjs: offline reproducible expected generation + actual SQL permit
+ comparison using the real production TS encoder (transpiled with installed TypeScript).
+ SDK vectors regenerated to OS TEMP and compared equal; no dependency changes.
+-06_export_encoding_permit.sql: calls real prepare/initiate/authorize through fixture,
+ exports immutable source fields and actual permit, then rolls back. FAILED before
+ authorization on the new trigger blocker below. This actual-call SQL/TS comparison
+ is NOT completed; do not conflate the successful fixed wire-vector comparison with it.
+-07_encoding_acceptance.sql: NOT RUN. Reruns05, validates the actual06/TS comparison
+ artifact and commits one private explicit encoding checkpoint only on success.
+-90_final_acceptance.sql: preserves ALL original34 prerequisites and additionally
+ requires payment_db_codec.completion's encoding record. New total35, version2.
+ Missing schema/record or failed comparison is fatal. No manual marker creation.
+
+After05 passed,06 failed; retry10_contracts as requested also FAILED exit3, same
+cause: record "new" has no field "resolved_event". terms_guard() in applied063 has
+TG_TABLE_NAME='operations' AND NEW.resolved_event ... as one IF expression. The shared
+trigger compiles that expression for a sales row, which lacks the field, before the
+false table-name guard can protect it. Failure occurs when record_lifecycle changes
+sales.state opening->open. All fixture writes rolled back: users/orders/attempts and
+original acceptance checkpoints remain0; no payment_db_codec schema/marker exists.
+No20+, dedicated worker, concurrency, terminal, stale-lease, expiry/relink or90 run.
+35-checkpoint gate NOT PASSED. No financial/authorization assertions weakened.
+
+STOP / concrete next proposal: a NEW forward065 replacing ONLY terms_guard body with
+nested table-specific IF blocks around the2 operations-only predicates (resolved_event
+and signature). Preserve each predicate/error, all immutable terms checks, ownership,
+ACLs and trigger attachment. Add regression exercising this existing trigger on each
+of sales/attempts/operations/outbox, including rejecting actual immutable mutations.
+Do not rewrite applied063, disable the trigger, add permissive fields or bypass it.
+This is production control-flow logic, outside codec/syntax/alias/display scope;
+no repair authored/executed. After separately reviewed/approved forward repair,
+resume06 (then offline compare/07),10 and remaining suite. Do not rerun064 or03.
+
+Other payment quotient inspection FOUND a separate demonstrated defect, NOT changed:
+059's CHECK and060's initiate allocation use floor(total_units*500/10000). At total
+18446744073709551615 (and...614), existing expression gives922337203685477581 vs
+exact922337203685477580, an overcharge of1USDC base unit. Rust uses u128 integer
+division, so SQL diverges. At historical fixture5000000 both give250000. Proposed
+separate reviewed forward scope: exact numeric div for both CHECK and initiate's fee/
+net allocations, retaining full-u64 bounds and all other checks; inspect existing
+attempts first and add independent edge vectors. No amount/constraint change allowed
+under current codec repair, so none made. MYR calculation uses bounded bigint integer
+division, not the demonstrated numeric divide/truncate defect. No other quotient
+changes made. This known edge-case mismatch remains an integration/release blocker.
+
+Evidence: /home/family/flexsoar-payment-db-69c6161-20261016T022841Z/
+codec-repair-20261016T043338Z/: isolation.json, preflight.log (all table counts/original
+code/ACLs and reproduced failures),064-input.sql/hash/log/exit0,05 log/exit0,06 log,
+10 log/exit3,after-and-other-arithmetic.log (rollback counts/postrepair metadata/fee
+comparison),trigger-blocker-catalog.txt, preserved SQL/helper inputs + input-hashes,
+failure-summary.txt.06's individual exit code was not captured separately by the
+original set-e shell; its actual psql SQL error/transcript is preserved. No reset,
+failed environment cleanup or hidden correction. Original prior errors retained.
+
+App validation:npx tsc --noEmit exit0;npm test488 passed/2 unchanged known FSC-copy
+failures/490total. No extra market failures. Build outcome recorded below. Human
+package/lock pair hashes unchanged; exported diff preserved; funding const false,
+no enabled network rows. No production/shared DB, public-chain calls, email, push or
+deployment. OpenCode not used. No TypeScript production exports/signatures changed.
+
+Final validation: npx next build --webpack exit0,40/40 pages; existing optional Privy @farcaster/mini-app-solana warning remains. git diff --check exit0. SQL migration064 and primitive regressions passed; actual-permit checkpoint and full35-checkpoint suite remain blocked, not accepted.

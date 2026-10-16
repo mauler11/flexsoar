@@ -4,6 +4,8 @@
 \ir 46_worker_results.sql
 \ir 53_race_assert.sql
 BEGIN;
+-- Additional mandatory checkpoint; the original34 remain unchanged.
+SELECT payment_db_acceptance.assert_true((SELECT count(1)=1 AND bool_and(scenario='encoding' AND comparison->>'actual'=comparison->>'expected' AND length(comparison->>'actual')=1380) FROM payment_db_codec.completion),'successful encoding checkpoint');
 DO $final$
 DECLARE required text;missing text;role_name text;c record;a_pid integer;b_pid integer;
 BEGIN
@@ -47,7 +49,7 @@ BEGIN
  PERFORM payment_db_acceptance.assert_true((SELECT login='payment_db_race_notifier_a' FROM payment_db_acceptance.completions WHERE scenario='stale:outbox_takeover'),'actual stale notifier completion');
 END $final$;
 SET CONSTRAINTS ALL IMMEDIATE;
-SELECT payment_db_acceptance.complete('final','{"suiteVersion":"payment-db-completeness-1","requiredCheckpoints":34}'::jsonb);
+SELECT payment_db_acceptance.complete('final','{"suiteVersion":"payment-db-completeness-2","requiredCheckpoints":35}'::jsonb);
 COMMIT;
 -- This success record is printed ONLY after the final transaction committed.
 SELECT scenario,login,backend_pid,completed_at,details FROM payment_db_acceptance.completions WHERE scenario='final';

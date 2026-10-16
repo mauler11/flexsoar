@@ -1,11 +1,12 @@
-# Payment-v2 database suite: BLOCKED by production codec defect
+# Payment-v2 database suite: BLOCKED by shared trigger
 
-All75 reviewed migration files and03_completion_setup have committed. After authorized
-synthetic-handle corrections,10_contracts was retried ONLY and rolled back again, now
-with PAYMENT_V2_LIFECYCLE_CONTEXT. Diagnostic calls show Base58 round-trip corruption
-and le64 full-range corruption in applied060's numeric division. Zero successful
-checkpoints; later scenarios and34-checkpoint gate remain NOT RUN. See latest handoff
-for exact evidence and forward-repair proposal. Earlier sections are historical.
+Forward064 committed (76 manifest files total);05 encoding primitive/wire vectors
+passed.06 actual permit export and10_contracts failed on shared terms_guard accessing
+NEW.resolved_event on a sales row. Both fixtures rolled back. No successful checkpoints.
+Original34 prerequisites remain, plus mandatory encoding verification: NEW TOTAL35.
+Actual SQL-authorized permit/TS comparison, dedicated logins/races and final gate are
+NOT RUN to completion. See latest handoff for exact evidence and forward-repair scope.
+Earlier sections are historical and do not supersede this checkpoint.
 
 ## Current stop: payment060 parser error after approved listing repair
 
@@ -470,3 +471,61 @@ quotients, preserving ownership/grants/guards, with independent cross-language v
 Do not alter applied060, weaken lifecycle matching, choose accommodating fixture keys,
 or skip10. After separately approved isolated repair, retry10 only, then20 onward.
 Full evidence: fixture-retry-20261016T042158Z/ in the preserved run directory.
+
+## Encoding regression additions and exact resume procedure
+
+064 is applied in this preserved test instance: NEVER reapply it or edit it. It changes
+only3 integer quotient operations and asserts pg_proc attributes/ACL/owner unchanged.
+05 passed:10 Base58 encode/7 decode/10 LE64 expected-value vectors,11 rejection/
+strictness assertion groups, complete fixed690-byte existing Rust/TS wire vector.
+Expected values are from installed bs584.0.1/Solana SDK/Node Buffer + production
+protocol-v2.ts, never SQL roundtrips. All-zero/FF/leading zeros and64-byte encodings
+are included; decoder still rejects non32-byte output. Reproduce offline constants:
+
+```powershell
+node tests/payment-db/make-encoding-vectors.mjs vectors "$env:TEMP\flexsoar-sdk-vectors.sql"
+# Compare to checked-in04_sdk_encoding_vectors.sql, normalizing CRLF only.
+```
+
+06 failed on production trigger control flow, as did retry10. Do not rerun03 or
+any migration. A separately reviewed forward trigger repair is needed before resume.
+After that repair is explicitly approved/applied, run these exact isolated commands
+from this worktree; the function selects ONLY internal loopback in the named container:
+
+```powershell
+$container = 'flexsoar-payment-db-69c6161-20261016T022841Z'
+# First reverify exact ID, network none, no ports, three read-only mounts as before.
+function Invoke-PaymentDb {
+    & docker exec -i -e PGHOST=127.0.0.1 -e PGPORT=5432 `
+        -e PGDATABASE=flexsoar_payment_v2_test -e PGUSER=supabase_admin `
+        -e PGOPTIONS='-c payment_v2.test_identity=synthetic-payment-v2-only' `
+        $container psql -X -v ON_ERROR_STOP=1 `
+        -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY @args
+    if ($LASTEXITCODE -ne 0) { throw 'Isolated SQL stage failed; preserve output and STOP' }
+}
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$export = Join-Path $env:TEMP "flexsoar-codec-export-$stamp.json"
+$comparison = Join-Path $env:TEMP "flexsoar-codec-comparison-$stamp.json"
+$json = Invoke-PaymentDb -q -At -f /audit/tests/payment-db/06_export_encoding_permit.sql
+[IO.File]::WriteAllText($export, ($json -join "`n"), (New-Object Text.UTF8Encoding($false)))
+node tests/payment-db/make-encoding-vectors.mjs permit $export $comparison
+if ($LASTEXITCODE -ne 0) { throw 'Actual SQL/production TS permit comparison failed' }
+$comparisonJson = [IO.File]::ReadAllText($comparison)
+Invoke-PaymentDb -v "comparison_json=$comparisonJson" -f /audit/tests/payment-db/07_encoding_acceptance.sql
+Invoke-PaymentDb -f /audit/tests/payment-db/10_contracts.sql
+# Continue20,30 and all previously documented worker/concurrent/recovery scenarios,
+# stopping at first failure. Do not manually insert markers.
+# ONLY after all original34 + encoding checkpoints succeed:
+Invoke-PaymentDb -f /audit/tests/payment-db/90_final_acceptance.sql
+```
+
+07 reruns05 assertions and requires the full actual SQL permit/TS comparison artifact,
+then commits the private payment_db_codec.completion encoding row. It is NOT RUN.
+90 requires that explicit additional checkpoint; original34 are unchanged. Final
+record now reports version2/requiredCheckpoints35. A missing encoding schema/row fails.
+35 excludes the final acceptance record itself. No gate was executed this turn.
+
+Separate demonstrated issue awaiting review: floor(total_units*500/10000) in applied
+059/060 overcharges1 base unit at max-u64. No amount/constraint repair was made.
+Full evidence/proposals are in latest handoff. No database suite or end-to-end recovery
+acceptance claimed. Funding remains disabled. Logs and original environment retained.
