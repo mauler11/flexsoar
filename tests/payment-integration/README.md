@@ -360,3 +360,47 @@ FSC-copy expectations at `tests/invariants.test.ts:1901,1960`);
 message remain. Earlier runs intermittently showed the admin/market mock errors
 (described above); they were not present in this latest full run. The focused
 market control still reproduced its `.in()` mock deficiency.
+
+## Finalized RPC evidence binding follow-up (2026-10-16)
+
+The production `LocalFinalizedRpcSource` requests base64, `jsonParsed`, compiled
+`json`, and validated lookup-table account data. Real validator observations show
+that `jsonParsed.meta` may omit `loadedAddresses`; the compiled `json` response
+provides it for the v0 lookup, and the implementation validates it against table
+account bytes and the parsed resolved account list. RPC `stackHeight` is execution
+metadata, accepted when absent/null/positive, while serialized program index,
+ordered accounts and data remain bound to the wire message. Cross-source comparison
+ignores valid differences in lookup-table `contextSlot`, but not resolved address,
+transaction identity or execution-result differences.
+
+An actual loopback-only run is recorded in the helper state at
+`/state/evidence-adapter-PXfMA7/verification.json`. It used new ephemeral keys and a
+fresh local ledger and passed acquisition plus retained validation for a legacy
+transaction and v0 address-lookup transaction. For the v0 transaction, jsonParsed
+omitted loaded addresses, compiled json included the writable resolved address, and
+lookup proof was retained. A snapshot of that same local response at table context
+slot 136 agreed with a later primary observation at context slot 137. This was a
+simulated local snapshot archive: the ledger was not pruned and this is not evidence
+of an independent archive provider's retention. Later fresh-ledger retries failed
+at lookup-table creation with `is not a recent slot`; failure evidence is preserved
+under `/state/evidence-adapter-*/failure.txt` and is not counted as a pass.
+
+The integration database was read through the dedicated verifier/settler logins in
+the same attested container and loopback namespace. The committed receipt was
+recovered twice identically without a chain query. Pending evidence readback remains
+blocked: the verifier context RPC in applied migration 068 fails in its attempt
+branch because PL/pgSQL row variable `s` conflicts with SQL alias `s` (`s.id` is
+ambiguous). The read RPC returned no evidence and the harness stopped before any
+write or lifecycle consumption. No schema changes or SQL were made/applied in this
+follow-up. Do not infer pending acknowledgement recovery from the receipt pass; a
+reviewed forward database repair and successful dedicated-login evidence-envelope
+readback are still required. The accepted `flexsoar_payment_v2_test` database was
+not accessed.
+
+Application checks run for this follow-up: focused evidence/payment tests 66/66;
+`npx tsc --noEmit` exit 0; `npm test` 526/528 with only the two existing FSC-copy
+assertions failing at `tests/invariants.test.ts:1901,1960` (no admin/market mock
+failures in this run); `npx next build --webpack` exit 0, 40/40 static pages. The
+build still reports the optional Privy `@farcaster/mini-app-solana` resolution
+warning and missing Stripe-secret diagnostic. These application checks do not prove
+the blocked pending-evidence database readback or production archive behavior.

@@ -14,7 +14,7 @@ export interface FinalizedRpcResult {
   slot: number; blockTime: number; transaction: [string, 'base64'];
   meta: Record<string, unknown>; version?: number | string;
 }
-interface RawCompiledInstruction { programIdIndex: number; accounts: number[]; data: string }
+interface RawCompiledInstruction { programIdIndex: number; accounts: number[]; data: string; stackHeight?: number | null }
 interface RawCompiledMessage {
   header: { numRequiredSignatures: number; numReadonlySignedAccounts: number; numReadonlyUnsignedAccounts: number };
   accountKeys: string[]; recentBlockhash: string; instructions: RawCompiledInstruction[];
@@ -137,7 +137,15 @@ function lookupState(proof:LookupTableEvidence,expectedAddress:string):AddressLo
   const data=strictBase64(proof.dataBase64,'lookup table');if(hash(data)!==proof.dataDigest)throw new Error('address lookup table evidence digest mismatch');
   const state=AddressLookupTableAccount.deserialize(data);return new AddressLookupTableAccount({key:new PublicKey(proof.address),state});
 }
-function resolveKeys(transaction:VersionedTransaction,proofs:LookupTableEvidence[],parsed:ParsedFinalizedRpcResult):{keys:PublicKey[];signer:boolean[];writable:boolean[]}{
+function loadedAddresses(meta:Record<string,unknown>,label:string):{writable:string[];readonly:string[]}|undefined{
+  if(!Object.hasOwn(meta,'loadedAddresses'))return undefined;
+  const value=meta.loadedAddresses;
+  if(!value||typeof value!=='object'||Array.isArray(value))throw new Error(`invalid ${label} loaded addresses`);
+  const row=value as Record<string,unknown>;
+  if(!Array.isArray(row.writable)||!row.writable.every(x=>typeof x==='string')||!Array.isArray(row.readonly)||!row.readonly.every(x=>typeof x==='string'))throw new Error(`invalid ${label} loaded addresses`);
+  return {writable:row.writable as string[],readonly:row.readonly as string[]};
+}
+function resolveKeys(transaction:VersionedTransaction,proofs:LookupTableEvidence[],parsed:ParsedFinalizedRpcResult,compiledMeta:Record<string,unknown>):{keys:PublicKey[];signer:boolean[];writable:boolean[]}{
   const parts=messageParts(transaction),staticKeys=parts.staticKeys,header=parts.header;
   let loadedWritable:PublicKey[]=[],loadedReadonly:PublicKey[]=[];
   if(parts.version==='legacy'){
@@ -154,18 +162,44 @@ function resolveKeys(transaction:VersionedTransaction,proofs:LookupTableEvidence
       for(const index of lookup.writableIndexes){if(index>=state.addresses.length||state.lastExtendedSlot===parsed.slot&&index>=state.lastExtendedSlotStartIndex)throw new Error('address lookup writable index unavailable at transaction slot');loadedWritable.push(state.addresses[index]);}
       for(const index of lookup.readonlyIndexes){if(index>=state.addresses.length||state.lastExtendedSlot===parsed.slot&&index>=state.lastExtendedSlotStartIndex)throw new Error('address lookup readonly index unavailable at transaction slot');loadedReadonly.push(state.addresses[index]);}
     }
-    const loaded=(parsed.meta as typeof parsed.meta&{loadedAddresses?:{writable?:string[];readonly?:string[]}})?.loadedAddresses;
-    if(!loaded||canonical(loaded.writable)!==canonical(loadedWritable.map(x=>x.toBase58()))||canonical(loaded.readonly)!==canonical(loadedReadonly.map(x=>x.toBase58())))throw new Error('parsed loaded addresses do not match validated lookup tables');
+    // jsonParsed omits meta.loadedAddresses on Solana RPC. The compiled json
+    // response carries it; table proofs and jsonParsed account keys are checked
+    // independently as well.
+    const loaded=loadedAddresses(compiledMeta,'compiled JSON');
+    if(!loaded||canonical(loaded.writable)!==canonical(loadedWritable.map(x=>x.toBase58()))||canonical(loaded.readonly)!==canonical(loadedReadonly.map(x=>x.toBase58())))throw new Error('compiled loaded addresses do not match validated lookup tables');
+    const parsedLoaded=loadedAddresses(parsed.meta,'jsonParsed');
+    if(parsedLoaded&&(canonical(parsedLoaded.writable)!==canonical(loaded.writable)||canonical(parsedLoaded.readonly)!==canonical(loaded.readonly)))throw new Error('parsed loaded addresses conflict with compiled lookup resolution');
   }else {
     if(proofs.length)throw new Error('unexpected address lookup table evidence');
-    const loaded=(parsed.meta as typeof parsed.meta&{loadedAddresses?:{writable?:string[];readonly?:string[]}})?.loadedAddresses;
-    if(loaded&&(loaded.writable?.length||loaded.readonly?.length))throw new Error('unexpected parsed loaded addresses');
+    for(const [meta,label] of [[compiledMeta,'compiled JSON'],[parsed.meta,'jsonParsed']] as const){const loaded=loadedAddresses(meta,label);if(loaded&&(loaded.writable.length||loaded.readonly.length))throw new Error(`unexpected ${label} loaded addresses`);}
   }
   const keys=[...staticKeys,...loadedWritable,...loadedReadonly],signer=keys.map((_,index)=>index<header.numRequiredSignatures);
   const writable=keys.map((_,index)=>index<staticKeys.length
     ? index<header.numRequiredSignatures?index<header.numRequiredSignatures-header.numReadonlySignedAccounts:index<staticKeys.length-header.numReadonlyUnsignedAccounts
     : index<staticKeys.length+loadedWritable.length);
   return {keys,signer,writable};
+}
+function wireInstructionFields(value:unknown):RawCompiledInstruction[]{
+  if(!Array.isArray(value))throw new Error('compiled RPC instructions are missing');
+  return value.map((entry,index)=>{
+    if(!entry||typeof entry!=='object'||Array.isArray(entry))throw new Error(`invalid compiled instruction ${index}`);
+    const ix=entry as Record<string,unknown>;
+    if(!Number.isSafeInteger(ix.programIdIndex)||Number(ix.programIdIndex)<0||!Array.isArray(ix.accounts)||!ix.accounts.every(n=>Number.isSafeInteger(n)&&Number(n)>=0&&Number(n)<=255)||typeof ix.data!=='string')throw new Error(`invalid wire instruction fields ${index}`);
+    // stackHeight is execution metadata, not a serialized message field.
+    // RPC variants omit it or report null/positive integer values.
+    if(Object.hasOwn(ix,'stackHeight')&&ix.stackHeight!==null&&(!Number.isSafeInteger(ix.stackHeight)||Number(ix.stackHeight)<1))throw new Error(`invalid instruction stackHeight ${index}`);
+    return {programIdIndex:Number(ix.programIdIndex),accounts:(ix.accounts as number[]).map(Number),data:ix.data as string};
+  });
+}
+function innerInstructionFields(meta:Record<string,unknown>):{index:number;instructions:RawCompiledInstruction[]}[]{
+  if(!Object.hasOwn(meta,'innerInstructions')||meta.innerInstructions===null)return [];
+  if(!Array.isArray(meta.innerInstructions))throw new Error('invalid compiled inner-instruction groups');
+  return meta.innerInstructions.map((entry,index)=>{
+    if(!entry||typeof entry!=='object'||Array.isArray(entry))throw new Error(`invalid compiled inner-instruction group ${index}`);
+    const group=entry as Record<string,unknown>;
+    if(!Number.isSafeInteger(group.index)||Number(group.index)<0)throw new Error(`invalid compiled inner-instruction index ${index}`);
+    return {index:Number(group.index),instructions:wireInstructionFields(group.instructions)};
+  });
 }
 function validateParsedBinding(transaction:VersionedTransaction,parsed:ParsedFinalizedRpcResult,wire:FinalizedRpcResult):ParsedFinalizedRpcResult{
   if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)||!parsed.transaction||!parsed.meta)throw new Error('invalid parsed finalized transaction response');
@@ -175,8 +209,10 @@ function validateParsedBinding(transaction:VersionedTransaction,parsed:ParsedFin
   const compiled=parsed.compiledRpcResult;
   if(!compiled||compiled.slot!==wire.slot||compiled.blockTime!==wire.blockTime||compiled.meta?.err!==null||canonical(executionMeta(compiled.meta))!==canonical(executionMeta(wire.meta))||canonical(compiled.transaction?.signatures)!==canonical(signatures))throw new Error('compiled RPC transaction identity/metadata mismatch');
   const parts=messageParts(transaction),raw=compiled.transaction.message;
-  if(!raw||canonical(raw.header)!==canonical(parts.header)||raw.recentBlockhash!==parts.recentBlockhash||canonical(raw.accountKeys)!==canonical(parts.staticKeys.map(k=>k.toBase58()))||canonical(raw.instructions)!==canonical(parts.instructions)||canonical(raw.addressTableLookups??[])!==canonical(parts.lookups)||compiled.version!==undefined&&compiled.version!==(parts.version==='legacy'?'legacy':0))throw new Error('compiled RPC message does not match serialized transaction bytes');
-  const resolved=resolveKeys(transaction,parsed.lookupTableEvidence??[],parsed);
+  if(!raw||canonical(raw.header)!==canonical(parts.header)||raw.recentBlockhash!==parts.recentBlockhash||canonical(raw.accountKeys)!==canonical(parts.staticKeys.map(k=>k.toBase58()))||canonical(wireInstructionFields(raw.instructions))!==canonical(parts.instructions)||canonical(raw.addressTableLookups??[])!==canonical(parts.lookups)||compiled.version!==undefined&&compiled.version!==(parts.version==='legacy'?'legacy':0))throw new Error('compiled RPC message does not match serialized transaction bytes');
+  const resolved=resolveKeys(transaction,parsed.lookupTableEvidence??[],parsed,compiled.meta);
+  const base64Loaded=loadedAddresses(wire.meta,'base64'),compiledLoaded=loadedAddresses(compiled.meta,'compiled JSON');
+  if(base64Loaded&&compiledLoaded&&(canonical(base64Loaded.writable)!==canonical(compiledLoaded.writable)||canonical(base64Loaded.readonly)!==canonical(compiledLoaded.readonly)))throw new Error('base64 and compiled loaded addresses conflict');
   const parsedKeys=parsed.transaction.message.accountKeys;
   if(parsedKeys.length!==resolved.keys.length||parsedKeys.some((key,index)=>key.pubkey!==resolved.keys[index].toBase58()||key.signer!==resolved.signer[index]||key.writable!==resolved.writable[index]))throw new Error('parsed account keys or derived signer/writable privileges mismatch');
   const canonicalInstructions=parts.instructions.map(ix=>({programId:resolved.keys[ix.programIdIndex]?.toBase58(),accounts:ix.accounts.map(index=>resolved.keys[index]?.toBase58()),data:ix.data}));
@@ -193,7 +229,7 @@ function validateParsedBinding(transaction:VersionedTransaction,parsed:ParsedFin
   return parsed;
 }
 function validateParsedInnerInstructions(parsed:ParsedFinalizedRpcResult,compiled:ParsedFinalizedRpcResult['compiledRpcResult'],topLevel:{programId:string;accounts:string[];data:string}[],keys:PublicKey[]):void{
-  const rawGroups=((compiled.meta.innerInstructions??[]) as {index:number;instructions:RawCompiledInstruction[]}[]),parsedGroups=parsed.meta.innerInstructions??[];
+  const rawGroups=innerInstructionFields(compiled.meta),parsedGroups=parsed.meta.innerInstructions??[];
   if(rawGroups.length!==parsedGroups.length)throw new Error('parsed inner-instruction groups mismatch');
   for(let g=0;g<rawGroups.length;g++){
     const raw=rawGroups[g],view=parsedGroups[g];if(raw.index!==view.index||raw.index<0||raw.index>=topLevel.length||raw.instructions.length!==view.instructions.length)throw new Error('parsed inner-instruction order mismatch');
@@ -213,6 +249,26 @@ function validateParsedShapeAndBind(transaction:VersionedTransaction,raw:Finaliz
   if(!parsedValue||typeof parsedValue!=='object'||Array.isArray(parsedValue))throw new Error('invalid parsed finalized transaction response');
   const parsed=parsedValue as ParsedFinalizedRpcResult;
   return validateParsedBinding(transaction,parsed,raw);
+}
+function wireObservation(value:{result:FinalizedRpcResult;transaction:VersionedTransaction}):string{
+  return canonical({
+    transaction:Buffer.from(value.transaction.serialize()).toString('base64'),
+    slot:value.result.slot,
+    blockTime:value.result.blockTime,
+    execution:executionMeta(value.result.meta),
+  });
+}
+function semanticObservation(value:{result:FinalizedRpcResult;parsed:ParsedFinalizedRpcResult;transaction:VersionedTransaction}):string{
+  const parts=messageParts(value.transaction),compiled=value.parsed.compiledRpcResult;
+  const resolved=resolveKeys(value.transaction,value.parsed.lookupTableEvidence??[],value.parsed,compiled.meta);
+  return canonical({
+    wire:wireObservation(value),
+    signatures:value.transaction.signatures.map(base58Encode),
+    resolvedAddresses:resolved.keys.map(key=>key.toBase58()),
+    instructions:parts.instructions,
+    lookups:parts.lookups,
+    executionDetails:{innerInstructions:innerInstructionFields(compiled.meta),returnData:compiled.meta.returnData??null},
+  });
 }
 
 /** Checks each source independently. Only explicit source unavailability or a
@@ -247,11 +303,8 @@ export async function acquireFinalizedEvidence(
     found.push({ ...candidate, result:checked.result, parsed, transaction:checked.transaction });
   }
   if (!found.length) throw new Error(`finalized history unavailable (${unavailable.join('; ')||'transaction absent'})`);
-  if (observed.length > 1) {
-    const first=observed[0];
-    for(const next of observed.slice(1))if(!Buffer.from(first.transaction.serialize()).equals(Buffer.from(next.transaction.serialize()))||first.result.slot!==next.result.slot||first.result.blockTime!==next.result.blockTime||canonical(executionMeta(first.result.meta))!==canonical(executionMeta(next.result.meta)))throw new EvidenceValidationError('primary/archive finalized evidence conflict');
-  }
-  if(found.length>1&&canonical(found[0].parsed)!==canonical(found[1].parsed))throw new EvidenceValidationError('primary/archive parsed finalized evidence conflict');
+  if(observed.length>1){const first=wireObservation(observed[0]);for(const next of observed.slice(1))if(wireObservation(next)!==first)throw new EvidenceValidationError('primary/archive finalized evidence conflict');}
+  if(found.length>1){const first=semanticObservation(found[0]);for(const next of found.slice(1))if(semanticObservation(next)!==first)throw new EvidenceValidationError('primary/archive finalized evidence conflict');}
   const chosen = found.find(x => x.kind === 'primary') ?? found[0];
   const bytes = chosen.transaction.serialize();
   return {

@@ -25,9 +25,9 @@ export async function decodeSale(address: string, bytes: Uint8Array, program: st
 export interface V2Transaction {
   slot: number; transaction: {signatures: string[]; message: {
     accountKeys: {pubkey:string;signer:boolean;writable:boolean}[];
-    instructions: {programId:string;accounts?:string[];data?:string}[];
+    instructions: {programId:string;accounts?:string[];data?:string;program?:string;parsed?:{type:string;info:Record<string,unknown>}}[];
   }};
-  meta: {err: unknown; innerInstructions?: {index:number;instructions:{programId:string;parsed?:{type:string;info:Record<string,string>}}[]}[];
+  meta: {err: unknown; [key:string]:unknown; innerInstructions?: {index:number;instructions:{programId:string;parsed?:{type:string;info:Record<string,string>}}[]}[];
     preTokenBalances?: Balance[];postTokenBalances?: Balance[]};
 }
 interface Balance {accountIndex:number;mint:string;owner?:string;programId?:string;uiTokenAmount:{amount:string;decimals:number}}

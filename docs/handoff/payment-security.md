@@ -3164,3 +3164,81 @@ existing missing-Stripe-secret message during static collection. No shared tests
 were modified. These are offline tests; no chain or database was accessed for
 this correction, so production RPC compatibility and database integration of the
 additional JSON evidence fields remain unverified here.
+
+## 2026-10-16 - RPC-shaped wire binding and isolated adapter/readback follow-up
+
+The follow-up review found one more source-comparison edge: base64 `meta.loadedAddresses`
+is optional, while `jsonParsed` omits it in actual RPC responses and compiled `json`
+provides the lookup result. Source equality now compares serialized bytes, execution
+slot/time and execution results separately from a semantic parsed representation.
+The semantic comparison includes the validated resolved address list, ordered wire
+instructions and lookup references, plus normalized inner instructions and return
+data. Lookup proof `contextSlot` can differ between primary and archive when each
+individually satisfies its transaction-slot and table-state validation. A base64
+response omitting optional loaded addresses no longer conflicts with one that includes
+them; v0 validation still requires compiled-json loaded addresses and checks them
+against table bytes and jsonParsed account addresses/privileges.
+
+Compiled instruction matching uses only serialized fields (`programIdIndex`, ordered
+account indices and base58 data). It accepts RPC `stackHeight` omitted, null, or a
+positive safe integer, validates its shape, then excludes it from the wire comparison.
+The same normalization is used for inner instructions, while existing inner token
+transfer and execution metadata checks remain. Legacy and v0 formats are supported;
+unsupported message formats and unresolvable lookup tables remain fail-closed. No
+schema or SQL change was made, and no public or production RPC was accessed.
+
+Focused tests after the final changes: `npx --no-install vitest run
+tests/payment-context-evidence.test.ts tests/payment-v2.test.ts` — 2 files, 66/66
+passed. Coverage includes stackHeight omitted/null/positive, malformed height,
+program/account-index/order/data alterations, signer/writable/signature-list tampering
+in acquisition and retained recovery, primary/archive context-slot differences,
+omitted optional base64 loaded addresses, changed lookup resolutions, conflicting
+execution metadata, jsonParsed without loadedAddresses, and actual adapter method
+shapes for base64/json/jsonParsed plus table-account lookup. These focused tests use
+local fixtures and are not chain/database proof.
+
+An actual loopback-only local validator run is preserved at
+`/state/evidence-adapter-PXfMA7/verification.json` in the isolated helper state. It
+used fresh ephemeral identities and a fresh ledger, then acquired and retained-validated
+a legacy transaction and a v0 address-lookup transaction through production
+`LocalFinalizedRpcSource`. In the v0 RPC result, `jsonParsed` omitted
+`meta.loadedAddresses`; compiled `json` supplied the resolved writable address, the
+validated lookup proof was retained, and retained evidence passed. The same captured
+local transaction was compared against a later primary observation with lookup context
+slots 136 and 137; semantic agreement passed. The archive was a snapshot of that same
+local validator, not an independent archival service, and `ledgerPruned=false`. This
+does not prove production archive retention or actual pruning recovery. Several later
+fresh-ledger retries failed before lookup-table creation because the local ALT program
+rejected the candidate recent slot; their failure logs remain in separate
+`/state/evidence-adapter-*/failure.txt` directories. The earlier successful run and
+its ledger/evidence were preserved; failed fresh ledgers were not represented as passes.
+
+The preserved container was rechecked before the database readback: container ID
+`71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92`, network `none`,
+no published ports, exactly the approved read-only mounts, and internal loopback to
+`flexsoar_payment_v2_integration_test` using the dedicated verifier login. The accepted
+`flexsoar_payment_v2_test` was not connected to or changed. In the integration DB, the
+committed-receipt fast path returned the same receipt twice without chain retrieval.
+Pending evidence readback did not pass: `fn_payment_v2_verifier_context(text,uuid)`
+raised `column reference "s.id" is ambiguous` in its attempt branch because PL/pgSQL
+row variable `s` conflicts with SQL alias `s` in `JOIN payment_v2.sales s ON s.id=a.sale_id`.
+The verifier evidence reads returned NULL; no evidence was overwritten and the script
+stopped before any persist or lifecycle consume. No SQL repair is authorized here.
+Required follow-up is a reviewed forward migration that fixes the alias/local-variable
+collision without changing the function contract or grants, applied only after review;
+then rerun dedicated verifier-context and evidence-envelope readback tests. Receipt-only
+recovery is independently proven, but pending-acknowledgement recovery from persisted
+evidence is not proven by this run.
+
+Final application validation for this source state: focused payment/evidence tests
+passed 66/66 across 2 files; `npx tsc --noEmit` exited 0; full `npm test` ran 528
+tests with 526 passing and only the two existing FSC-copy assertions failing at
+`tests/invariants.test.ts:1901,1960`; the intermittent admin/market mock failures did
+not occur in this run. `npx next build --webpack` exited 0 and generated 40/40 static
+pages. The build still warns that Privy cannot resolve optional
+`@farcaster/mini-app-solana` and prints the existing missing Stripe secret diagnostic
+during static collection. `git diff --check` passed. Manifest and lock hashes match
+main's human-prepared pair exactly; neither file is part of this task commit. Funding
+remains disabled. The old pending evidence, pruned acknowledgement, expired escrow
+and unresolved registration remain blocked; no replacement payment, signature, or
+historical execution context was invented.

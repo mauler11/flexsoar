@@ -52,12 +52,12 @@ function signedSample(mode:'legacy'|'v0'|'lookup'='v0') {
   if(mode==='lookup')keyRows.push({pubkey:recipient.publicKey.toBase58(),signer:false,writable:true});
   const rawMessage={header:transaction.message.header,accountKeys:staticKeys.map(x=>x.toBase58()),recentBlockhash,
     instructions:compiled,addressTableLookups};
-  const meta={err:null,...(mode==='lookup'?{loadedAddresses:{writable:loadedWritable,readonly:loadedReadonly}}:{})};
+  const meta={err:null,...(mode==='lookup'?{loadedAddresses:{writable:loadedWritable,readonly:loadedReadonly}}:{})},parsedMeta={...meta};delete parsedMeta.loadedAddresses;
   const parsed:ParsedFinalizedRpcResult={slot:42,blockTime:1234,transaction:{signatures:transaction.signatures.map(base58Encode),message:{accountKeys:keyRows,
-    instructions:compiled.map(ix=>({programId:keyRows[ix.programIdIndex].pubkey,accounts:ix.accounts.map(index=>keyRows[index].pubkey),data:ix.data}))}},meta,
+    instructions:compiled.map(ix=>({programId:keyRows[ix.programIdIndex].pubkey,accounts:ix.accounts.map(index=>keyRows[index].pubkey),data:ix.data}))}},meta:parsedMeta,
     compiledRpcResult:{slot:42,blockTime:1234,version:version==='legacy'?'legacy':version,transaction:{signatures:transaction.signatures.map(base58Encode),message:rawMessage},meta},
     lookupTableEvidence:lookupProof?[lookupProof]:[]};
-  const wire:FinalizedRpcResult={slot:42,blockTime:1234,transaction:[bytes.toString('base64'),'base64'],meta,version:version==='legacy'?'legacy':version};
+  const wire:FinalizedRpcResult={slot:42,blockTime:1234,transaction:[bytes.toString('base64'),'base64'],meta:structuredClone(meta),version:version==='legacy'?'legacy':version};
   return {signature,wire,parsed,transaction};
 }
 
@@ -121,6 +121,31 @@ describe('payment operation contexts and retained finalized evidence',()=>{
     const primary=source('primary',genesis,sample),archive=source('archive:different',genesis,other);
     await expect(acquireFinalizedEvidence(primary,archive,expected,inspect)).rejects.toThrow(/conflict/);
     await expect(acquireFinalizedEvidence({ ...primary,getTransaction:async()=>null },null,expected,inspect)).rejects.toThrow(/history unavailable/);
+  });
+
+  it('compares source semantics while ignoring valid lookup observation context slots',async()=>{
+    const sample=signedSample('lookup'),genesis=b58(k(63)),expected={networkId:uuid,genesis,program:publicKey(64).toBase58(),signature:sample.signature,subjectKind:'lifecycle' as const,subjectId:uuid,subjectAction:'opened'};
+    const laterContext=structuredClone(sample);laterContext.parsed.lookupTableEvidence[0].contextSlot=43;
+    await expect(acquireFinalizedEvidence(source('primary-context-42',genesis,sample),source('archive:context-43',genesis,laterContext),expected,()=>{})).resolves.toMatchObject({sourceKind:'primary',slot:42});
+    const omittedWireLoaded=structuredClone(sample);delete omittedWireLoaded.wire.meta.loadedAddresses;
+    await expect(acquireFinalizedEvidence(source('primary-omits-optional-loaded-metadata',genesis,omittedWireLoaded),source('archive:includes-optional-loaded-metadata',genesis,sample),expected,()=>{})).resolves.toMatchObject({sourceKind:'primary'});
+
+    const invalidSlot=structuredClone(sample);invalidSlot.parsed.lookupTableEvidence[0].contextSlot=41;
+    await expect(acquireFinalizedEvidence(source('primary-invalid-context',genesis,invalidSlot),null,expected,()=>{})).rejects.toThrow(/lookup table state/);
+
+    const changed=structuredClone(sample),table=Buffer.from(changed.parsed.lookupTableEvidence[0].dataBase64,'base64'),newAddress=publicKey(65);
+    newAddress.toBuffer().copy(table,56);changed.parsed.lookupTableEvidence[0].dataBase64=table.toString('base64');changed.parsed.lookupTableEvidence[0].dataDigest=createHash('sha256').update(table).digest('hex');
+    const changedLoaded=changed.parsed.compiledRpcResult.meta.loadedAddresses as {writable:string[];readonly:string[]};changedLoaded.writable=[newAddress.toBase58()];
+    changed.parsed.transaction.message.accountKeys.at(-1)!.pubkey=newAddress.toBase58();
+    changed.parsed.transaction.message.instructions[0].accounts![1]=newAddress.toBase58();
+    changed.wire.meta={...changed.wire.meta,loadedAddresses:{writable:[newAddress.toBase58()],readonly:[]}};
+    await expect(acquireFinalizedEvidence(source('primary-original-address',genesis,sample),source('archive:changed-address',genesis,changed),expected,()=>{})).rejects.toThrow(/conflict/);
+
+    const changedExecution=structuredClone(sample);
+    changedExecution.wire.meta={...changedExecution.wire.meta,fee:99};
+    changedExecution.parsed.meta={...changedExecution.parsed.meta,fee:99};
+    changedExecution.parsed.compiledRpcResult.meta={...changedExecution.parsed.compiledRpcResult.meta,fee:99};
+    await expect(acquireFinalizedEvidence(source('primary-execution-a',genesis,sample),source('archive:execution-b',genesis,changedExecution),expected,()=>{})).rejects.toThrow(/conflict/);
   });
 
   it('falls back only for absent or explicitly unavailable sources',async()=>{
@@ -195,6 +220,50 @@ describe('payment operation contexts and retained finalized evidence',()=>{
         await expect(validateRetainedFinalizedEvidence(changed,expected,inspect)).rejects.toThrow(/lookup table|digest/);
       }
     }
+  });
+
+  it('accepts compiled RPC stackHeight variants and rejects altered wire instruction fields',async()=>{
+    const genesis=b58(k(78)),sample=signedSample(),expected={networkId:uuid,genesis,program:publicKey(79).toBase58(),signature:sample.signature,subjectKind:'lifecycle' as const,subjectId:uuid,subjectAction:'opened'};
+    for(const stackHeight of [undefined,null,1] as const){
+      const candidate=structuredClone(sample),instruction=candidate.parsed.compiledRpcResult.transaction.message.instructions[0];
+      if(stackHeight===undefined)delete instruction.stackHeight;else instruction.stackHeight=stackHeight;
+      const acquired=await acquireFinalizedEvidence(source(`stack-height-${String(stackHeight)}`,genesis,candidate),null,expected,()=>{});
+      await expect(validateRetainedFinalizedEvidence(acquired,expected,()=>{})).resolves.toMatchObject({signature:sample.signature});
+    }
+    const invalidStack=structuredClone(sample);invalidStack.parsed.compiledRpcResult.transaction.message.instructions[0].stackHeight=0;
+    await expect(acquireFinalizedEvidence(source('stack-height-invalid',genesis,invalidStack),null,expected,()=>{})).rejects.toThrow(/stackHeight/);
+    const alterations=[
+      (ix:{programIdIndex:number;accounts:number[];data:string})=>{ix.programIdIndex++;},
+      (ix:{programIdIndex:number;accounts:number[];data:string})=>{ix.accounts.reverse();},
+      (ix:{programIdIndex:number;accounts:number[];data:string})=>{ix.data='111';},
+    ];
+    for(const alter of alterations){const candidate=structuredClone(sample);alter(candidate.parsed.compiledRpcResult.transaction.message.instructions[0]);await expect(acquireFinalizedEvidence(source('wire-instruction-alteration',genesis,candidate),null,expected,()=>{})).rejects.toThrow(/compiled RPC message/);}
+  });
+
+  it('handles actual Solana RPC encoding shapes with loaded addresses only in json',async()=>{
+    const sample=signedSample('lookup'),calls:Record<string,unknown>[]=[];
+    const parsed=structuredClone(sample.parsed);parsed.meta={err:null};
+    const payer=parsed.transaction.message.accountKeys.find(row=>row.signer)?.pubkey;
+    const destination=sample.parsed.lookupTableEvidence[0].address?new PublicKey(Buffer.from(sample.parsed.lookupTableEvidence[0].dataBase64,'base64').subarray(56,88)).toBase58():'';
+    parsed.transaction.message.instructions=[{programId:SystemProgram.programId.toBase58(),parsed:{type:'transfer',info:{source:payer??'',destination,lamports:'1'}}}];
+    const genesis=b58(k(80)),expected={networkId:uuid,genesis,program:publicKey(81).toBase58(),signature:sample.signature,subjectKind:'lifecycle' as const,subjectId:uuid,subjectAction:'opened'};
+    const rpc=new LocalFinalizedRpcSource('http://127.0.0.1:8899','local-rpc-fixture',async(_url,init)=>{
+      const request=JSON.parse(String(init?.body)) as Record<string,unknown>;calls.push(request);
+      const method=String(request.method),params=request.params as unknown[],encoding=(params[1] as Record<string,unknown>|undefined)?.encoding;
+      let result:unknown;
+      if(method==='getGenesisHash')result=genesis;
+      else if(method==='getTransaction'&&encoding==='base64')result=sample.wire;
+      else if(method==='getTransaction'&&encoding==='jsonParsed')result=parsed;
+      else if(method==='getTransaction'&&encoding==='json')result=sample.parsed.compiledRpcResult;
+      else if(method==='getAccountInfo')result={context:{slot:43},value:{owner:AddressLookupTableProgram.programId.toBase58(),data:[sample.parsed.lookupTableEvidence[0].dataBase64,'base64']}};
+      else throw new Error(`unexpected RPC method ${method}`);
+      return new Response(JSON.stringify({jsonrpc:'2.0',id:request.id,result}),{status:200,headers:{'content-type':'application/json'}});
+    });
+    const acquired=await acquireFinalizedEvidence(rpc,null,expected,()=>{});
+    expect(acquired.parsedRpcResult.meta).not.toHaveProperty('loadedAddresses');
+    expect(acquired.parsedRpcResult.compiledRpcResult.meta.loadedAddresses).toEqual({writable:[destination],readonly:[]});
+    expect(calls.map(call=>((call.params as unknown[])[1] as Record<string,unknown>|undefined)?.encoding)).toEqual(expect.arrayContaining(['base64','json','jsonParsed']));
+    await expect(validateRetainedFinalizedEvidence(acquired,expected,()=>{})).resolves.toMatchObject({signature:sample.signature});
   });
 
   it('consumes retained ACK evidence through distinct worker adapters without a chain lookup',async()=>{
