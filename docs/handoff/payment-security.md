@@ -3242,3 +3242,319 @@ main's human-prepared pair exactly; neither file is part of this task commit. Fu
 remains disabled. The old pending evidence, pruned acknowledgement, expired escrow
 and unresolved registration remain blocked; no replacement payment, signature, or
 historical execution context was invented.
+
+## 2026-10-20 — verifier-context attempt-branch alias collision: proposed forward repair (not applied)
+
+Per AGENT_RULES.md ("Never create, edit, delete, or execute a `.sql` file. Schema is
+human-only."), this section is prose + proposed SQL text only. No `.sql` file was
+created, edited, or executed. No database connection was made this session (source
+reading only). Uncommitted `package.json`/`package-lock.json` changes and the debris
+files (`0`, `3`, the two SHA256-named files, `payment-security-5c3db0e.diff`) are
+founder-owned and were left untouched.
+
+### a) Root cause
+
+`supabase/migrations/068_payment_v2_contexts_evidence.sql:89` declares, among others,
+a PL/pgSQL row variable:
+
+```
+DECLARE d payment_v2.decisions%rowtype;x payment_v2.escrows%rowtype;s payment_v2.sales%rowtype;st payment_v2.staff%rowtype;keys jsonb;action_code integer;ix_name text;
+```
+
+`s` is bound to `payment_v2.sales%rowtype` for the lifetime of the function. In the
+`p_kind='attempt'` branch, `068:108-109`, the same name is reused as a SQL alias in a
+joined subquery:
+
+```
+RETURN (SELECT jsonb_build_object(...,'saleId',s.id,...)
+ FROM payment_v2.attempts a JOIN payment_v2.sales s ON s.id=a.sale_id WHERE a.id=p_subject_id AND a.permit IS NOT NULL);
+```
+
+Every bare `s.col` inside that subquery is syntactically ambiguous: Postgres's
+plpgsql parser must decide whether `s` refers to the outer composite variable or the
+inner query's table alias, and both bind a column of the same name. This resolves to
+SQLSTATE `42702` (ambiguous_column), text normally of the form `column reference "s.id"
+is ambiguous` — matching what's recorded at `docs/handoff/payment-security.md:3222-3223`
+("raised `column reference "s.id" is ambiguous` in its attempt branch"). No literal
+psql log with the SQLSTATE code or a `CONTEXT:` line is present anywhere in this repo's
+tracked files (checked `tests/payment-db/README.md`, `tests/payment-integration/README.md`,
+`docs/handoff/payment-security.md` for `SQLSTATE`/`CONTEXT:`/`is ambiguous` — only the
+narrative line above matched); `42702` is cited here as the standard Postgres code for
+this class of error, not as something read from a captured log.
+
+**Why this only surfaces at execution time, not at `CREATE FUNCTION` time:** plpgsql
+compiles each SQL statement lazily, the first time it is actually executed, and only
+for the branch that runs. `p_kind='decision'` and `p_kind='lifecycle'` both reference
+`s.col` too, but only against the bare variable (no competing alias in scope in those
+statements), so they compile and run fine. The `attempt` branch's statement is the only
+one where an alias named `s` is introduced inside the same statement as the variable
+`s`, so it is the only one where the ambiguity exists — and it is only discovered when
+that specific statement is parsed/planned on first call, i.e. at runtime, not at
+`CREATE FUNCTION`/migration-apply time.
+
+### b) Redefinition check, migrations 059-073
+
+Migrations referencing `fn_payment_v2_verifier_context` by name:
+
+| Migration | Touches the function? | Redefines body after 068? |
+|---|---|---|
+| 068_payment_v2_contexts_evidence.sql | Defines it (`CREATE FUNCTION`) | — (original) |
+| 070_payment_v2_context_governance_order.sql | Yes | Yes — `CREATE OR REPLACE` via `pg_get_functiondef` + text replace of `ORDER BY g.staff_id` → `ORDER BY a.staff_id` in the **decision** branch only. Does not touch the attempt branch. |
+
+No other file in `supabase/migrations/059*.sql` through `073*.sql` references this
+function name (`grep -rl fn_payment_v2_verifier_context supabase/migrations/` returns
+only 068 and 070). So the latest **repo-defined** body is: 068's body with that one
+substring replaced, per 070.
+
+**Applied-state records in `docs/handoff/payment-security.md`:**
+- **068** — explicitly named as applied ("the verifier context RPC in **applied
+  migration 068** fails in its attempt branch...", line ~3222).
+- **073** — explicitly named as applied, with a cited migration SHA256
+  (`1103FB7B...677C8`) and stated post-apply verification (owner, grants, search_path,
+  SECURITY DEFINER), applied "only to `flexsoar_payment_v2_integration_test`".
+- **069, 070, 071, 072** — **unknown**: no entry in `docs/handoff/payment-security.md`
+  (or any other track's handoff file) names any of these four files or states they were
+  applied. Given 073's own preflight structurally assumes a prior schema state and the
+  repo's own convention is to apply migrations in order, it is likely they ran before
+  073, but this is not something I found recorded, so I am not asserting it as fact.
+
+### c) Collision sweep — PL/pgSQL variable vs SQL alias, migrations 059-073
+
+Method: every `DECLARE` block in `059`-`073` was cross-referenced against every
+`FROM`/`JOIN ... <alias>` in the same function body, for aliases matching a declared
+variable name. Only read/greped — nothing executed.
+
+| Function (migration) | Declared names at risk | Alias collision? | Verdict |
+|---|---|---|---|
+| `fn_payment_v2_verifier_context`, attempt branch (068, carried into 070) | `s` | `JOIN payment_v2.sales s` inside the same statement as variable `s` | **CONFIRMED** |
+| `fn_payment_v2_verifier_context`, decision/lifecycle branches (068/070) | `d,x,s,st` | queries use bare table names or distinct aliases (`g`, `a` for `governance_approvals`), never re-alias `s`/`d`/`x`/`st` | CLEAR |
+| `payment_v2.attempt_status` (060) | — | `LANGUAGE sql`, not plpgsql — no PL/pgSQL variables exist to collide | CLEAR |
+| `fn_payment_v2_recovery_binding` (060) | `a` | query aliases attempts as `a0` (not `a`) specifically to avoid this; sales alias `s` has no declared `s` var here | CLEAR |
+| `fn_payment_v2_record_verified_event` (060) | `a,s,e` | all three branches use unaliased `FROM payment_v2.<table>`, no alias reused | CLEAR |
+| `fn_payment_v2_prepare_sale` (060) | `l,c,i,v,n,w,s` (s is `uuid`, not a rowtype) | no matching alias reuse found | CLEAR |
+| `payment_v2.exit_plan` (062) | `op,s,a,n` | query aliases attempts as `a0`, escrows as `x` (no declared `x`) — collision avoided | CLEAR |
+| `fn_payment_v2_signed_operation` / `fn_payment_v2_stage_signed_operation` (062) | `o` | queries alias `x`,`op` (not `o`) | CLEAR |
+| `payment_v2.correspondence()` trigger (063) | `ok` only | aliases `c,i,a,b,e,s,o` used freely — no declared var shares those names | CLEAR |
+| `fn_payment_v2_approve_refund` / refund-adjacent functions (061, 067) | `e,a,s,c,x,st,d,n` | subqueries alias as `d0,t,ad,at,rd,rt,st` (in a function that doesn't declare `st`), etc. — checked each, no same-function collision found | CLEAR |
+| `fn_payment_v2_store_chain_evidence` / `fn_payment_v2_attempt_context` (068/069) | `n,a,s,d,x,o` | all lookups use unaliased `FROM payment_v2.<table>`; the one aliased join (`events e JOIN consumptions c`) doesn't collide with any declared name in that function | CLEAR |
+| Remaining ~45 functions across 059-073 (`payment_v2.b58/le64/unb58/require_role/...`, admin/outbox/dispute/recovery/encoding functions) | various | no `DECLARE`'d name reused as a `FROM`/`JOIN` alias in the same body | CLEAR |
+
+Net: **one CONFIRMED defect** (the task's known bug), **zero POSSIBLE**, everything
+else **CLEAR**. Not exhaustively re-verified by execution — this is a static read, and
+I am stating that plainly rather than implying it was tested.
+
+### d) Proposed next migration
+
+Per the `0NN_payment_v2_<description>.sql` convention (`supabase/migrations/`, highest
+existing is `073_payment_v2_evidence_decision_column.sql`), the next file would be:
+
+```
+supabase/migrations/074_payment_v2_verifier_context_attempt_alias.sql
+```
+
+This is a proposed filename only — the founder creates the file.
+
+### e) Proposed SQL text (for the founder to create as 074, not executed by me)
+
+**md5(prosrc) precomputation.** I cannot query the live catalog, so I computed
+`md5(prosrc)` offline from the 068 source for both line-ending conventions, so the
+guard can accept either without me asserting which one the live row actually has.
+Method: `prosrc` is the verbatim text between the function's `$$` delimiters — i.e.
+`068_payment_v2_contexts_evidence.sql` lines 89 (`DECLARE ...`) through the `END` token
+on line 117 (the file's own `END $$;` — the `prosrc` text itself is `...END`, without
+the delimiter `$$;`). Concrete reproduction:
+
+```bash
+# from the repo root, LF form:
+sed -n '89,116p' supabase/migrations/068_payment_v2_contexts_evidence.sql > body.txt
+printf 'END' >> body.txt
+md5sum body.txt   # => 209bda0e6b3b6251270d21f7bbb02e6e
+
+# CRLF form: convert embedded LF to CRLF, same content otherwise
+perl -pe 's/\n/\r\n/' body.txt > body_crlf.txt
+md5sum body_crlf.txt   # => 29178c1a83f3282c65c66a0dfa19bcde
+```
+
+LF md5: `209bda0e6b3b6251270d21f7bbb02e6e`
+CRLF md5: `29178c1a83f3282c65c66a0dfa19bcde`
+
+**This is an assumption, not a verified fact** — I have not queried `pg_proc.prosrc`
+for the applied function, so I cannot confirm Postgres's stored `prosrc` matches this
+reconstruction byte-for-byte (e.g. if it trims a leading/trailing newline differently
+than assumed here). The PRE-GUARD below is written to refuse to proceed if neither
+hash matches, which converts that uncertainty into a safe failure rather than a silent
+wrong assumption — the founder should treat a PRE-GUARD failure as "re-derive the hash
+from the live catalog," not as proof the repair is wrong.
+
+```sql
+BEGIN;
+
+-- PRE-GUARD: refuse unless exactly one overload exists and its body is byte-identical
+-- (modulo LF/CRLF) to the 068-defined body, carried through 070's governance-order fix.
+DO $preguard$
+DECLARE overloads int;body_md5 text;
+BEGIN
+ SELECT count(*) INTO overloads FROM pg_proc
+  WHERE proname='fn_payment_v2_verifier_context' AND pronamespace='public'::regnamespace;
+ IF overloads<>1 THEN
+  RAISE EXCEPTION 'expected exactly one overload of fn_payment_v2_verifier_context, found %',overloads;
+ END IF;
+ SELECT md5(prosrc) INTO body_md5 FROM pg_proc
+  WHERE oid='public.fn_payment_v2_verifier_context(text,uuid)'::regprocedure;
+ IF body_md5 NOT IN ('209bda0e6b3b6251270d21f7bbb02e6e','29178c1a83f3282c65c66a0dfa19bcde') THEN
+  RAISE EXCEPTION 'applied body md5 % matches neither expected LF/CRLF hash; do not proceed, re-derive from live catalog',body_md5;
+ END IF;
+END $preguard$;
+
+-- SNAPSHOT: capture full identity/attribute state before changing anything.
+CREATE TEMP TABLE payment_v2_verifier_context_snapshot ON COMMIT DROP AS
+ SELECT oid,proowner,proacl,prosecdef,proconfig,provolatile,proisstrict,proparallel,
+        proleakproof,pg_get_function_identity_arguments(oid) AS identity_args,
+        pg_get_function_result(oid) AS result_type
+ FROM pg_proc WHERE oid='public.fn_payment_v2_verifier_context(text,uuid)'::regprocedure;
+
+-- REPAIR: rename only the colliding SQL alias (s -> sl) in the attempt branch.
+-- Signature, return type, language, SECURITY DEFINER and search_path are unchanged
+-- because they are not mentioned in the replace target below.
+DO $repair$
+DECLARE definition text;
+ old_text text:='RETURN (SELECT jsonb_build_object(''formatVersion'',1,''kind'',''attempt'',''attemptId'',a.id,''saleId'',s.id,''listingId'',s.listing_id,''cardId'',s.card_id,''itemId'',s.item_id,''buyerId'',a.buyer_id,''sellerId'',s.seller_id,''networkId'',s.network_id,''genesis'',payment_v2.b58((s.network_snapshot).genesis),''program'',payment_v2.b58((s.network_snapshot).program),''config'',payment_v2.b58((s.network_snapshot).config),''sale'',payment_v2.b58(s.sale_address),''attemptCommitment'',payment_v2.b58(a.attempt_commitment),''permitHex'',encode(a.permit,''hex''),''mode'',s.mode,''generation'',s.generation::text,''revision'',s.revision::text,''custodyVersion'',s.custody_version::text,''buyerWallet'',payment_v2.b58(a.buyer_wallet),''sellerWallet'',payment_v2.b58(a.seller_wallet),''buyerToken'',payment_v2.b58(a.buyer_token),''sellerToken'',payment_v2.b58(a.seller_token),''treasuryToken'',payment_v2.b58(a.treasury_token),''refundToken'',payment_v2.b58(a.refund_token),''totalUnits'',a.total_units::text,''netUnits'',a.net_units::text,''feeUnits'',a.fee_units::text,''validFrom'',a.valid_from::text,''expiresAt'',a.expires_at::text)
+   FROM payment_v2.attempts a JOIN payment_v2.sales s ON s.id=a.sale_id WHERE a.id=p_subject_id AND a.permit IS NOT NULL);';
+ new_text text:='RETURN (SELECT jsonb_build_object(''formatVersion'',1,''kind'',''attempt'',''attemptId'',a.id,''saleId'',sl.id,''listingId'',sl.listing_id,''cardId'',sl.card_id,''itemId'',sl.item_id,''buyerId'',a.buyer_id,''sellerId'',sl.seller_id,''networkId'',sl.network_id,''genesis'',payment_v2.b58((sl.network_snapshot).genesis),''program'',payment_v2.b58((sl.network_snapshot).program),''config'',payment_v2.b58((sl.network_snapshot).config),''sale'',payment_v2.b58(sl.sale_address),''attemptCommitment'',payment_v2.b58(a.attempt_commitment),''permitHex'',encode(a.permit,''hex''),''mode'',sl.mode,''generation'',sl.generation::text,''revision'',sl.revision::text,''custodyVersion'',sl.custody_version::text,''buyerWallet'',payment_v2.b58(a.buyer_wallet),''sellerWallet'',payment_v2.b58(a.seller_wallet),''buyerToken'',payment_v2.b58(a.buyer_token),''sellerToken'',payment_v2.b58(a.seller_token),''treasuryToken'',payment_v2.b58(a.treasury_token),''refundToken'',payment_v2.b58(a.refund_token),''totalUnits'',a.total_units::text,''netUnits'',a.net_units::text,''feeUnits'',a.fee_units::text,''validFrom'',a.valid_from::text,''expiresAt'',a.expires_at::text)
+   FROM payment_v2.attempts a JOIN payment_v2.sales sl ON sl.id=a.sale_id WHERE a.id=p_subject_id AND a.permit IS NOT NULL);';
+BEGIN
+ SELECT pg_get_functiondef(oid) INTO definition FROM pg_proc
+  WHERE oid='public.fn_payment_v2_verifier_context(text,uuid)'::regprocedure;
+ IF position(old_text IN definition)=0 THEN
+  RAISE EXCEPTION 'repair target text not found verbatim in live function definition — do not blind-replace, re-derive from live catalog';
+ END IF;
+ EXECUTE replace(definition,old_text,new_text);
+END $repair$;
+
+-- POST-GUARD: every captured attribute must be byte-identical to the snapshot, the
+-- function must still be SECURITY DEFINER, exactly one overload must exist, and the
+-- new body must contain no remaining alias/variable collision for this function's
+-- declared names (d,x,s,st).
+DO $postguard$
+DECLARE r record;new_src text;
+BEGIN
+ SELECT p.oid,p.proowner,p.proacl,p.prosecdef,p.proconfig,p.provolatile,p.proisstrict,
+        p.proparallel,p.proleakproof,pg_get_function_identity_arguments(p.oid) AS identity_args,
+        pg_get_function_result(p.oid) AS result_type,p.prosrc
+  INTO r FROM pg_proc p WHERE p.oid='public.fn_payment_v2_verifier_context(text,uuid)'::regprocedure;
+ new_src:=r.prosrc;
+ IF (SELECT count(*) FROM pg_proc WHERE proname='fn_payment_v2_verifier_context' AND pronamespace='public'::regnamespace)<>1
+  OR r.prosecdef IS DISTINCT FROM true
+  OR NOT EXISTS(SELECT 1 FROM payment_v2_verifier_context_snapshot s
+     WHERE s.proowner=r.proowner AND s.proacl=r.proacl AND s.prosecdef=r.prosecdef
+       AND s.proconfig=r.proconfig AND s.provolatile=r.provolatile AND s.proisstrict=r.proisstrict
+       AND s.proparallel=r.proparallel AND s.proleakproof=r.proleakproof
+       AND s.identity_args=r.identity_args AND s.result_type=r.result_type)
+  OR new_src ~ '(^|[^A-Za-z0-9_])sales s($|[^A-Za-z0-9_])'
+ THEN
+  RAISE EXCEPTION 'post-repair catalog state diverges from snapshot, or a sales-alias collision remains — rolling back';
+ END IF;
+END $postguard$;
+
+COMMIT;
+```
+
+No `GRANT`, `REVOKE`, `ALTER ... OWNER TO`, or any statement touching an object other
+than `fn_payment_v2_verifier_context` appears above.
+
+**Alias vs. variable — why the alias was renamed, not the variable.** The variable `s`
+is read in all three branches (`decision`, `attempt`, `lifecycle`) across roughly 20
+lines total. The colliding alias exists in exactly one place — the two-line `attempt`
+subquery. Renaming the alias touches 2 lines inside 1 branch; renaming the variable
+would touch every reference to `s` across all 3 branches, for no additional safety
+(the variable's name has no significance outside the function). Fewer lines, strictly
+less surface area for a typo, no behavioral difference either way.
+
+### f) Full body diff, 068 body vs. proposed body
+
+Only the `attempt` branch's SQL alias changes; the `decision` and `lifecycle` branches,
+the function signature, `LANGUAGE`, `SECURITY DEFINER`, and `SET search_path` are
+byte-identical. (This is the same two-line span shown in (e) above — `s` → `sl` as a
+table alias, and `s.<col>` → `sl.<col>` for every column reference bound to that
+alias, inside the `attempt` branch's `SELECT ... FROM payment_v2.attempts a JOIN
+payment_v2.sales s/sl ON s/sl.id=a.sale_id ...` statement only.) Nothing in the
+`decision` branch (lines ~92-106) or `lifecycle` branch (lines ~111-115) changes, and
+the variable `s` in those two branches still refers to the function's own
+`payment_v2.sales%rowtype` variable exactly as before.
+
+### g) Post-approval test plan (NOT executed)
+
+Per `AGENT_RULES.md` §8 and the task's own scope, this is a plan for the founder (or a
+future authorized session) to run, via the WSL Ubuntu path this repo documents at
+`/c/Users/Family/flexsoar-payment-db-preparation-69c6161.md` ("Use Ubuntu (`wsl.exe -d
+Ubuntu`) consistently for Docker and database commands") and
+`tests/payment-integration/evidence-db-readback.mjs` (the existing dedicated-login
+readback harness, run with its required `--read-existing-evidence-isolated-only` flag).
+
+1. **Container verification, before anything else** (matches the method already used
+   in `docs/handoff/payment-security.md`'s prior entries): confirm container ID,
+   `network=none`, zero published ports, exactly the approved read-only mounts, and
+   loopback-only namespace topology (`/proc/self/ns/net`, `/proc/net/dev` showing only
+   `lo`, `/proc/net/route` with one line) — the same checks
+   `evidence-db-readback.mjs` performs against `/state/integration-host-attestation.json`
+   before it opens any connection.
+2. Apply `074_payment_v2_verifier_context_attempt_alias.sql` to
+   `flexsoar_payment_v2_integration_test` only, inside a transaction, and confirm the
+   PRE-GUARD/POST-GUARD both pass (a POST-GUARD failure must roll back the whole
+   migration — do not retry with `--no-verify` or a hand edit).
+3. **Positive path, using the real dedicated worker login `payment_integration_verifier`**
+   (created by `tests/payment-integration/00_worker_logins.sql`, granted role
+   `payment_v2_verifier`): call `fn_payment_v2_verifier_context('attempt', <attemptId>)`
+   for the attempt tied to the existing pending-acknowledgement fixture referenced in
+   `docs/handoff/payment-security.md` (`verifierContextError` capture point in
+   `evidence-db-readback.mjs`), confirm it now returns the expected JSON (not an
+   ambiguous-column error), and that `readVerifiedPaymentEvidence` /
+   `recoverCommittedClaimAcknowledgement` can proceed past the point they previously
+   stopped at.
+4. **Idempotency**: call the same `fn_payment_v2_verifier_context('attempt', ...)` a
+   second and third time; all three results must be identical, and no row in
+   `payment_v2.verified_chain_evidence` or any lifecycle/consumption table may be
+   written as a side effect of a read-only context call.
+5. **Negative checks**:
+   - Connect as `payment_integration_verifier` and confirm it cannot reach any
+     `fn_payment_v2_admin_*` function or any table outside its granted role (expect
+     permission-denied, not a silent empty result).
+   - Confirm there is no superuser/admin fallback path — i.e. the call fails closed
+     (raises) rather than substituting a privileged identity when the dedicated login
+     lacks a permission.
+   - Attempt the same call as a different dedicated login (e.g.
+     `payment_integration_settler` or `payment_integration_issuer`) for a subject it
+     does not own/is not authorized for, and confirm cross-user access is refused by
+     `payment_v2.require_role`, not merely filtered.
+   - Deliberately fail a readback (e.g. an unknown `p_subject_id`) and confirm zero
+     writes/lifecycle consumption resulted — re-run step 3's positive case afterward and
+     confirm it is unaffected (no partial state from the failed attempt).
+6. Record results the way prior entries in this file do: exact commands run, container
+   ID, before/after catalog snapshots, and pass/fail per check — including the negative
+   cases, explicitly, not just "all passed."
+
+### h) Open questions / what I could not determine
+
+- **`prosrc` exact bytes are an offline reconstruction, not a verified fact.** I have no
+  DB connection this session; the PRE-GUARD's two hashes are my best-effort
+  reconstruction of "what `pg_proc.prosrc` should contain," not a value read from the
+  live catalog. If the PRE-GUARD fails on both hashes when the founder runs this, that
+  means my reconstruction is wrong in some whitespace/trimming detail, not necessarily
+  that the function was further modified — the fix at that point is to re-derive
+  `md5(prosrc)` from the live row and update the PRE-GUARD, not to relax or remove it.
+- **Whether migrations 069, 070, 071, 072 were actually applied, and in what order** —
+  not recorded by filename anywhere in `docs/handoff/`. I'm treating 070's text-replace
+  as logically "in effect" because it's the only other migration touching this function
+  and the task's own context says the live function currently fails exactly as 068+070
+  predicts, but I have not independently confirmed 070 (or 069/071/072) ran.
+  No exact SQLSTATE/`CONTEXT:` block for the `42702` error exists in any tracked file —
+  only the narrative sentence at `docs/handoff/payment-security.md:3222-3223`. If an
+  exact captured error log exists outside this repo (e.g. in the Windows TEMP
+  directories the handoff doc mentions, `flexsoar-final-{tsc,tests,build}` or similar),
+  I did not have access to it and did not search outside this worktree.
+- `proacl`'s exact text representation (grantor, timestamp-independent encoding) is
+  compared by catalog equality in the SNAPSHOT/POST-GUARD rather than asserted as a
+  literal string, specifically because I cannot verify its exact printed form without a
+  live connection — flagging this so it isn't mistaken for an oversight.
+- I did not re-run `npx tsc --noEmit` or `npm test` this session, per instruction 2 —
+  so I have nothing to report there this round.
