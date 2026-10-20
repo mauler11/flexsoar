@@ -23,8 +23,12 @@ import {initiatePaymentAttempt,ownPaymentAttempts,recordPaymentDecision,paymentR
 import {loadSignedOperation,stageSignedOperation,signedOperationRecovery,inspectSignedOperation} from '../../lib/db/payment-signed-operation.ts';
 import {observeSignedOutcome} from '../../lib/solana/v2-operation-observer.ts';
 
-const args=process.argv.slice(2),reviewOnly=args[0]==='--record-expiry-review-isolated-integration',contextOnly=args[0]==='--context-evidence-isolated-integration',observeOnly=args[0]==='--observe-isolated-integration'||reviewOnly,resume=args[0]==='--resume-isolated-integration'||observeOnly||contextOnly;
-if(!(args.length===1&&args[0]==='--run-isolated-integration')&&!(resume&&args.length===2&&/^\/state\/integrated-[A-Za-z0-9]+$/.test(args[1])))throw new Error('Explicit integration opt-in required');
+const args=process.argv.slice(2),reviewOnly=args[0]==='--record-expiry-review-isolated-integration',contextOnly=args[0]==='--context-evidence-isolated-integration',observeOnly=args[0]==='--observe-isolated-integration'||reviewOnly,retainedAck=args[0]==='--retained-ack-recovery-isolated-integration',resume=args[0]==='--resume-isolated-integration'||observeOnly||contextOnly||retainedAck;
+// Milestone-4 mode: exactly one new direct scenario per process (13, 14 or 15). The ACK
+// crash injection exists ONLY for index 14 with its explicit flag; no other mode can reach it.
+const retainedIndex=retainedAck?Number(args[2]):null,injectAckCrash=retainedAck&&retainedIndex===14&&args.length===4&&args[3]==='--inject-crash-after-ack-evidence';
+if(!(args.length===1&&args[0]==='--run-isolated-integration')&&!(resume&&!retainedAck&&args.length===2&&/^\/state\/integrated-[A-Za-z0-9]+$/.test(args[1]))
+ &&!(retainedAck&&/^\/state\/integrated-[A-Za-z0-9]+$/.test(args[1])&&['13','14','15'].includes(args[2])&&(args.length===3||injectAckCrash)))throw new Error('Explicit integration opt-in required');
 const attestation=JSON.parse(readFileSync('/state/integration-host-attestation.json','utf8'));
 assert.equal(attestation.containerId,'71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92');
 assert.equal(attestation.network,'none');assert.equal(attestation.database,'flexsoar_payment_v2_integration_test');
@@ -151,8 +155,20 @@ try{
    result(outcome.kind==='reconciled'?'retained-finalized-acknowledgement-consumed-after-lost-lifecycle-response':'committed-acknowledgement-receipt-returned-without-history',{sale:f.saleId,eventId,workerLoginCount:identities.length,claim:'available',chainLookup:'none during recovery'});
    writeFileSync(state('scenario-11-complete'),'retained acknowledgement evidence reconciled without a new payment or chain lookup');
   }
- for(const [index,mode] of (observeOnly?[]:contextOnly?[[11,1],[12,0]]:[[0,1],[1,0],[2,0],[4,1],[5,0],[6,0]])){
+ for(const [index,mode] of (observeOnly?[]:contextOnly?[[11,1],[12,0]]:retainedAck?[[retainedIndex,1]]:[[0,1],[1,0],[2,0],[4,1],[5,0],[6,0]])){
   if(existsSync(state('scenario-'+index+'-complete')))continue;
+  if(retainedAck&&index===14&&existsSync(state('crash-after-ack-evidence-14.json')))throw new Error('index 14 already stopped after retained ACK evidence; recover ONLY with retained-ack-recover.mjs, never by re-observing the chain');
+  if(retainedAck){
+   // Fresh synthetic buyers for 13-15, additive via the unedited 04 fixture; old bindings untouched.
+   const file=state('EPHEMERAL-LOCAL-ONLY-m4-buyers.json');
+   if(!existsSync(file))writeFileSync(file,JSON.stringify([0,1].map(()=>({id:randomUUID(),secret:Array.from(Keypair.generate().secretKey)}))),{flag:'wx',mode:0o600});
+   const fresh=JSON.parse(readFileSync(file,'utf8')),publicBuyers=fresh.map((b,i)=>{buyers[i]=Keypair.fromSecretKey(Uint8Array.from(b.secret));const p={id:b.id,wallet:buyers[i].publicKey.toBase58(),token:ata(buyers[i].publicKey).toBase58()};people['buyer'+i]=p;return p;});
+   if(sql(`SELECT count(*) FROM public.users WHERE id='${fresh[0].id}'`)==='0')sql(readFileSync('/work/tests/payment-integration/04_additional_buyers.sql','utf8'),'supabase_admin',{fixture:JSON.stringify({networkId,buyers:publicBuyers})});
+   for(const [i,b]of buyers.entries()){
+    if(!await connection.getAccountInfo(ata(b.publicKey)))await send([new TransactionInstruction({programId:ataProgram,data:Buffer.from([1]),keys:[meta(bootstrap.publicKey,true,true),meta(ata(b.publicKey),false,true),meta(b.publicKey),meta(mint.publicKey),meta(SystemProgram.programId),meta(token)]})],[],[],'confirmed','m4-buyer-ata-'+i);
+    if(await balance(ata(b.publicKey))<3000000n)await send([new TransactionInstruction({programId:token,keys:[meta(mint.publicKey,false,true),meta(ata(b.publicKey),false,true),meta(bootstrap.publicKey,true)],data:Buffer.concat([Buffer.from([7]),u64(10000000)])})],[],[],'confirmed','m4-buyer-mint-'+i);
+   }
+  }
   if(contextOnly&&index===11){
    const file=state('EPHEMERAL-LOCAL-ONLY-context-buyers.json');
    if(!existsSync(file))writeFileSync(file,JSON.stringify([0,1].map(()=>({id:randomUUID(),secret:Array.from(Keypair.generate().secretKey)}))),{flag:'wx',mode:0o600});
@@ -174,7 +190,7 @@ try{
    if(!await connection.getAccountInfo(ata(buyer.publicKey)))await send([new TransactionInstruction({programId:ataProgram,data:Buffer.from([1]),keys:[meta(bootstrap.publicKey,true,true),meta(ata(buyer.publicKey),false,true),meta(buyer.publicKey),meta(mint.publicKey),meta(SystemProgram.programId),meta(token)]})],[],[],'confirmed','context-buyer12-ata');
    if(await balance(ata(buyer.publicKey))<1000000n)await send([new TransactionInstruction({programId:token,keys:[meta(mint.publicKey,false,true),meta(ata(buyer.publicKey),false,true),meta(bootstrap.publicKey,true)],data:Buffer.concat([Buffer.from([7]),u64(10000000)])})],[],[],'confirmed','context-buyer12-mint');
   }
-  if(index>=5&&!contextOnly){
+  if(index>=5&&!contextOnly&&!retainedAck){
    const file=state('EPHEMERAL-LOCAL-ONLY-additional-buyers.json');
    if(!existsSync(file))writeFileSync(file,JSON.stringify([0,1].map(()=>({id:randomUUID(),secret:Array.from(Keypair.generate().secretKey)}))),{flag:'wx',mode:0o600});
    const next=JSON.parse(readFileSync(file,'utf8')),publicBuyers=next.map((b,i)=>{buyers[i]=Keypair.fromSecretKey(Uint8Array.from(b.secret));const p={id:b.id,wallet:buyers[i].publicKey.toBase58(),token:ata(buyers[i].publicKey).toBase58()};people['buyer'+i]=p;return p;});
@@ -192,7 +208,10 @@ try{
   const card=uuidHash(f.cardId),pair=uuidHash(f.itemId),saleId=uuidHash(f.saleId),a=v2Addresses(program,card,saleId),now=BigInt(f.now),expires=BigInt(Math.floor(Date.now()/1000))+(index===4?BigInt(90):BigInt(3600));
   const storedQuote=sql(`SELECT jsonb_build_object('validFrom',valid_from::text,'expiresAt',expires_at::text) FROM payment_v2.quote_books WHERE sale_id='${f.saleId}' ORDER BY created_at DESC,id DESC LIMIT 1`);
   const quote=storedQuote?JSON.parse(storedQuote):{validFrom:String(now-30n),expiresAt:String(expires)};
-  const terms={id:f.saleId,saleAddress:a.sale.toBase58(),escrowAddress:a.escrow.toBase58(),totalUnits:'1000000',fxSnapshot:{myrSen:2000,usdcBaseUnits:'1000000',source:'isolated-local'},validFrom:quote.validFrom,expiresAt:quote.expiresAt};
+  // Index 15 uses a remainder amount; the split rule is floor(total*500/10000) (066:22,52; protocol-v2.ts:39).
+  const totalUnits=retainedAck&&index===15?1000019n:1000000n,feeUnits=totalUnits*500n/10000n,netUnits=totalUnits-feeUnits;
+  assert.equal(netUnits+feeUnits,totalUnits);if(retainedAck&&index===15){assert.equal(feeUnits,50000n);assert.equal(netUnits,950019n);}
+  const terms={id:f.saleId,saleAddress:a.sale.toBase58(),escrowAddress:a.escrow.toBase58(),totalUnits:String(totalUnits),fxSnapshot:{myrSen:2000,usdcBaseUnits:String(totalUnits),source:'isolated-local'},validFrom:quote.validFrom,expiresAt:quote.expiresAt};
   await preparePaymentSale(issuer,f.listingId,networkId,terms);
   // Open template's sale-wide fields equal the prepared immutable sale. Buyer and
   // attempt are not authorizations until the canonical DB permit is issued later.
@@ -221,7 +240,7 @@ try{
   const raced=await Promise.allSettled(permits.map(async(q,i)=>send([await buyV2Instruction(q)],[roles.issuer,buyers[i]],tables,'finalized','buy-'+index+'-'+i)));
   assert.equal(raced.filter(r=>r.status==='fulfilled').length,1,JSON.stringify({sameSaleMismatch,permitTiming,outcomes:raced.map(r=>r.status==='rejected'?{message:r.reason?.message,chainError:r.reason?.chainError}:{status:'finalized'})}));const winner=raced.findIndex(r=>r.status==='fulfilled'),loser=1-winner;
   assert.ok(raced[loser].reason.chainError,'loser must fail on-chain, not transport');
-  assert.equal(before[loser],await balance(ata(buyers[loser].publicKey)));assert.equal(before[winner]-await balance(ata(buyers[winner].publicKey)),1000000n);
+  assert.equal(before[loser],await balance(ata(buyers[loser].publicKey)));assert.equal(before[winner]-await balance(ata(buyers[winner].publicKey)),totalUnits);
   const q=permits[winner],at=attempts[winner];
   if(index===4&&!existsSync(state('crash-after-funding'))){writeFileSync(state('crash-after-funding'),raced[winner].value);console.log('Waiting for original quote expiry before recovery restart');while(BigInt(Math.floor(Date.now()/1000))<=expires)await pause(500);throw new Error('INJECTED process stop after finalized funding, before database settlement; resume this exact run');}
   const lostSettler={async rpc(name,args){const response=await settler.rpc(name,args);if(index===4&&name==='fn_payment_v2_reconcile_event'&&!response.error&&!existsSync(state('lost-settlement-response'))){writeFileSync(state('lost-settlement-response'),JSON.stringify(response.data));throw new Error('INJECTED actual database commit response lost');}return response;}};
@@ -237,7 +256,16 @@ try{
   assert.equal(sql(`SELECT owner_id FROM public.cards WHERE id='${f.cardId}'`),people['buyer'+winner].id);
   assert.equal((await reconcilePayments(verifier,observer,20,settler)).processed,0);
   result(mode?'direct-funded-and-reconciled':'escrow-funded-and-reconciled',{index,sale:f.saleId,attempt:at.id,signature:raced[winner].value,loserPrincipalDebit:'0',claim:s.claim});
-   if(mode){assert.equal(await balance(ata(seller.publicKey))-sb,950000n);assert.equal(await balance(ata(treasury.publicKey))-tb,50000n);}
+   if(mode){assert.equal(await balance(ata(seller.publicKey))-sb,netUnits);assert.equal(await balance(ata(treasury.publicKey))-tb,feeUnits);}
+   if(retainedAck){
+    // Exact persisted USDC split and MYR snapshot (MYR derives from the listing price_cents=2000 of
+    // fixture 02: fee_cents=2000*500/10000=100, net 1900; 066:52), asserted here instead of 03 for index 15.
+    const row=JSON.parse(sql(`SELECT jsonb_build_object('total',total_units::text,'fee',fee_units::text,'net',net_units::text,'grossCents',gross_cents,'feeCents',fee_cents,'netCents',net_cents) FROM payment_v2.attempts WHERE id='${at.id}'`));
+    assert.deepEqual(row,{total:String(totalUnits),fee:String(feeUnits),net:String(netUnits),grossCents:2000,feeCents:100,netCents:1900});
+    const order=JSON.parse(sql(`SELECT jsonb_build_object('grossCents',gross_cents,'feeCents',fee_cents,'netCents',net_cents) FROM public.orders WHERE payment_v2_attempt_id='${at.id}'`));
+    assert.deepEqual(order,{grossCents:2000,feeCents:100,netCents:1900});
+    result('direct-split-exact-base-units',{index,sale:f.saleId,totalUnits:String(totalUnits),buyerDebit:String(before[winner]-await balance(ata(buyers[winner].publicKey))),sellerDelta:String(await balance(ata(seller.publicKey))-sb),treasuryDelta:String(await balance(ata(treasury.publicKey))-tb),myr:order});
+   }
    else if(s.funding==='funded'){assert.equal(await balance(a.escrow),1000000n);assert.equal(await balance(ata(seller.publicKey)),sb);assert.equal(await balance(ata(treasury.publicKey)),tb);}
    else if(s.funding==='released'){assert.equal(await balance(a.escrow),0n);assert.equal(await balance(ata(seller.publicKey))-sb,950000n);assert.equal(await balance(ata(treasury.publicKey))-tb,50000n);}
    else {assert.equal(await balance(a.escrow),0n);assert.equal(await balance(ata(buyers[winner].publicKey)),before[winner]);assert.equal(await balance(ata(seller.publicKey)),sb);assert.equal(await balance(ata(treasury.publicKey)),tb);}
@@ -346,7 +374,9 @@ try{
    writeFileSync(state('crash-after-ack'),JSON.stringify({ackSignature,replacement}));throw new Error('INJECTED process stop after finalized acknowledgement and synthetic wallet relink, before lifecycle database commit; resume this exact run');
   }
   const ackEvidence=await retainAuthorityEvidence(ackSignature,ack,{networkId:ackContext.networkId,genesis:ackContext.genesis,program:ackContext.program,signature:ackSignature,subjectKind:'lifecycle',subjectId:f.saleId,subjectAction:'acknowledged'});
-  await recordPaymentLifecycle(verifier,{saleId:ackContext.saleId,kind:'acknowledged',finality:'finalized',sale:ackContext.sale,genesis:ackContext.genesis,program:ackContext.program,generation:ackContext.generation,revision:ackContext.revision,outcome:ackContext.kind==='direct'?'direct':ackContext.kind==='released'?'released':'refunded',cardCommitment:hex(base58Decode(ackContext.cardCommitment)),signature:ackSignature,slot:ackEvidence.evidence.slot,executedAtSeconds:String(ackEvidence.evidence.blockTime),evidenceId:ackEvidence.evidenceId});
+  // Index-14 crash: the ACK evidence row above is committed; the lifecycle RPC is never sent.
+  const ackVerifier=injectAckCrash&&index===14?{async rpc(name,rpcArgs){if(name==='fn_payment_v2_record_lifecycle'&&rpcArgs?.p_proof?.kind==='acknowledged'){assert.match(String(ackEvidence.evidenceId),/^[0-9a-f-]{36}$/);writeFileSync(state('crash-after-ack-evidence-14.json'),JSON.stringify({eventId,saleId:f.saleId,attemptId:at.id,ackSignature,evidenceId:ackEvidence.evidenceId}),{flag:'wx'});throw new Error('INJECTED process stop after retained ACK evidence, before lifecycle database commit; recover with retained-ack-recover.mjs');}return verifier.rpc(name,rpcArgs);}}:verifier;
+  await recordPaymentLifecycle(ackVerifier,{saleId:ackContext.saleId,kind:'acknowledged',finality:'finalized',sale:ackContext.sale,genesis:ackContext.genesis,program:ackContext.program,generation:ackContext.generation,revision:ackContext.revision,outcome:ackContext.kind==='direct'?'direct':ackContext.kind==='released'?'released':'refunded',cardCommitment:hex(base58Decode(ackContext.cardCommitment)),signature:ackSignature,slot:ackEvidence.evidence.slot,executedAtSeconds:String(ackEvidence.evidence.blockTime),evidenceId:ackEvidence.evidenceId});
   assert.equal((await status()).claim,mode||index===1||index===12?'available':'quarantined');
   result('finalized-claim-acknowledged',{sale:f.saleId,signature:ackSignature,claim:(await status()).claim,actualConsumption:committed});
   const receiptAgain=await paymentAcknowledgementContext(settler,eventId);assert.equal(receiptAgain.receipt.signature,ackSignature);result('committed-acknowledgement-receipt-returned-without-new-chain-observation',{sale:f.saleId,signature:receiptAgain.receipt.signature});
@@ -355,7 +385,7 @@ try{
  // Read-only audit of persisted terminal envelopes after process restart. The
  // fixture administrator reads audit rows only here; no worker claims that this
  // bypasses lease authorization. The actual production observer/policy is used.
-  for(const index of (contextOnly?[]:[1,2])){
+  for(const index of (contextOnly||retainedAck?[]:[1,2])){
   const operation=JSON.parse(readFileSync(state('outcome-operation-'+index+'.json'),'utf8'));
   const raw=JSON.parse(sql(`SELECT envelope FROM payment_v2.signed_operations WHERE operation_id='${operation.id}'`));
   const envelope=inspectSignedOperation(raw,raw.plan),observation=await observeSignedOutcome(rpc,envelope.plan,envelope);
@@ -378,11 +408,12 @@ try{
   const audit={signature:blocked.signature,signatureStatus,cardExists:!!account,card:address.toBase58(),classification:account?'expected registration exists; do not repeat registration':'BLOCKED: uncertain registration, no replacement authorized'};
   writeFileSync(state('registration-outcome-audit-'+Date.now()+'.json'),JSON.stringify(audit,null,2));console.log('REGISTRATION AUDIT',JSON.stringify(audit));
  }
- const completed=(contextOnly?[11,12]:[0,1,2,4,5]).filter(i=>existsSync(state('scenario-'+i+'-complete'))).map(i=>{const f=JSON.parse(readFileSync(state('scenario-'+i+'.json'),'utf8'));return {saleId:f.saleId,listingId:f.listingId,outcome:[0,4,11].includes(i)?'direct':i===1||i===12?'released':'refunded'};});
-  assert.ok(completed.length>=(contextOnly?2:3));
+ // Index 15 is deliberately excluded: 03 hard-codes the 1000000-unit split.
+ const completed=(contextOnly?[11,12]:retainedAck?[13,14]:[0,1,2,4,5]).filter(i=>existsSync(state('scenario-'+i+'-complete'))||(retainedAck&&i===14&&existsSync(state('scenario-14-recovered.json')))).map(i=>{const f=JSON.parse(readFileSync(state('scenario-'+i+'.json'),'utf8'));return {saleId:f.saleId,listingId:f.listingId,outcome:[0,4,11,13,14].includes(i)?'direct':i===1||i===12?'released':'refunded'};});
+  assert.ok(completed.length>=(contextOnly?2:retainedAck?1:3));
  sql(readFileSync('/work/tests/payment-integration/03_outcome_assertions.sql','utf8'),'supabase_admin',{cases:JSON.stringify(completed)});
  result('actual-integrated-accounting-audit',{terminalSales:completed.length,classification:'does not count blocked/held cases as terminal success'});
- if(!reviewOnly&&!contextOnly)for(const index of [0,1,2,4,5].filter(i=>existsSync(state('scenario-'+i+'-complete')))){
+ if(!reviewOnly&&!contextOnly&&!retainedAck)for(const index of [0,1,2,4,5].filter(i=>existsSync(state('scenario-'+i+'-complete')))){
   const f=JSON.parse(readFileSync(state('scenario-'+index+'.json'),'utf8')),a=v2Addresses(program,uuidHash(f.cardId),uuidHash(f.saleId));
   const eventId=sql(`SELECT id FROM payment_v2.events WHERE sale_id='${f.saleId}' AND kind='${[0,4].includes(index)?'direct':index===1?'released':'refunded'}'`);
   const receipt=await paymentRpc(settler,'fn_payment_v2_reconcile_event',{p_event_id:eventId});assert.equal(receipt.saleId,f.saleId);
@@ -399,7 +430,7 @@ try{
   }
  }
  if(contextOnly){const oldEvent=sql("SELECT e.id FROM payment_v2.events e JOIN payment_v2.consumptions c ON c.event_id=e.id ORDER BY e.created_at LIMIT 1");const oldReceipt=await paymentAcknowledgementContext(settler,oldEvent);assert.ok(oldReceipt.receipt?.signature);result('historical-committed-receipt-recovered-without-fresh-primary-history',{eventId:oldEvent,signature:oldReceipt.receipt.signature,chainRetrieval:'not requested'});}
- if(!reviewOnly&&!contextOnly)result('all-completed-acknowledgements-reverified',{count:completed.length});
+ if(!reviewOnly&&!contextOnly&&!retainedAck)result('all-completed-acknowledgements-reverified',{count:completed.length});
  if(reviewOnly){
   const original=JSON.parse(readFileSync(state('outcome-operation-6.json'),'utf8'));
   const executor=createPaymentPostgresTransport({role:'payment_v2_executor',login:'payment_integration_executor_b',host:'127.0.0.1',port:5432,database:db,sslMode:'disable'});

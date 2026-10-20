@@ -67,14 +67,14 @@ assert.equal(checked.signature,stored.signature);
 const before=JSON.stringify({id:stored.id,transactionDigest:stored.transactionDigest,parsedResultDigest:stored.parsedResultDigest,signature:stored.signature,parsed:stored.parsedRpcResult});
 const persistedId=await persistVerifiedPaymentEvidence(verifier,checked);
 assert.equal(persistedId,stored.id,'idempotent persistence returns the same evidence row');
-const readback=await readVerifiedPaymentEvidence(verifier,'payment_event',ack.attemptId,'direct');
+const readback=await readVerifiedPaymentEvidence(verifier,subjectKind,subjectId,subjectAction);
 assert.equal(JSON.stringify({id:readback.id,transactionDigest:readback.transactionDigest,parsedResultDigest:readback.parsedResultDigest,signature:readback.signature,parsed:readback.parsedRpcResult}),before,'stored compiled response and lookup proof are unchanged');
 
 const tampered=structuredClone(checked);
 tampered.parsedRpcResult.compiledRpcResult.transaction.message.instructions[0].data='111';
 await assert.rejects(validateRetainedFinalizedEvidence(tampered,expected,inspect),'tampered instruction must fail before any lifecycle RPC');
 await assert.rejects(persistVerifiedPaymentEvidence(verifier,tampered),'conflicting evidence must not replace the immutable row');
-const afterConflict=await readVerifiedPaymentEvidence(verifier,'payment_event',ack.attemptId,'direct');
+const afterConflict=await readVerifiedPaymentEvidence(verifier,subjectKind,subjectId,subjectAction);
 assert.equal(JSON.stringify({id:afterConflict.id,transactionDigest:afterConflict.transactionDigest,parsedResultDigest:afterConflict.parsedResultDigest,signature:afterConflict.signature,parsed:afterConflict.parsedRpcResult}),before,'conflict rejection preserves immutable evidence');
 
 console.log('ISOLATED_DATABASE_EVIDENCE_READBACK_PASS',JSON.stringify({database,workerLoginsDistinct:true,eventId:ack.eventId,saleId:ack.saleId,subjectKind,subjectAction,evidenceId:stored.id,compiledResponsePersisted:true,lookupProofCount:stored.parsedRpcResult.lookupTableEvidence.length,idempotentPersistedSameId:true,tamperRejectedBeforeLifecycle:true,conflictingPersistRejected:true,committedReceiptRecoveredTwice:true,chainLookupDuringReceiptRetry:false,pendingAcknowledgementFixtureAvailable:false}));
