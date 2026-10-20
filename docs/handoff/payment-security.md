@@ -4016,3 +4016,324 @@ but this has not been verified for this function.
   the Supabase CLI.
 - **Exact `proacl` contents.** These are compared by catalog value and never asserted
   as a literal.
+
+## 2026-10-20 - Milestone 3: pending retained-evidence recovery after 074 (dedicated worker logins)
+
+**Outcome: BLOCKED (evidence absent).** 074 works: the dedicated verifier login now
+gets valid JSON from `fn_payment_v2_verifier_context('attempt', ...)` (no 42702), and
+the harness reports `verifierContextError:null`. Pending-acknowledgement recovery
+from retained evidence is still NOT proven. The pending subject has no
+`payment_v2.verified_chain_evidence` row, because it was executed before the
+evidence-retention path existed (root cause below). Zero database rows changed
+across the whole session. No evidence rows were created.
+
+Scope and authorization: founder-authorized for this task only. The founder later
+clarified that "no restart" meant no reset or recreate, and that starting the
+existing stopped helper was permitted. Database `flexsoar_payment_v2_integration_test`
+only. The accepted `flexsoar_payment_v2_test` was not connected to. No DDL, no `.sql`
+file created, edited or executed (all SQL is inline in scratch shell heredocs), no
+GRANT/REVOKE, no write as `supabase_admin` (every admin session was
+`BEGIN TRANSACTION READ ONLY ... ROLLBACK`, and `transaction_read_only=on` is
+recorded in each snapshot). No chain transaction, no validator start, no
+container created, removed or reset. Pre-flight: HEAD `9627b2e`; `git log HEAD..main`
+lists `f2ac97a`, `86c731d`, `afae327`, and per the founder we proceeded without a
+rebase. `package.json`, `package-lock.json` and the debris files were not touched.
+There is no `tests/payment-integration/evidence/` directory convention, so no
+evidence files were committed. Scratch scripts and raw outputs are in the review ZIP.
+
+### Pending fixture located
+
+The failure is recorded at this file's 2026-10-16 section ("Pending evidence readback
+did not pass ... `s.id` is ambiguous", lines ~3216-3231), at
+`tests/payment-integration/README.md:406-416`, and at the harness capture point
+`tests/payment-integration/evidence-db-readback.mjs:47-56`. The harness walks the
+`actualConsumption` rows of `/state/integrated-JXopR6/results.json` newest-first and
+selects the first one whose settler `ack_context` is `direct` with a receipt. We
+confirmed this read-only as `payment_integration_settler`. Event `1392bc4e...`
+(the newest candidate) is `refunded`, so it is skipped. Event
+`b3949981-da83-424b-9a33-c179704817e6` is `direct` with a receipt, so it is selected:
+sale `6e2a2198-a61e-4e85-983c-3cd5897cdb05`, attempt
+`b9cb89ae-6e3e-4838-b247-37f4a2265972` (results.json row 23).
+
+Preserved cases tracked:
+- pruned ACK: case0 sale `bb4a634c-454b-4f0e-a918-93492838c9f8`, ACK `nYpb9Bg...`, block 156 cleaned up
+- unresolved registration: case3 sale `b61b09f4-fc2e-4229-ae48-daa45060d380`
+- expired escrow: operation `27bc0cae-1766-4295-b86c-6457289edd6b`, sale `878f34bc-fda7-4c11-af0b-27e82492a52b`
+
+### Container verification (every session; first mismatch exits)
+
+Database container, rechecked before each of the 10 database sessions:
+```
+Id=71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92
+Running/Network/Privileged=true none false
+PortBindings={}
+Image=supabase/postgres@sha256:6058a6759ab9268cff8ee70641d61f1bd75953316281b76427cf5a6b4db2eafc
+Mounts=/audit/hba.conf rw=false;/audit/migrations rw=false;/audit/tests/payment-db rw=false;
+netdev=lo,   route_lines=1   netns=net:[4026532483]
+IDENTITY flexsoar_payment_v2_integration_test 127.0.0.1 <expected login>
+```
+The database container was started at 2026-10-20T04:13:27Z, before this session.
+`/audit/hba.conf` is `trust` for local and loopback, so no credential was needed or
+used. Its netns changed from the attested `net:[4026532408]`.
+
+Helper: found `Exited (255)`, `OOMKilled=false`, `FinishedAt=2026-10-17T02:06:26Z`,
+`RestartPolicy=no`. Started with `docker start flexsoar-payment-integration-20261016T075407Z`
+only after the database-only checks were recorded. It was verified before use, again
+before each harness run, and again at the end:
+```
+Id=3a59f47bb849c66e81bae1ecb5112ce1131b58f07ec1de49d34f6a700b3a4998
+Running/Privileged/NetworkMode/ReadonlyRootfs/User/RestartCount=true false container:71c4856a...cc92 true 1000:1000 0
+StartedAt=2026-10-20T05:45:52.869308103Z  PortBindings={}  CapDrop=["ALL"]  SecurityOpt=["no-new-privileges"]
+/state <- /home/family/flexsoar-payment-db-69c6161-20261016T022841Z/integration-discovery-20261016T074634Z/helper-state rw=true
+/work/lib <- /mnt/c/Users/Family/flexsoar-payment-security/lib rw=false
+/work/node_modules <- /mnt/c/Users/Family/flexsoar-payment-security/node_modules rw=false
+/work/tests/payment-integration <- /mnt/c/Users/Family/flexsoar-payment-security/tests/payment-integration rw=false
+/tools/{agave,node,program.so,runtime} rw=false (unchanged sources)
+helper netdev=lo,  route_lines=1  netns db=net:[4026532483] helper=net:[4026532483]
+```
+`bash tests/payment-integration/attest-helper.sh flexsoar-payment-integration-20261016T075407Z`
+exited 0 with: "Attested ... in net:[4026532483]. Evidence
+/home/family/flexsoar-payment-db-69c6161-20261016T022841Z/integration-attestation-20261020T054620Z."
+It rewrote only `/state/integration-host-attestation.json` (sha256
+`48d114aea55c7b131d14e6abe63efb8cc094b95b6aeab1650ac7011d11b9c836`):
+`{"containerId": "71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92", "network": "none", "database": "flexsoar_payment_v2_integration_test", "namespace": "net:[4026532483]"}`.
+Both containers were left running.
+
+Chain/state dependencies (part D): `/state/integrated-JXopR6/results.json` is present.
+It is 29247 bytes, mtime 2026-10-16 21:52:15 +0800 (not modified since that run),
+sha256 `dd45ee7f999d216d8d9143eb181fe0fed3a804a0cf761489f339f02e1f09e1ca`. The ledger
+directory is present (496M; snapshots at slots 2626 and 2726). The helper ran only
+`sleep infinity`; no validator was started. `evidence-db-readback.mjs` and its imported
+`lib/solana/v2-{context,evidence,authority-observer,observer}.ts`/`protocol-v2.ts`
+contain no RPC or network calls (we grepped for fetch, Connection, http, ws and RPC
+constructors), so this harness reads no chain history. The known block-156 gap is
+pre-existing and unchanged. Nothing was regenerated.
+
+### Commands (executed from Windows via `wsl.exe -d Ubuntu -- bash -lc "bash <script>"`)
+
+- Admin snapshot (read-only):
+  `docker exec -i -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGDATABASE=flexsoar_payment_v2_integration_test -e PGUSER=supabase_admin -e PGPASSFILE=/dev/null <db> psql -X -q -At -F '|' -v ON_ERROR_STOP=1 -v expected_login=supabase_admin`.
+  stdin is the identity guard, `BEGIN TRANSACTION READ ONLY`, a `\gexec`-generated
+  per-table count with `md5(string_agg(pk))` and `md5(string_agg(row::text))` over all
+  `payment_v2` and `public` tables, the per-case row md5s, and `ROLLBACK`.
+- Worker checks: the same `docker exec` with `PGUSER=payment_integration_<role>`. Each check is its own
+  session: `BEGIN TRANSACTION READ ONLY; SET LOCAL ROLE payment_v2_<role>; <call>; ROLLBACK;`
+  (this mirrors the `lib/db/payment-postgres.ts` transport, but read-only and rolled back).
+- Harness (x3):
+  `docker exec flexsoar-payment-integration-20261016T075407Z /tools/runtime/ld-linux-x86-64.so.2 --library-path /tools/runtime /tools/node --loader /work/tests/payment-integration/ts-loader.mjs /work/tests/payment-integration/evidence-db-readback.mjs --read-existing-evidence-isolated-only`
+
+### Step results
+
+| Step | Result |
+|---|---|
+| 1 Preflight | PASS. HEAD 9627b2e, only founder-owned dirt, fixture located |
+| 2 BEFORE snapshot | PASS. 58 tables plus 4 case blocks; sha256 of snapshot file `5cbfc0e6...6fde` |
+| 3a verifier_context('attempt', b9cb89ae...) as payment_integration_verifier | PASS. exit 0 three times; identical md5 `ba7307ad36815f77669d6c905ffb4a26`; 32-key JSON (`kind`=attempt, `saleId` 6e2a2198..., `mode` 1, `revision` "1", `totalUnits` "1000000"); no 42702 |
+| 3b harness run 1 | BLOCKED (expected outcome 2). exit 2, `DATABASE_EVIDENCE_READBACK_BLOCKED`, `verifierContextError:null`, receipt recovery PASS twice, lifecycle and payment_event evidence both NULL |
+| 4 AFTER snapshot | PASS. byte-identical to BEFORE; zero changed rows (none expected, since the harness stopped before persist and lifecycle) |
+| 5 idempotency (runs 2 and 3) | PASS. same BLOCKED output and exit 2 both times; snapshots after each are byte-identical; no new payment, transfer, ledger entry, consumption or outcome |
+| 6 negatives | PASS. 11/11 permission cases fail closed with SQLSTATE-42501-class `permission denied`; unknown subject returns NULL with the snapshot unchanged (see table and note) |
+| 7 preserved cases | PASS. case md5 blocks identical in BEFORE, after-run1/2/3 and final |
+| 8 handoff | this section |
+
+Changed rows, BEFORE vs after-partA, after-run1, after-run2, after-run3 and final:
+**none.** All six snapshot files have sha256
+`5cbfc0e6b3d4671805b8a0af0aec8bcc4c4963f7867993d37e5ce0de2f616fde`. The worker
+RPCs the harness calls (`worker_identity`, `ack_context`, `verifier_context`,
+`read_chain_evidence`) are SELECT-only. It never reached `store_chain_evidence` or
+`record_lifecycle`.
+
+### Negative checks (each its own session, READ ONLY, rolled back)
+
+| # | Login / SET ROLE | Call | Result |
+|---|---|---|---|
+| 6.1 | verifier / payment_v2_verifier | `fn_payment_v2_ack_context` (settler-only) | `ERROR: permission denied for function fn_payment_v2_ack_context`, exit 3 |
+| 6.2 | verifier / payment_v2_verifier | `fn_payment_v2_issuer_context` (issuer-only) | `permission denied for function fn_payment_v2_issuer_context` |
+| 6.3 | verifier / payment_v2_verifier | `fn_payment_v2_admin_queue()` (staff/authenticated only) | `permission denied for function fn_payment_v2_admin_queue` |
+| 6.4 | verifier | `SET ROLE payment_v2_settler` | `permission denied to set role "payment_v2_settler"` |
+| 6.5 | verifier | `SET ROLE supabase_admin` | `permission denied to set role "supabase_admin"` |
+| 6.6 | settler / payment_v2_settler | `fn_payment_v2_verifier_context` | `permission denied for function fn_payment_v2_verifier_context` |
+| 6.7 | settler | `SET ROLE payment_v2_verifier` | `permission denied to set role "payment_v2_verifier"` |
+| 6.8 | issuer / payment_v2_issuer | `fn_payment_v2_read_chain_evidence` | `permission denied for function fn_payment_v2_read_chain_evidence` |
+| 6.9 | executor / payment_v2_executor | `fn_payment_v2_verifier_context` | `permission denied for function fn_payment_v2_verifier_context` |
+| 6.10 | customer (authenticated) | `fn_payment_v2_verifier_context` | `permission denied for function fn_payment_v2_verifier_context` |
+| 6.11 | verifier / payment_v2_verifier | `SELECT count(*) FROM payment_v2.sales` | `permission denied for schema payment_v2` |
+| 6.12 | verifier / payment_v2_verifier | `verifier_context('attempt', 00000000-0000-4000-8000-000000000074)` | returns SQL NULL, exit 0 (not an error) |
+| 6.13 | verifier / payment_v2_verifier | `verifier_context('bogus', ...)` | `ERROR: PAYMENT_V2_CONTEXT_KIND_UNSUPPORTED` |
+| 6.14 | verifier / payment_v2_verifier | `read_chain_evidence('lifecycle', unknown, 'acknowledged')` | returns NULL |
+
+Note on 6.12: at the database level an unknown subject is a NULL result, not an
+error. It fails closed one layer up: `paymentVerifierContext` passes the value to
+`object()` (`lib/db/payment-v2-workers.ts:10`), which throws `invalid payment context`
+on null. A caller that bypasses the adapter would see NULL. This was recorded; it
+was not changed.
+
+No admin fallback, from the code: `lib/db/payment-postgres.ts:1` ("no Supabase/admin
+fallback"). Line 41 refuses `postgres`, `supabase_admin`, `service_role`, `authenticator`,
+`authenticated`, `anon`, `payment_v2_owner` and any `payment_v2_*` login. Line 43 builds
+a closed environment with `PGPASSFILE=/dev/null` and no inherited credentials. Line 48
+refuses any RPC not routed to this transport's role. Line 59 requires
+`superuser:false` and the exact login. On any failure, line 65 returns
+`PAYMENT_DB_OUTCOME_UNKNOWN` with no retry and no second client. `lib/db/payment-v2.ts:15-18`
+`paymentRpc` throws on `result.error`. `lib/db/payment-v2-workers.ts:1` says "No
+service-role fallback", and no function in it constructs another client.
+`evidence-db-readback.mjs` creates only the three `payment_integration_*` transports
+(line 23). Database side: `payment_v2.require_role` (`062`) requires exactly one
+worker-role membership and rejects owner, service_role, authenticator, authenticated
+and anon membership with SQLSTATE 42501.
+
+### Why the pending evidence is absent (read-only root cause; nothing created)
+
+It was never persisted. It is not stored somewhere the reader fails to look.
+- The selected sale's rows were all written 2026-10-16 08:43:55-08:47:25 UTC:
+  lifecycle `opened` `5RBpCneb...`, event `direct` `3k6XMNnS...`, consumption, and
+  lifecycle `acknowledged` `3UEUDGD7...`. Every one has `proof->>'evidenceId'` absent.
+- Database-wide: 11/16 lifecycle rows and 9/12 event rows have no evidenceId. The
+  latest of those was written at 08:51:52 UTC. The earliest row that has an
+  evidenceId is from 13:20:40 UTC. All 11 `verified_chain_evidence` rows were verified
+  between 13:20:40 and 13:48:59 UTC by `payment_integration_verifier`. They belong
+  only to sales `201ca142...`, `096c26f6...` and `7153da6c...`.
+- The persistence path is `retainAuthorityEvidence` in
+  `tests/payment-integration/integrated.mjs:64-80`, which calls
+  `persistVerifiedPaymentEvidence` at line 79 and then `fn_payment_v2_store_chain_evidence`.
+  The ACK uses it at `integrated.mjs:348-349`. Together with migration 068 (store/read
+  RPCs and the `evidence_before_*` insert triggers, `068:178-205`), it was introduced
+  in `dd5027c` (2026-10-16 22:03 +0800). The previous harness revision `599bf0e` has 0
+  references to `persistVerifiedPaymentEvidence`. The triggers apply only to new
+  inserts, so the earlier rows are legitimately evidence-free.
+- No `verified_chain_evidence` row shares a signature with any of the selected sale's
+  events or lifecycle rows (count 0). The only other copy of the ACK transaction is
+  the harness journal `/state/integrated-JXopR6/transaction-3UEUDGD7...json`, written
+  at `integrated.mjs:101`. Per README:101-102 that file is NOT a production durable
+  store, and the reader correctly does not consult it.
+- Also: all 11 existing evidence rows have `parsed_rpc_result ? 'compiledRpcResult'`
+  = false. The harness requires `compiledRpcResult` (`evidence-db-readback.mjs:61`), and
+  the stronger validator was described earlier in this file ("Old pending evidence
+  without those fields cannot pass the stronger validator"). So pointing the harness
+  at a sale that has evidence would still not pass without new, compliant evidence.
+  That needs a fresh scenario captured under the current code, which is out of scope
+  and was not done.
+
+### Preserved cases (BEFORE = every later snapshot)
+
+`case|` rows give `count:md5` for sales, attempts, events, consumptions, escrows, operations,
+signed_operations, lifecycle_evidence, verified evidence, claim_history and outbox. The
+`state|` rows are human-readable. The expired escrow is still `funded`, operation
+`27bc0cae` is `execute_outcome:unknown:REVIEW_REQUIRED...`, and the claim is unchanged.
+The case3 sale is still `opening` with its `open_sale` operation `leased`. The pruned-ACK
+sale case0 is still `direct`, its `acknowledged` lifecycle has no evidence row, and it
+was not reverified. None was repaired.
+
+Full BEFORE snapshot (identical bytes in after-partA, after-run1, after-run2, after-run3, final):
+```
+IDENTITY flexsoar_payment_v2_integration_test 127.0.0.1 supabase_admin
+txn_read_only|on
+table|payment_v2.attempts|19|f9d86519867a6ed4391af49525f33f6e|e74828d74b964b7486bac6318058b165
+table|payment_v2.attestations|9|e5fa64b05a7ac3814427e5f4a32ed5c2|5eb76e3e39a8ea106297df696f6b4d06
+table|payment_v2.candidates|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|payment_v2.claim_history|10|6d5c5b815ac7ecf3d80bdeed513bea2d|0dc9601c14df2abd84f11256f4489b1e
+table|payment_v2.configuration_history|33|ee52592d826d829972d88216d0141e07|7fbf003c6ecbeeadee18e26792a84552
+table|payment_v2.consumptions|12|e17af5ae7c25b2fcb71cc97f0fa138a8|008242ab4d80a4b1295cb511c317be1b
+table|payment_v2.cursors|1|7b8fac8e1b450ba8d9667433ff29debc|777f02adfe1ef8a1b4fb8301e12a049b
+table|payment_v2.decisions|9|e5fa64b05a7ac3814427e5f4a32ed5c2|7c9989216d2471eb6c5fde8a43b5c2d4
+table|payment_v2.dispatch_reviews|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|payment_v2.escrows|5|96258ccef097bd7fe651746527e6a591|5de00f16bce29e6f674065da6d012aec
+table|payment_v2.events|12|e17af5ae7c25b2fcb71cc97f0fa138a8|c5cca6b0e67f995aeb7e4b20ca0f41ce
+table|payment_v2.governance_approvals|6|6aab9492cc7237bba7bca7661565c8f9|ac8560ac1de9907e1287f12f68d64caf
+table|payment_v2.inventory|10|c14a913088c5d371e2ff4b6afe048641|e6d49d8eb6f57c352f7f5722dc544328
+table|payment_v2.lifecycle_evidence|16|1b73a51126b98358e6ec81bb36a684ce|9d85e9250b049f25a5cb06006435bc73
+table|payment_v2.networks|2|5eed2e79b21d76953740521ed103677d|6ba5a86b44ee257f84779335968e0524
+table|payment_v2.operation_failures|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|payment_v2.operations|31|ce9c51eea3c06e19d9756dfe0aeb424c|23e5e9b9883c2223d0306cde20939050
+table|payment_v2.outbox|24|736bb50aad3f07e1b8ffbf96aa054c1b|1e29cdd1dd08fdb117d6f173d32b6cd9
+table|payment_v2.policies|1|3591c4b307bd9fc5a5acb0b10d3e41e2|fb040419737b1faaec6d8a8af8d3dd15
+table|payment_v2.quote_books|10|b07f4698bc77f3b74e91154910d818e4|004ac7fd5af5962362433c109a80a476
+table|payment_v2.sales|10|efb21475e9dbc3b474b86b8decfc7c7f|87cd16949d47c1b5341a6bee3ed579a1
+table|payment_v2.signed_operations|5|0a977957b8c259ab04ec5237043ae251|95ba8bf5f046cbdab1d270e7d7e1e3e3
+table|payment_v2.staff|20|f6ee76ab8e422802eb16e52afaf21468|83cb8254baeb1cc164f5244ccbbce45a
+table|payment_v2.unresolved|1|c4ca4238a0b923820dcc509a6f75849b|233e2331e01075e68b9914ea7ae4f8be
+table|payment_v2.usdc_journal|29|30ae902fe5f13e8775cb9d2c0b0207df|d980dcb29884753e64c80f124441d1df
+table|payment_v2.verified_chain_evidence|11|62a2668ed6e03415cc1faf13ebb05649|c81866845eb784db5df8cee542c1c9c0
+table|payment_v2.wallet_accounts|11|68aaf41030c6c2998b68ad830c130d6b|038c249c3ef6173bf7e5893d8d1bffc4
+table|public.card_provenance|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.cards|10|c14a913088c5d371e2ff4b6afe048641|046ee9a129d72a73d3c18e6465399649
+table|public.cash_payout_countries|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.condition_bands|5|c45995428cba999d4b7e97f07c507d4a|e56cf23a7cf193561b4d408b966e8c33
+table|public.consignment_events|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.consignments|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.credit_holds|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.items|10|5be5992a193272a4791588643443d355|d280351c17166a09f48195e0ab518653
+table|public.ledger_entries|30|f29c6023e808b041b06c5ba374f40052|502b65a1c49af14410f4db2b195282f6
+table|public.level_snapshots|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.levels|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.listings|10|34dd3eeefe136689260eadaddc7a2c52|f09cac95d54aebc8933ae7dc315a37d9
+table|public.market_refs|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.notifications|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.orders|8|3b267607d736f50290cde0e4f669ef2e|ccb4489fe8617bc04e53a26b9c63db31
+table|public.platform_config|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.redemptions|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.referrals|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.sku_float_curve|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.sku_models|10|3957f0bbc3cdd6cc8095be9ba939e6f3|4eec71fe2906303b0565300d89103a59
+table|public.sku_requests|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.skus|10|271e84ddee56ac727554623a5161233e|65357809c627c738ec13f45d401abde7
+table|public.subscriptions|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.sweeps|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.tier_bands|5|afe805e5a3c3ec7fa05645a6a2a6e607|a9db442bba3fbc32889389a94f072676
+table|public.trade_offers|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.users|31|2412224e1a0c72613dc547fed2c8cf73|99a68a011d7e7ad71a9cdc62090dccd5
+table|public.vault_intakes|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.watchlists|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+table|public.xp_events|0|d41d8cd98f00b204e9800998ecf8427e|d41d8cd98f00b204e9800998ecf8427e
+case|expired_escrow_op27bc0cae|sale_id=878f34bc-fda7-4c11-af0b-27e82492a52b|1:05c14f04992c94a64fc90973f2676333|2:3f07dfe0372b2538c3f290084211014a|1:74000fd718fb484e678e4bf3b4b26075|1:1f1079283c022a80bcda412d6b466e29|1:661ec2cc3f990e49f44f23c1a17cbf7d|3:f2a26c366543804e26a283d557a873ec|1:f1774b09f9ddd8e55df50aece78cb401|1:dcea93c2fa9f348e0c093645165324bc|0:d41d8cd98f00b204e9800998ecf8427e|1:1aaa5d0fe50821507e441b4d26bcb097|2:55c8753e2f257704cff974bcfd9b8794
+case|pending_harness|sale_id=6e2a2198-a61e-4e85-983c-3cd5897cdb05|1:8855eae12721320073fbdb79971aaebb|2:2248a0b4161d77a54ede6264282fecc6|1:e3d1f78bfc5f165d4ce2bc3897bb4755|1:a72e9df70a08601fe131e48a9ee2781d|0:d41d8cd98f00b204e9800998ecf8427e|2:7b70833cada2264539a5152b0a54132a|0:d41d8cd98f00b204e9800998ecf8427e|2:6c92a24a593e81662577ca96f57b269c|0:d41d8cd98f00b204e9800998ecf8427e|1:dd986821e69ffdbf4b4d57ee24e2bf79|2:c6923fd2cdf0d69b047c9a353acbdc88
+case|pruned_ack_case0|sale_id=bb4a634c-454b-4f0e-a918-93492838c9f8|1:1631bb74251a1775acb70316f0de2804|2:890c0c4c515bc46e1e92035dde14289e|1:e4e1a1a8ad302a13fa89b1a5e385f74f|1:a6851af3c487614365ae7643ecb84a0a|0:d41d8cd98f00b204e9800998ecf8427e|2:1882d05d160d1234eca3976c0184ae07|0:d41d8cd98f00b204e9800998ecf8427e|2:1a0546f6d3093dbd04fbf86eb0835cd8|0:d41d8cd98f00b204e9800998ecf8427e|1:fae7f6358076335ca5ad3725e3ae7d4c|2:ad30012571c3d5239b82a70e63480197
+case|unresolved_registration_case3|sale_id=b61b09f4-fc2e-4229-ae48-daa45060d380|1:c6fec2e6c8734d53f7d4ed5a0867b81f|0:d41d8cd98f00b204e9800998ecf8427e|0:d41d8cd98f00b204e9800998ecf8427e|0:d41d8cd98f00b204e9800998ecf8427e|0:d41d8cd98f00b204e9800998ecf8427e|1:839bdd83651e9ba6aeb76d345fb5ee4f|0:d41d8cd98f00b204e9800998ecf8427e|0:d41d8cd98f00b204e9800998ecf8427e|0:d41d8cd98f00b204e9800998ecf8427e|0:d41d8cd98f00b204e9800998ecf8427e|0:d41d8cd98f00b204e9800998ecf8427e
+state|expired_escrow_op27bc0cae|funded|0|1|1|f|funded:2ef70930-5d07-470b-b9e1-1b58fa9fb865:att=b4d16a85-b55d-4786-ad23-a78bf878a68a|funded:rev1|adc88e0d-bda2-49f8-8902-3b7c4db0fb1d:open_sale:observed:-;cfbe0398-6d69-4c35-a533-c4f5c36959cf:refund:observed:-;27bc0cae-1766-4295-b86c-6457289edd6b:execute_outcome:unknown:REVIEW_REQUIRED: expired or invalid original transaction: no|opened:2N52tPinjycz:ev=none|b4d16a85-b55d-4786-ad23-a78bf878a68a:funded;5b1502b7-d7b8-48e5-b5c4-985790bb871e:authorized
+state|pending_harness|direct|1|1|1|t|direct:b3949981-da83-424b-9a33-c179704817e6:att=b9cb89ae-6e3e-4838-b247-37f4a2265972||3f6d3dd8-5804-49bb-82a3-db6ccd32aa8b:open_sale:observed:-;c12fd363-952a-490c-a0e4-a3b53d6b91af:acknowledge_claim:observed:-|opened:5RBpCnebHLMa:ev=none;acknowledged:3UEUDGD7bxVW:ev=none|b9cb89ae-6e3e-4838-b247-37f4a2265972:direct;159febeb-1e06-4e47-8507-caff762b64df:authorized
+state|pruned_ack_case0|direct|1|1|1|t|direct:124e9120-6448-4f66-b835-b2a96c5c2cf3:att=08319238-02c0-4683-a165-3a2416161270||b82b7d1c-42b8-4723-91e0-7ae000d71f25:open_sale:observed:-;32954778-1a48-42f5-8f43-287abe5eaf38:acknowledge_claim:observed:-|opened:3eB7VQvSbnYf:ev=none;acknowledged:nYpb9BgDzVxN:ev=none|08319238-02c0-4683-a165-3a2416161270:direct;36a9ceba-a548-4c7a-a9d4-b098f0806a68:authorized
+state|unresolved_registration_case3|opening|1|1|1|f|||276f50d6-797f-4062-8a96-3ea85d5ade61:open_sale:leased:-||
+evidence_by_kind|attestation|authentication_pass|1
+evidence_by_kind|attestation|receipt|1
+evidence_by_kind|attestation|release|1
+evidence_by_kind|lifecycle|acknowledged|2
+evidence_by_kind|lifecycle|opened|3
+evidence_by_kind|payment_event|direct|1
+evidence_by_kind|payment_event|funded|1
+evidence_by_kind|payment_event|released|1
+unresolved|1|AXxVGqvow56TSnzTi4Lb1haWtEaUoBN2ezpSfMNqQAXx|INJECTED actual database commit response lost
+verifier_context_fn|3e39cf76a408b38d7b665116ded63101|7299|payment_v2_owner|{payment_v2_owner=X/payment_v2_owner,postgres=X/payment_v2_owner,payment_v2_verifier=X/payment_v2_owner}|t|{search_path=pg_catalog}
+```
+
+### Results by category
+
+- **Real chain/DB integration:** the dedicated verifier login reads verifier context
+  through the real Postgres role and grant path after 074 (x3 identical). Receipt-only
+  recovery of a committed direct ACK through distinct settler and verifier logins
+  (x6 across 3 runs, identical). No chain was contacted in this session; the chain
+  facts relied on come from the 2026-10-16 runs.
+- **Offline/mocked:** none run this session. No vitest, tsc, npm or build; under the
+  task constraints, no application code changed.
+- **Simulated outages:** none this session. The earlier simulated-primary-outage archive
+  evidence (results.json rows 79-86) was not re-exercised.
+- **Intentional fail-closed:** 11 permission-denied negatives (6.1-6.11). The
+  unsupported kind (6.13). Unknown subject: NULL at the DB, which the adapter turns into
+  an exception (6.12). The harness refused to proceed without retained evidence (exit 2,
+  three times) and wrote nothing.
+- **Blocked/unimplemented:** pending-ACK recovery from retained evidence. There is no
+  compliant evidence for any committed-ACK subject, so this needs a new scenario
+  captured under the current evidence code. The pruned ACK (case0) is not
+  independently reverifiable. The expired escrow (op 27bc0cae, `unknown`/REVIEW_REQUIRED)
+  and the unresolved registration (case3, `opening`) are unchanged. There is also no
+  archival observer or production retention.
+
+Limits and unverifiable items:
+- The harness does not print the selected sale. The selection was reconstructed from
+  its code plus a read-only settler `ack_context` replay.
+- The run-2 and run-3 console logs were partly overwritten by interleaved stdout and
+  stderr from `wsl.exe`. Their result line and `harness_exit=2` survived. The
+  verification header lines of those two runs did not survive, but the script aborts
+  before the harness when the DB checks fail, and the helper was re-verified clean
+  afterwards (05:49:15Z).
+- The time 068 was applied is inferred from row timestamps and git history. There is
+  no migration ledger in this database.
