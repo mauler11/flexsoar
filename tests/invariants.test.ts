@@ -1889,7 +1889,7 @@ describe('PricePayout — country-driven payout disclosure (docs/handoff/market.
     expect(html).toContain("You&#x27;ll be paid in cash");
   });
 
-  it('picking a non-cash-eligible country shows the FSC disclosure, with the plain-language store-credit copy, overriding a stale cash sellerPayoutMethod', () => {
+  it('picking a non-MY country blocks selling without FSC, overriding a stale cash sellerPayoutMethod', () => {
     const html = renderToStaticMarkup(
       createElement(PricePayout, {
         ...baseProps,
@@ -1898,9 +1898,10 @@ describe('PricePayout — country-driven payout disclosure (docs/handoff/market.
         cashPayoutCountryCodes: ['MY'],
       }),
     );
-    expect(html).toContain("You&#x27;ll be paid in FSC, not cash");
-    expect(html).toContain('1 FSC = RM1');
-    expect(html).toContain('cannot be cashed out to a bank');
+    expect(html).toContain("Selling isn&#x27;t available in your country yet");
+    expect(html).toContain('There is no store credit');
+    expect(html).not.toContain('FSC');
+    expect(html).toContain('Blocked above: pick a supported country to continue.');
   });
 
   it('no country picked and no sellerPayoutMethod on file: shows neither disclosure banner', () => {
@@ -1937,7 +1938,7 @@ describe('PricePayout — country-driven payout disclosure (docs/handoff/market.
     expect(html).not.toContain('<button');
   });
 
-  it('the read-only payout indicator agrees with the disclosure banner above it, for both cash and credit', () => {
+  it('MY shows a cash disclosure and read-only cash indicator; non-MY blocks selling with no payout indicator', () => {
     const cashHtml = renderToStaticMarkup(
       createElement(PricePayout, {
         ...baseProps,
@@ -1947,9 +1948,9 @@ describe('PricePayout — country-driven payout disclosure (docs/handoff/market.
       }),
     );
     expect(cashHtml).toContain("You&#x27;ll be paid in cash");
-    expect(cashHtml).toMatch(/>cash</);
+    expect(cashHtml).toMatch(/aria-label="Payout method \(determined by your country, not a choice\)"[^>]*>cash<\/div>/);
 
-    const creditHtml = renderToStaticMarkup(
+    const blockedHtml = renderToStaticMarkup(
       createElement(PricePayout, {
         ...baseProps,
         countryCode: 'US',
@@ -1957,8 +1958,9 @@ describe('PricePayout — country-driven payout disclosure (docs/handoff/market.
         cashPayoutCountryCodes: ['MY'],
       }),
     );
-    expect(creditHtml).toContain("You&#x27;ll be paid in FSC, not cash");
-    expect(creditHtml).toMatch(/>credit</);
+    expect(blockedHtml).toContain("Selling isn&#x27;t available in your country yet");
+    expect(blockedHtml).not.toContain('aria-label="Payout method (determined by your country, not a choice)"');
+    expect(blockedHtml).not.toMatch(/>(cash|credit)</);
   });
 });
 
