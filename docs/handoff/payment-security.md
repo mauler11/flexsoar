@@ -4337,3 +4337,333 @@ Limits and unverifiable items:
   afterwards (05:49:15Z).
 - The time 068 was applied is inferred from row timestamps and git history. There is
   no migration ledger in this database.
+
+## 2026-10-20 - Milestone 4 phase 1: PLAN ONLY for a fresh retained-evidence ACK recovery scenario
+
+Status: plan only. Nothing was executed that writes to a database, touches a chain or
+validator, or starts or creates a container. This session ran only file/git reads,
+`docker inspect`/`docker exec cat` of `/proc` and the TCP table, and one
+`BEGIN TRANSACTION READ ONLY ... ROLLBACK` session as `supabase_admin` after the
+milestone-3 container checks (all passed at 05:56:41Z). HEAD at start was `33f182b`.
+The tree is still behind main, as already authorized. The founder-owned package files
+and debris were not touched.
+
+**Headline: the current harness cannot produce this scenario without a founder
+decision.** (a) No existing `integrated.mjs` mode creates a new sale. The normal loop
+indices `[0,1,2,4,5,6]` and the context indices `[11,12]` all have `scenario-*-complete`
+markers in `/state/integrated-JXopR6`, so they are skipped (`integrated.mjs:154-155`). A
+fresh `--run-isolated-integration` cannot run either: it creates a new ledger and
+genesis and then runs `01_signable_fixtures.sql`, which refuses whenever any sale,
+attempt, order, card or operation exists (`01_signable_fixtures.sql:10-13`). (b) No
+existing injection point falls between "ACK evidence persisted" and "ACK lifecycle
+committed". The only ACK crash, index 4, fires before evidence retention
+(`integrated.mjs:342-347`, ahead of `retainAuthorityEvidence` at `:348`). A test-only
+harness change is therefore required (section 7, D1).
+
+### 1. Environment
+
+- The validator is the owned `solana-test-validator` (Agave 2.1.0, `/tools/agave`). It is
+  spawned by `integrated.mjs` as a child process inside the existing helper
+  `flexsoar-payment-integration-20261016T075407Z` (Id `3a59f47b...`, NetworkMode
+  `container:71c4856a...`, so it shares the DB container's loopback-only netns). Exact
+  argv, from `integrated.mjs:87`:
+  `/tools/runtime/ld-linux-x86-64.so.2 --library-path /tools/runtime /tools/agave/solana-test-validator --config <run>/validator-config.json --url http://127.0.0.1:18899 --mint <bootstrap pubkey> --bind-address 127.0.0.1 --rpc-port 18899 --faucet-port 18901 --gossip-port 18902 --dynamic-port-range 19000-19020 --ledger <run>/ledger --limit-ledger-size 1000000 --upgradeable-program CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF /tools/program.so <bootstrap pubkey>`.
+  Its environment sets `RAYON_NUM_THREADS=2`. Config: `integrated.mjs:82`
+  (`ws://127.0.0.1:18900`, commitment finalized). RPC is `http://127.0.0.1:18899`
+  (`:57`). Readiness is a `getHealth` poll (`:113`). The validator is SIGTERMed in
+  `finally` (`:415`).
+- Pre-flight inside the harness:
+  - attestation, netns, `lo`-only and route checks (`:29-33`);
+  - program sha256 `99aa6bec...743c` (`:34`);
+  - at least 5 GiB free under `/state` (`:35`);
+  - ports 18899-18901 free (`:36`).
+
+  Today none of those ports is listening; the only helper listener is
+  `127.0.0.1:5432`. Host free space is 949G.
+- Ledger: `<run>/ledger`. To reuse the existing chain, the run is
+  `/state/integrated-JXopR6`, which is
+  `/home/family/flexsoar-payment-db-69c6161-20261016T022841Z/integration-discovery-20261016T074634Z/helper-state/integrated-JXopR6/ledger`
+  on the host (496M, snapshots at slots 2626 and 2726). Resume asserts the same genesis
+  `FAiPDLaech8zexAiuEiKUWzapfJbegZyfrkBgDLYunyF` (`:129`, "never replace an existing
+  integration chain"), and that is the network `dba29220-5ac4-4d7e-ad78-00c84eaf815e`
+  with `funding_enabled=t` in the DB.
+- **No new container is needed.** The validator runs inside the existing helper's
+  namespace. **No new ledger is needed or possible.** A new ledger implies a new genesis,
+  hence a new `payment_v2.networks` row through `01`, and `01` refuses on this
+  populated DB. Starting the validator on the existing JXopR6 ledger *does* write to
+  that ledger: it produces new slots, and the new scenario's transactions are added to
+  it. That is a separate founder authorization (D3).
+
+### 2. Keys and funds (all synthetic, local-only)
+
+- All keys are `Keypair.generate()` at first setup (`integrated.mjs:44-50`): bootstrap,
+  mint, treasury, seller, buyer0/1, issuer, inventory, receiver, authenticator,
+  reviewer, release, reconciler, guardian and governor0-2. They are stored mode 0600 in
+  `<run>/EPHEMERAL-LOCAL-ONLY-keys.json` and reloaded only on resume. We did not open
+  that file, per README:28-29.
+- New buyers follow the existing pattern (`:156-167`): fresh
+  `{id: randomUUID(), secret: Keypair.generate()}` written to a new
+  `EPHEMERAL-LOCAL-ONLY-*.json` with flag `wx`, then added to the DB through
+  `04_additional_buyers.sql`.
+- SOL comes from the bootstrap key, the `--mint` genesis account of the owned validator,
+  and from `requestAirdrop` on its own faucet (`:115`).
+- "USDC" is a synthetic SPL mint created by bootstrap with 6 decimals and bootstrap as
+  mint authority (`:116`, InitializeMint2 `[20,6]`). JXopR6 mint is
+  `DDQuaMSaezFVerEMXRhHCq2xfWKm6URggbcEDxkS7qmF`. Buyers are minted 10,000,000 base
+  units, i.e. 10 test USDC (`:118`; same amount for added buyers).
+- The program is a local build pinned by hash. Genesis exists only on this ledger. None
+  of these is a real or operational key, mint or wallet. The chain is
+  unreachable from outside the namespace (no routes, `lo` only).
+
+### 3. Fixtures (existing scripts only; no new `.sql` needed)
+
+The harness runs every fixture through its isolated `sql()` helper as `supabase_admin`
+over loopback (`integrated.mjs:59`). These are fixture-administrator writes, not worker
+paths, and they need explicit founder authorization (D2) because milestone 3
+forbade admin writes.
+- `02_inventory_fixture.sql`, called at `:191`: inserts one each of
+  `public.sku_models`, `skus`, `items`, `cards` (owner=seller), `ledger_entries`
+  (mint), `listings` (public, 2000 sen) and `payment_v2.inventory`. Guarded to the
+  integration DB, loopback and `supabase_admin`.
+- `04_additional_buyers.sql`, called as at `:160`/`:173`/`:181`: inserts two each of
+  `public.users` and `payment_v2.wallet_accounts`. It is additive and changes no
+  existing binding.
+- `01_signable_fixtures.sql`: not used. It refuses on this DB, and it would
+  deactivate staff and networks.
+- `03_outcome_assertions.sql`: a read-only audit (`BEGIN READ ONLY ... ROLLBACK`) run at
+  the end of the mode (`:383`). It checks the exact order, MYR and USDC snapshots,
+  journal, consumption, outbox and ownership. It writes nothing.
+
+Every other row is created by worker RPCs under dedicated logins (section 4). **No new
+`.sql` fixture is proposed.**
+
+### 4. Scenario script
+
+There are two new mode-1 (direct, vaulted) scenarios in the same run directory, indices
+13 (normal) and 14 (crash). Mode 1 is deliberate: it never calls
+`claimPaymentOperations` (that happens only for escrow outcomes, `:274`), so the
+preserved leased and unknown operations `27bc0cae...` and `276f50d6...` are never
+leased or touched. Logins and signers per step:
+
+a. Normal direct sale (index 13). The flow is the existing loop body `:187-353`:
+  1. Fixture: `02` as `supabase_admin` (`:191`); buyers via `04` as `supabase_admin`.
+  2. `register_card` on chain, signed by the inventory and authenticator test keys
+     (`:201`). The bootstrap key pays all fees.
+  3. Address lookup table (`:203`); bootstrap only.
+  4. Quote and sale: `preparePaymentSale` via **payment_integration_issuer**
+     (`fn_payment_v2_prepare_sale`, `:196`; terms `totalUnits:'1000000'`, `:195`).
+  5. Open: `paymentIssuerContext` (issuer), then `open_sale` signed by the issuer key,
+     finalized (`:206-208`).
+  6. Opening evidence: `retainAuthorityEvidence` with `LocalFinalizedRpcSource`, then
+     `persistVerifiedPaymentEvidence` via **payment_integration_verifier**
+     (`fn_payment_v2_store_chain_evidence`, `:66-80`). Then
+     `recordPaymentLifecycle(opened)` via the verifier, with evidenceId (`:210`).
+  7. Attempts: `initiatePaymentAttempt` for both buyers via
+     **payment_integration_customer** (`SET LOCAL ROLE authenticated` plus
+     `request.jwt.claim.sub`, `:62`). Then `authorizePaymentAttempt` via the issuer
+     (`:212-213`).
+  8. Chain payment: two buyers race `buy_v2`, signed by buyer and issuer, finalized
+     (`:221-226`). Exactly one finalizes; the loser fails on chain and its principal
+     debit is 0.
+  9. Verification, evidence and settlement: `reconcilePayments(verifier, observer, 20,
+     settler)` (`:228-231`). The verifier calls `begin_scan`, `attempt_context`,
+     `store_chain_evidence` for subject `payment_event`/`direct`
+     (`lib/db/payment-reconciliation.ts:47`) and `record_verified_event` with evidenceId
+     (`:50-52`). **payment_integration_settler** calls `reconcile_event`.
+  10. Assertions:
+      - order count is 1 (`:235`);
+      - the journal nets to 0 (`:236`);
+      - the card owner is the winning buyer (`:237`);
+      - a second reconcile processes 0 (`:238`);
+      - **seller +950000 and treasury +50000 base units** (`:240`).
+  11. ACK: the settler calls `reconcile_event` and `ack_context` (`:330-332`). The
+      reconciler test key signs `acknowledge_claim`, finalized (`:339`). The chain flag
+      alone does not unlock the DB (`:341`).
+  12. ACK evidence: `retainAuthorityEvidence(lifecycle/acknowledged)` via the verifier
+      (`:348`), then `recordPaymentLifecycle(acknowledged)` with evidenceId via the
+      verifier (`:349`). The claim becomes `available` and the receipt is returned
+      (`:350-352`).
+  - **95/5 rule.** The fee is `pg_catalog.div(total_units*500, 10000)` and
+    net = total - fee. This is enforced in the DB constraint and initiation
+    (`066_payment_v2_exact_usdc_fee.sql:22`, `:52`) and the permit codec
+    (`lib/solana/protocol-v2.ts:39`). It is integer division, which is floor for
+    positive values. For 1,000,000 that gives fee 50,000 and net 950,000.
+    `03_outcome_assertions.sql` re-checks `total/fee/net = 1000000/50000/950000` and MYR
+    `2000/100/1900`. Limitation: totalUnits is hard-coded, so the remainder or rounding
+    branch is not exercised by this amount.
+
+b. Crash after evidence, before the ACK lifecycle commit (index 14). It is identical
+   through step 12's `retainAuthorityEvidence`; the ACK evidence row is committed. Then
+   the **proposed injection** fires (no app code is changed). In the new mode, the
+   harness wraps the verifier transport, following the existing `lostSettler`
+   (`:227`) and `lostResponse` (`:285`) patterns. When it sees
+   `fn_payment_v2_record_lifecycle` with `p_proof.kind==='acknowledged'` for index 14,
+   it writes marker `crash-after-ack-evidence-14`, **does not forward the call**, and
+   throws `INJECTED process stop after retained ACK evidence, before lifecycle commit`.
+   The process exits 1 and the validator is SIGTERMed by `finally`. Because nothing was
+   sent, nothing is committed. Recovery is then a separate step that does not start the
+   validator, so any chain lookup would fail (port 18899 closed). It calls
+   `recoverCommittedClaimAcknowledgement(settler, verifier, eventId)`
+   (`lib/db/payment-v2-workers.ts:40-64`):
+   1. the settler's `ack_context` returns receipt NULL;
+   2. the verifier's `read_chain_evidence(lifecycle, sale, acknowledged)` returns the
+      row;
+   3. `validateRetainedFinalizedEvidence` runs offline, including `compiledRpcResult`;
+   4. the verifier's `recordPaymentLifecycle` records it with evidenceId.
+
+   Expected result: `{kind:'reconciled', claim:'available'}`. This is the logic of the
+   existing context block `integrated.mjs:132-153`, which has never actually reached
+   its `reconciled` branch (results row 88 is a receipt). Rejected alternatives:
+   - killing the node process: the window between two RPCs is milliseconds, so the
+     timing is non-deterministic;
+   - row locks or `LOCK` from an admin session: that is a write-lock as admin;
+   - a dropped response after `record_lifecycle` commits: that tests the receipt path,
+     not evidence recovery. It can be added as optional case 14b.
+
+c. Idempotency. Run the same recovery twice more. Both must return
+   `{kind:'receipt'}` with the identical receipt; the second and third results must be
+   `deepEqual`. The snapshot after recovery 2 and after recovery 3 must be
+   byte-identical to the snapshot after recovery 1. Also re-assert:
+   - one order;
+   - one consumption and one direct event;
+   - one `lifecycle_evidence(acknowledged)`;
+   - card owner unchanged;
+   - `usdc_journal` sum 0 with 3 rows;
+   - buyer, seller and treasury balances unchanged since step 8;
+   - no new signature in `<run>/transaction-*.json`.
+
+d. Negatives:
+  - Offline, existing, not run here: `tests/payment-context-evidence.test.ts`.
+    - `:104-117`: wrong `networkId` gives "integrity mismatch" (`:112`); wrong genesis
+      gives "genesis mismatch" (`:113`); a corrupt or failed execution is rejected.
+    - `:188-243`: parsed and wire tampering, missing or changed lookup proof, altered
+      instruction fields.
+    - `:289`: never-verified ACK history stays blocked.
+
+    Run with `npx --no-install vitest run tests/payment-context-evidence.test.ts`; the
+    last count was 66/66 across 2 files with `payment-v2.test.ts`. Needs authorization
+    (D4).
+  - DB, existing: `evidence-db-readback.mjs:73-78` covers a tampered instruction, which
+    is rejected before any lifecycle RPC, and a conflicting persist, which
+    `store_chain_evidence` rejects with `PAYMENT_V2_VERIFIED_EVIDENCE_CONFLICT`
+    (`069:63`), leaving the row unchanged. After a new scenario this harness selects
+    the newest direct receipt (index 14 or 13). **Predicted defect:** when it reads the
+    lifecycle subject (`:50`), the readback comparisons at `:70` and `:77` query
+    `payment_event/direct` for `ack.attemptId` instead of the lifecycle subject, so the
+    "unchanged" assertion at `:71` should fail on a different evidence id. A one-line
+    test fix is needed: use `subjectKind/subjectId/subjectAction`. Founder decision
+    D1b. Not edited.
+  - DB, proposed, read-only and rolled back, as the verifier: call
+    `fn_payment_v2_store_chain_evidence` with the stored index-13 envelope modified
+    three ways:
+    - `networkId` set to `d6fa9d50-d2ad-4a88-b657-0713c94d333c` (the inactive
+      network), expecting `PAYMENT_V2_VERIFIED_NETWORK_MISMATCH` (`069:42`);
+    - `parsedRpcResult` removed, expecting `PAYMENT_V2_VERIFIED_EVIDENCE_SHAPE`
+      (`069:36`);
+    - one byte of `transactionBase64` flipped, expecting `..._TRANSACTION_IDENTITY` or
+      `..._RESULT_MISMATCH`.
+
+    All three raise before the INSERT. Each runs inside
+    `BEGIN TRANSACTION READ ONLY ... ROLLBACK`, so even an unexpected pass cannot
+    write. Snapshot unchanged.
+  - The permission negatives from milestone 3 (6.1-6.14) are repeated unchanged.
+
+### 5. Expected database changes and snapshot method
+
+Snapshots use milestone 3's `snapshot.sh` unchanged, plus the new sale IDs for 13 and
+14 added to its case list. It is read-only as `supabase_admin` with
+`transaction_read_only=on`: per table, count plus `md5(pk)` plus `md5(row::text)` over
+all `payment_v2` and `public` tables, and per-case row md5s. Snapshots are taken at
+BEFORE, after the fixtures, after index 13, after the crash, after recovery 1, 2 and 3,
+and after the negatives. Every row change must be attributable to the new sale IDs, the
+new buyer IDs or the global tables listed below. Anything else is a FAIL.
+
+Expected per sale, modelled on milestone 3's committed direct sale `6e2a2198`, whose
+case footprint is sales 1, attempts 2, events 1, consumptions 1, escrows 0,
+operations 2, lifecycle 2, claim_history 1, outbox 2:
+- fixtures: +1 each of `sku_models`, `skus`, `items`, `cards`, `listings`,
+  `ledger_entries`(mint) and `payment_v2.inventory`. Buyers: +2 `users`,
+  +2 `wallet_accounts`.
+- prepare/open: +1 `payment_v2.sales` (state opening, then opened);
+  +1 `quote_books`; +1 `verified_chain_evidence`(lifecycle/opened);
+  +1 `lifecycle_evidence`(opened, evidenceId set); +1 `operations`(open_sale, observed).
+- attempts: +2 `attempts` (winner becomes `direct`, loser stays `authorized`).
+- payment and settlement: +1 `verified_chain_evidence`(payment_event/direct); +1 `events`(direct,
+  evidenceId set); +1 `consumptions`; +1 `public.orders`; +3 `usdc_journal` (sum 0);
+  +1 `claim_history`; +2 `outbox`; card `owner_id` set to the buyer; claim ledger
+  `ledger_entries`; `listings` status change; `sales.state=direct`; updated
+  `payment_v2.cursors` lease and `after_address` (global scan cursor, 1 row).
+- ACK: +1 `verified_chain_evidence`(lifecycle/acknowledged); +1 `operations`(acknowledge_claim);
+  +1 `lifecycle_evidence`(acknowledged), with `sales.chain_acknowledged=t`. For index 14
+  the `lifecycle_evidence` row appears only after recovery 1.
+- Recoveries 2 and 3: zero changes.
+- The exact table/row set for "card owner", the ledger and the outbox is taken from the
+  DB functions during execution and reported row by row. The list above is a
+  prediction, not a substitute.
+
+### 6. Stop conditions and preserved state
+
+Stop immediately and report, never retrying or repairing, on any of these:
+- any container check mismatch;
+- harness attestation, netns or program-hash failure;
+- genesis differs from `FAiPDLae...`;
+- port busy;
+- under 5 GiB free;
+- a validator that fails readiness;
+- any `uncertain chain outcome` (`:96`);
+- an unexpected exit from an injected stop;
+- `processed` not in {0,1};
+- any 95/5 balance mismatch;
+- any snapshot change outside section 5;
+- any change to a preserved-case md5;
+- any `PAYMENT_DB_OUTCOME_UNKNOWN`;
+- recovery returning anything other than `reconciled` the first time and `receipt` afterwards;
+- any request for a credential.
+
+Never use `--run-isolated-integration`, `--observe-isolated-integration` (it exits 1 at
+the pruned ACK by design) or `--record-expiry-review-isolated-integration`.
+
+Preserved untouched:
+- `flexsoar_payment_v2_test`: not connected to.
+- The three historical blocked cases, verified by md5 at every snapshot:
+  - pruned ACK, case 0, sale `bb4a634c...`;
+  - unresolved registration, case 3, sale `b61b09f4...` (`opening`, leased `open_sale`);
+  - expired escrow, op `27bc0cae...`, sale `878f34bc...` (`funded`, `unknown`/REVIEW_REQUIRED).
+- The milestone-3 pending sale `6e2a2198...`.
+- All existing rows other than the global cursor.
+- The state directory `/state/integrated-JXopR6` (existing files are only appended to:
+  new `scenario-13/14*.json` and markers, plus `results.json` rows); no file is deleted.
+
+### 7. Missing / decisions required (not worked around)
+
+- **D1 test-harness change (lane extension for `tests/payment-integration/**`).** This is
+  a new explicit mode, e.g. `--retained-ack-recovery-isolated-integration /state/integrated-JXopR6`.
+  It would:
+  - run indices `[[13,1],[14,1]]` with contextOnly-style gating, so the
+    `[1,2]` terminal audit (`:358`) and the archival recheck loop (`:385-400`), which
+    exits 1 at the pruned case 0, are skipped;
+  - create two fresh buyers via `04` as at `:156-167`;
+  - wrap the verifier transport with the index-14 injection described in 4b;
+  - add a recovery-only entry point that does not spawn the validator. Either it is the
+    same file with an early branch before `:87`, or a new
+    `tests/payment-integration/retained-ack-recover.mjs` that imports only the
+    transports and `recoverCommittedClaimAcknowledgement`. **Recommended: the
+    separate script**, so "no chain lookup" is structural.
+
+  No `lib/**` or app code changes.
+- **D1b** fix the `evidence-db-readback.mjs:70,77` subject mismatch (predicted to
+  fail), or accept that this harness's DB negative will fail for lifecycle subjects.
+- **D2** authorize fixture writes as `supabase_admin` through the existing `02`/`04`
+  scripts, run only by the harness `sql()` helper.
+- **D3** authorize starting the owned validator on the existing JXopR6 ledger and new
+  local chain transactions: register, ALT, open, two buys, ACK, for each of 2 sales. The
+  ledger grows; there is no reset.
+- **D4** authorize the offline `npx --no-install vitest run tests/payment-context-evidence.test.ts`.
+- Not missing:
+  - toolchain: node 22.14.0, agave 2.1.0, psql 17.11, pinned `program.so`; the helper
+    mounts were verified in milestone 3;
+  - credentials: HBA is `trust` on loopback, and no password or secret is needed;
+  - funds: synthetic.
+- Not established even after a pass: production archive retention, production worker
+  daemons, browser/API recovery, or a rounding-remainder amount. totalUnits is fixed at
+  1,000,000; a different amount needs another harness parameter, which is not proposed.
