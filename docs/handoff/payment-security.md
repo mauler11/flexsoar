@@ -4892,3 +4892,321 @@ No case returned 25006: validation refused before the INSERT in every negative c
   - 2 ATA creations and 2 mints for the new buyers;
   - per index: `register_card`, ALT create and extend, `open_sale`, 2 racing `buy_v2`
     (1 failed on chain) and `acknowledge_claim`.
+
+## 2026-10-20 - Pre-merge review: track/payment-security -> main, deploy with funding DISABLED (read-only)
+
+Reviewed HEAD: `f98e32f` (the merge of main `f2ac97a` into `e1fab59`); `git log HEAD..main` is empty.
+This was a read-only review: no edits, no DB, chain or container access, no
+install/ci/audit fix. The only commit is this section. The tree was clean before and
+after `tsc`/`npm test`/`npm audit`.
+Reference: Codex's map of main, `C:\Users\Family\flexsoar-reviews\money-routes-20261020-0916.md`
+(afae327). Wherever a route or action is **unchanged** by this branch
+(`git diff --stat main..HEAD`), Codex's main findings still apply and are summarised,
+not repeated. **Static source review only.** The deployed DB grants, migration state,
+config rows and env values are **UNKNOWN**.
+
+### 5. Validation on this HEAD
+
+- `npx --no-install tsc --noEmit`: exit 0.
+- `npm test` (vitest run): **20 files, 528/528 passed**, exit 0.
+- `npm audit --json`: 40 findings: 1 critical, 11 high, 28 moderate (section 4).
+
+### 1. Route by route (merged code)
+
+Verdicts: **REMOVED** / **HARD-DISABLED** (unconditional refusal) /
+**FAILS-CLOSED-UNLESS-CONFIGURED** / **LIVE**.
+
+| Route / action | Auth (file:line) | Effect after merge | Gate, env missing vs present | Verdict |
+|---|---|---|---|---|
+| GET /api/solana/build-tx | session `route.ts:6-8` -> 401 | none | unconditional 503 `FUNDING_DISABLED` (`:9`); no env read | **HARD-DISABLED** |
+| GET /api/solana/quote | session `route.ts:6-8` -> 401 | none | unconditional 503 (`:9`) | **HARD-DISABLED** |
+| POST /api/solana/settle (legacy body) | session `:15-18`; quote identity `:39-43`; HMAC `:50` | receipt lookup of an existing `orders.settlement_ref` only | `verify` and `settle` both `blocked` (`:63-68`), so with no prior order it is 409. Missing `SOLANA_QUOTE_SECRET` makes `verifyQuoteSignature` throw, which is caught as 409 (`:70-76`) | **HARD-DISABLED for settlement** (receipt-only lookup LIVE) |
+| POST /api/solana/settle (`version:2`) | session `:15-18` | `attachPaymentCandidate` session RPC records a candidate only; 202 pending (`:25-31`) | needs migrations 060+ and an own attempt; none can exist (no initiate caller, see 1d); otherwise 503 | **FAILS-CLOSED** |
+| GET /api/solana/attempts (new) | session `:6-7` | session RPC `fn_payment_v2_own_attempts`, read-only; `fundingAvailable:false` | RPC absent -> 503 (`:11`) | LIVE read-only |
+| GET /api/solana/receipts (new) | session `:6-7`; buyer-bound `.eq('buyer_id',user.id)` `:11`, re-checked `:17` | read own orders | session client (RLS) | LIVE read-only |
+| POST /api/internal/solana/reconcile (new) | `Bearer PAYMENT_RECONCILE_SECRET` `:4-5`, missing secret -> 401 | none | flag `PAYMENT_V2_ENABLE_LOCAL_RECONCILIATION!=='true'` -> 503 (`:6`); even with both set it is an unconditional 503 (`:8`); the file imports no Supabase client | **HARD-DISABLED** |
+| GET /api/solana/balances | session (unchanged; Codex) | RPC balance read | `HELIUS_API_KEY` missing -> 501 | LIVE read-only |
+| GET/POST /api/solana/link-wallet | session `route.ts:28-33,42-47` | service write `users.solana_address` (`:72-76`) | Ed25519 proof required (1g) | LIVE (proof-gated) |
+| GET /api/cron/process-payouts | `Bearer CRON_SECRET`, missing -> 401 (`route.ts:23-33`) | `processAllDuePayouts`; nothing executes (1a) | none needed | **HARD-DISABLED (no money path)** |
+| GET /api/cron/sync-comps | CRON_SECRET (unchanged) | market_refs/sku_models display data | `EBAY_APP_ID` missing -> skipped | LIVE (no money) |
+| POST /api/webhooks/stripe | `stripe-signature` + `constructEventAsync` (`route.ts:528-547`) | **none**: handled events return 503 `Stripe is dormant` (`:553-558`) | `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` missing -> 500 (`:520-526`) | **HARD-DISABLED** (verification kept) |
+| POST /api/webhooks/stripe-connect | signature (unchanged) | sets `stripe_connect_payouts_enabled=true` | secret missing -> 500 | LIVE-IF-CONFIGURED (no money; readiness-revocation gap per Codex) |
+| POST /api/consignor/connect | session (unchanged) | creates a Stripe Connect account and link; may set `is_consignor` before the key check | `STRIPE_SECRET_KEY` missing -> throws | LIVE-IF-CONFIGURED (no money) |
+| GET /api/fx, /api/webhooks/ebay-deletion | none (unchanged) | display / ack | - | LIVE (no money) |
+| createCheckoutAction | - | unconditional `throw` (`app/(market)/actions.ts:217-220`) | - | **HARD-DISABLED** |
+| createRedemptionCheckoutAction | - | unconditional `throw` (`:274-276`), zero-total branch included | - | **HARD-DISABLED** |
+| completeRedemptionAction | - | unconditional `{ok:false}` (`:345-348`) | - | **HARD-DISABLED** |
+| listCardAction / cancelListingAction | session `:113`, `:162-165` | `fn_payment_v2_list_card` / `fn_payment_v2_request_cancel` (`lib/api/contract.ts:1508,1529`) | **RPCs exist only after migrations 059+**; on a 058 DB they error | LIVE-IF-MIGRATED |
+| submitEscrowDecision (`app/admin/payments`, new) | `requireAdminAction()` `actions.ts:9`; page `requireAdminPage` `page.tsx:24` | session RPC `fn_payment_v2_record_decision`, intent only; DB checks enrolled staff role and independence | needs migrations; no escrows exist while funding is off | FAILS-CLOSED |
+| batchMintAction / approveSubmissionAction / burnCardAction | see 1f | initial ownership / burn | SQL `fn_require_admin` | LIVE (admin) |
+
+**a. Payouts cannot move money, regardless of `STRIPE_SECRET_KEY`/`CRON_SECRET`.**
+- `checkPayoutEligibility` (`lib/api/contract.ts:4407-4422`) returns `eligible:false`
+  for every order, with a reason from `stripePayoutBlockReason`
+  (`lib/db/purchase-payment.ts:50-54`).
+- `processAllDuePayouts` filters `eligible` (`:4448-4449`), so its loop runs zero times.
+- `executePayout` (`:4427-4434`) always ends in
+  `throw new ContractError('WRONG_STATUS', …)`.
+- `transfers.create` appears **nowhere** in app/lib (grep). The only Stripe
+  constructors left are Connect onboarding and status (`contract.ts:4286,4361`) and the
+  two webhooks.
+- Pinned by `tests/purchase-payment.test.ts:248-259`: USDC and `pi_` orders are
+  ineligible, `executePayout` rejects, and `mocks.stripe` is never called.
+
+**b. Legacy build-tx/quote/settle cannot issue a purchase or transfer a card.**
+- build-tx and quote are an unconditional 503 after the session check. Pinned by
+  `tests/purchase-payment.test.ts:265-268`, which also asserts no query or RPC.
+- settle's only success is returning an already-existing matching order
+  (`purchase-payment.ts:27-32`). `verify` and `settle` are `blocked`
+  (`settle/route.ts:63-68`).
+- `purchaseCard`/`purchaseCardSplit` throw unconditionally (`contract.ts:1553-1557`,
+  `1612-1618`; pinned at `tests/purchase-payment.test.ts:270-274`).
+- `issueQuote`, `verifyBuyTransaction` and `treasuryAddress` have no app caller.
+- **No configuration re-enables these in app code.** But see the BLOCKER BEFORE
+  DEPLOY on direct SQL RPCs.
+
+**c. Stripe checkout webhook and checkout/redemption actions cannot create a sale,
+settle or mark a redemption paid.**
+- The webhook returns 503 for every handled event after signature verification
+  (`webhooks/stripe/route.ts:553-558`). The legacy handlers in the file are unreachable
+  from `POST`.
+- The three actions refuse unconditionally (`actions.ts:220,276,348`).
+- Gap: no test calls the webhook `POST` or these three actions (backlog). The
+  invariants tests only mirror the old pure parsing logic
+  (`tests/invariants.test.ts:1242+`).
+
+**d. Public-funding switch.** There are three independent layers, all default-off and
+none env-enabled:
+1. **App constant** `FUNDING_AVAILABLE = false`, with **no env override**
+   (`lib/db/payment-v2.ts:62`).
+   - Pinned by `tests/payment-v2.test.ts:185`, which also asserts the panel renders
+     "Recover payment status" / "Do not pay again" and no "Confirm in wallet".
+   - Echoed in `attempts/route.ts:10-11`.
+   - The legacy issuance 503 is pinned by `tests/purchase-payment.test.ts:265-268`.
+2. **DB switch** `payment_v2.networks.funding_enabled boolean NOT NULL DEFAULT false`
+   (`059_payment_v2_records.sql:53`).
+   - Every issuing RPC refuses unless it is true plus `funding_configuration`:
+     `prepare_sale` (`060:109`) and `initiate` (`066:42`).
+   - No migration inserts a networks row.
+   - 063 refuses to apply if any network is enabled (`063:7`).
+3. **No production caller** of `initiatePaymentAttempt` exists (only the re-export
+   `contract.ts:4815`). No production code writes `payment_v2.wallet_accounts`, which
+   `initiate` requires (`066:47-49`).
+
+`NEXT_PUBLIC_ENABLE_PRIVY_CHECKOUT` (`lib/solana/privy.ts:98-99`) is **inert**:
+`isPrivyCheckoutEnabled()` has no caller outside `tests/solana-settle.test.ts:586-590`.
+It does **not** gate the wallet Deposit on-ramp (section 3).
+
+**e. `/api/internal/solana/reconcile`.** The caller must present
+`Bearer PAYMENT_RECONCILE_SECRET` (`route.ts:4-5`; missing secret -> 401). The flag is
+required (`:6`). The route then always returns 503 (`:8`). It imports no Supabase or
+service client (the whole file is 9 lines). Pinned by
+`tests/payment-db-adapters.test.ts:29-35`: with the secret and the flag set it returns
+503 "Dedicated verifier and settler…" and the network mock is never called. The worker
+transport refuses `service_role`, `supabase_admin` and other privileged logins
+(`lib/db/payment-postgres.ts:41`), and on failure returns `PAYMENT_DB_OUTCOME_UNKNOWN`
+without retry (`:65`), as milestone 3 found. There is no test for the missing-secret or
+missing-flag branches (backlog; the code at `:5-6` is fail-closed).
+
+**f. Admin actions.**
+- `batchMintAction`: `requireAdminAction()` at `app/admin/mint/actions.ts:47`, then
+  session `fn_mint_card`, guarded by `perform fn_require_admin()`
+  (`005_admin_guards.sql:51`).
+- `approveSubmissionAction`: `requireAdminAction()` at
+  `app/admin/submissions/actions.ts:60`; SQL `v_admin := fn_require_admin()`
+  (`041_fix_post_032_function_refs.sql:44`, superseding `030:29`).
+- `burnCardAction`: **no action-level guard** (`app/admin/cards/[id]/actions.ts:7-9`).
+  It is backed by session `fn_burn_card` with `v_admin := fn_require_admin()`
+  (`028_connect_notifications_retire.sql:141`), granted only to `authenticated`
+  (`:168-169`).
+- The same pattern applies to `archiveSkuModelAction` (`app/admin/skus/[id]/actions.ts:7-9`,
+  SQL `028:195`).
+- Every other admin action calls `requireAdminAction()`, which throws unless
+  `checkAdmin` is ok (`components/admin/auth.ts:68-76`).
+- `proxy.ts` gates the /admin pages only and is not the boundary (`proxy.ts:24-27`).
+
+**g. link-wallet: a user cannot bind a wallet they do not control.**
+- POST requires a session (`route.ts:42-47`).
+- It then requires an Ed25519 signature that verifies against the submitted address
+  over `FlexSoar wallet link\nuser:<session users.id>\nissued:<ts>`, within 10 minutes
+  (`lib/solana/wallet.ts:22-24,52-79`). Only the verified address is stored
+  (`route.ts:72-76`).
+- Residual issue: the message has no domain or cluster binding. A user tricked into
+  signing a message naming *another* user's id would make their own wallet that user's
+  payout address. That benefits the victim, not the attacker (backlog).
+- The v2 path additionally requires a `payment_v2.wallet_accounts` binding that no
+  production code creates.
+
+### 2. Custody rule ("vaulted" only from a custody record: physically held and authenticated)
+
+- UI: the "Vaulted" badge is `vaulted={item.custody === "warehouse"}`
+  (`app/(market)/card/[id]/page.tsx:203` -> `components/card/CardDetail.tsx:121-123`).
+  BuyPanel's seller-held state also reads `items.custody`. **No app or server code
+  derives vaulted from the lister's identity, role, handle or `is_admin`** (we grepped
+  app/components/lib for is_admin, role, handle and platform comparisons).
+- Violations of the founder rule, all from the data model rather than lister identity:
+  1. **Column default** `custody custody_model not null default 'warehouse'`
+     (`013_seller_custody.sql:54`). Pre-013 rows were backfilled as warehouse, and any
+     future insert that omits custody (dashboard, manual SQL) is shown as Vaulted with
+     no receipt record. The in-repo item creators set `'seller'` explicitly
+     (`013:143-152`, `019c:423-432`).
+  2. The UI badge checks custody only, not authentication (`authenticated_at`) or a
+     received vault intake.
+  3. v2 sets `custody='warehouse'` on the `receipt` decision **before**
+     authentication (`061_payment_v2_settlement.sql:174`). The legacy
+     `fn_vault_receive` sets warehouse with `authenticated_at = coalesce(..., now())`
+     (`023c:263-268`). That is admin-gated, but it stamps authentication at receipt.
+- "Paid cash to bank" copy. The founder's decision is 95% to the seller in USDC on
+  chain. These still say cash to bank:
+  - `components/market/ListForm.tsx:104`, `:109-110`, `:139-140`;
+  - `components/market/intake/PricePayout.tsx:174`, `:182`, `:189-190`, `:242-243`;
+  - `components/market/PayoutSetup.tsx:133`;
+  - `components/auth/WelcomeForm.tsx:167`;
+  - `app/(market)/settings/page.tsx:40`.
+
+  `components/market/SellerGuideModal.tsx:31` and `app/(market)/payouts/page.tsx:183-197`
+  describe payout and bank cash-out (the payouts page says it is paused). These belong
+  to the market/design lanes; nothing was edited.
+
+### 3. Environment and deploy (names only; no values were read)
+
+Read by the merged app:
+- **Supabase:** `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+  `SUPABASE_SERVICE_ROLE_KEY` (computed `requireEnv`, `lib/supabase/server.ts:41-111`).
+- **Cron:** `CRON_SECRET`.
+- **Stripe:** `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_CONNECT_WEBHOOK_SECRET`.
+- **Payment v2 reconcile:** `PAYMENT_RECONCILE_SECRET`, `PAYMENT_V2_ENABLE_LOCAL_RECONCILIATION`.
+- **Solana:** `SOLANA_CLUSTER`, `SOLANA_USDC_MINT`, `SOLANA_TREASURY`,
+  `SOLANA_MAX_TRADE_UNITS`, `SOLANA_MYR_PER_USD`, `SOLANA_QUOTE_SECRET`, `HELIUS_API_KEY`.
+- **Privy:** `NEXT_PUBLIC_PRIVY_APP_ID`, `NEXT_PUBLIC_PRIVY_FUNDING_ENV`,
+  `NEXT_PUBLIC_SOLANA_CHAIN`, `NEXT_PUBLIC_ENABLE_PRIVY_CHECKOUT`.
+- **Auth:** `NEXT_PUBLIC_ENABLE_PASSWORD_AUTH`.
+- **URLs and support:** `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SITE_URL`, `SUPPORT_EMAIL`,
+  `SUPPORT_PHONE`.
+- **eBay:** `EBAY_APP_ID`, `EBAY_CERT_ID`, `EBAY_DELETION_TOKEN`, `EBAY_DELETION_ENDPOINT`.
+- **Email:** `RESEND_API_KEY`, `FROM_EMAIL`.
+- **R2:** `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`,
+  `R2_PUBLIC_URL`.
+- **Runtime:** `NODE_ENV`, plus `PATH`/`SystemRoot` (passed through only by the psql
+  transport).
+
+For a deploy with funding disabled:
+- **Must be set:** the three Supabase vars; `CRON_SECRET` (otherwise the crons 401,
+  harmless); R2 (listing photos); Privy app id (wallets); app/site URL; email if mail
+  is wanted.
+- **Should be ABSENT:**
+  - `PAYMENT_RECONCILE_SECRET`, `PAYMENT_V2_ENABLE_LOCAL_RECONCILIATION`: inert, but
+    absent is cleaner.
+  - `SOLANA_TREASURY`, `SOLANA_MAX_TRADE_UNITS`: no runtime caller.
+  - `NEXT_PUBLIC_ENABLE_PRIVY_CHECKOUT`: inert.
+  - `SOLANA_QUOTE_SECRET`: only enables legacy receipt lookup; absent makes that 409.
+  - `STRIPE_*`, per the founder's USDC-only decision: absent keeps Connect onboarding
+    failing closed and the webhook at 500.
+- **Dangerous if set:**
+  - `NEXT_PUBLIC_PRIVY_FUNDING_ENV=production`. The wallet Deposit tab
+    (`components/market/WalletMenu.tsx:129-207` -> `FundingOptions.tsx:56-84`) opens a
+    real card on-ramp to **mainnet** USDC (`privy.ts:108-112`, hard-coded
+    `FUNDING_CHAIN`). Nothing can be bought, and the copy says "then spend from your
+    balance". It is **not** gated by any funding flag.
+  - A live `STRIPE_SECRET_KEY` creates real Connect accounts (`/api/consignor/connect`).
+  - `SOLANA_CLUSTER=mainnet-beta` together with a non-matching `SOLANA_USDC_MINT`.
+- **Cluster and mint defaults:**
+  - `SOLANA_CLUSTER` defaults to `devnet` (`lib/solana/config.ts:15,28`).
+  - `SOLANA_USDC_MINT` defaults per cluster (`:12-18`; mainnet
+    `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`, devnet
+    `4zMMC9srt5Ri5X14GAgXhaHii3L6VUHdfBMqBGE3ter`). A set value always wins.
+  - `NEXT_PUBLIC_SOLANA_CHAIN` defaults to `solana:devnet` (`privy.ts:29`).
+  - **No runtime cross-check** between `SOLANA_CLUSTER`, `SOLANA_USDC_MINT`,
+    `NEXT_PUBLIC_SOLANA_CHAIN` and the hard-coded mainnet funding chain. The only check
+    is a test (`tests/solana-settle.test.ts:593-599`: mainnet default mint equals the
+    funding mint). With defaults, a mainnet on-ramp deposit would not appear in the
+    devnet `/api/solana/balances`.
+  - `verifyPurchaseTransaction` rejects clusters other than devnet/mainnet-beta
+    (`lib/solana/verify.ts:60-61`), but it has no production caller.
+
+### 4. npm audit (1 critical, 11 high; no fix applied)
+
+| Pkg (installed) | Path | Ships | Exploitability here | Minimal fix |
+|---|---|---|---|---|
+| **next 16.3.0** (critical) | direct | server and client runtime | Advisories: RCE on Windows hosts (n/a on Vercel Linux); RCE in image optimisation with AVIF (no `images.remotePatterns`, so only local images are optimised; R2 accepts AVIF uploads but they are not optimised by next/image, so UNKNOWN but low); RCE in `next/og` (not used); `use cache` draft-mode leak (not used); SSG/ISR cache poisoning for self-hosted (UNKNOWN on Vercel); metadata image route bypass (no metadata image routes); SSRF in the image optimiser (no remote patterns); dev MCP disclosure (dev only) | upgrade to **next >= 16.3.8** (audit suggests 16.4.2, non-major) with matching `eslint-config-next`; human-only via DEPS.md, followed by tsc, test and build |
+| sharp 0.35.4 | via next | server (image optimiser) | librsvg; SVG optimisation is disabled by default (`dangerouslyAllowSVG` not set) | `sharp >= 0.35.5` (comes with the next upgrade or an override) |
+| @coral-xyz/anchor 0.32.1 + toml 3.0.0 | direct dep | **not imported** by app/lib/components (grep: only package.json/DEPS.md) | not reachable at runtime; toml prototype pollution needs untrusted TOML | remove the unused dependency (human) or accept; no upstream fix |
+| ws 7.5.13 / 8.18.3 | Privy -> WalletConnect/viem | browser bundle (ws is shimmed to the native WebSocket) and server if SSR imports it | memory disclosure / DoS on a ws server or client parsing hostile frames; app runs no ws server | `@privy-io/react-auth` bump (audit says 3.6.1 is a *downgrade*; prefer an override `ws >= 8.21.0`) |
+| eslint-config-next / @next/eslint-plugin-next / fast-glob / micromatch / braces / brace-expansion | dev lint tooling | **dev-only** | ReDoS/DoS on attacker-controlled globs during lint | bump with next; not deploy-relevant |
+| source-map-js 1.2.1 | build tooling | dev/build | DoS on hostile source maps | override `>= 1.2.2`; not deploy-relevant |
+
+### BLOCKERS (must fix before merge to main)
+
+- **None at code level.** tsc is clean, 528/528 tests pass, and every money route and
+  action in the merged code is hard-disabled or fails closed (section 1).
+- **Conditional:** if `main` auto-deploys to production (Vercel git integration;
+  UNKNOWN from source), merging *is* deploying. In that case every item in the next list
+  becomes a merge blocker, unless auto-deploy or production promotion is paused first.
+
+### BLOCKERS BEFORE DEPLOY (can merge, but do not deploy)
+
+1. **Legacy SQL settlement is callable directly by any signed-in user (static
+   evidence; live grants UNKNOWN).**
+   - Through 058, `fn_purchase_card(uuid,uuid,text,bigint,uuid)` is SECURITY DEFINER
+     (`021_credit_holds.sql:418-445`) and granted to `authenticated`
+     (`022b_permissions_lockdown.sql:171`).
+   - For a cash leg its only check is a non-empty `p_settlement_ref`
+     (`043_sale_notification.sql:116-119`). The caller/buyer identity check covers only
+     the FSC leg (`:105`).
+   - So a PostgREST `rpc('fn_purchase_card', {…, p_buyer_id:<any>, p_settlement_ref:'x', p_credit_cents:0})`
+     with the public anon key and a user JWT transfers a listed card and creates an
+     order without payment.
+   - The merged app no longer calls it, but app code cannot revoke a DB grant. This
+     applies to **main today** if its DB matches the migrations.
+   - Also `fn_redeem_card` takes a client-supplied `p_fee_cents`, although it checks the
+     actor (`048_pricing_fees_rarity.sql:2,17,39-44`, granted to `authenticated` `:54`).
+   - **Minimal fix (human, SQL):** apply 063's retirement, or at least
+     `REVOKE EXECUTE ON FUNCTION fn_purchase_card(uuid,uuid,text,bigint,uuid), fn_redeem_card(uuid,uuid,jsonb,integer) FROM authenticated;`.
+     Then verify read-only with `has_function_privilege('authenticated', …)` on the
+     production DB.
+2. **The merged app requires v2 schema RPCs.** List and cancel listing
+   (`contract.ts:1508,1529`), redemption (`:2001-2011`), attempts, settle v2 and the
+   admin queue call `fn_payment_v2_*`, which exist only after migrations 059-074. On a
+   058 DB those features error out (fail closed, but broken). Decide before deploy:
+   apply 059-074 to production with no networks row (`funding_enabled` stays false;
+   063 itself refuses otherwise), or do not deploy. Which migrations production has
+   applied is UNKNOWN.
+3. **Upgrade `next` (and `sharp`) before exposure:** next >= 16.3.8 (section 4). This is
+   a human DEPS.md request.
+4. **Env:** `NEXT_PUBLIC_PRIVY_FUNDING_ENV` must be absent or `sandbox`, or the Deposit
+   tab must be hidden. Otherwise users can buy real mainnet USDC with nothing to spend
+   it on (`FundingOptions.tsx:56-84`). Set the vars in section 3; keep `STRIPE_*` absent
+   per the founder's decision.
+5. **Seller payout copy** promises cash to bank (section 2 list). Replace it with "95%
+   in USDC to your linked wallet" (market/design lanes).
+6. **Vaulted badge:** require authentication and a custody record, not just
+   `custody === 'warehouse'` (`app/(market)/card/[id]/page.tsx:203`). Audit production
+   rows whose custody came from the 013 default (`013_seller_custody.sql:54`). The
+   minimal UI fix is `custody === 'warehouse' && authenticated_at != null`. The
+   SQL-level fix is a human migration.
+
+### ACCEPTABLE / backlog
+
+- Add an action-level `requireAdminAction()` to `burnCardAction`
+  (`app/admin/cards/[id]/actions.ts:7`) and `archiveSkuModelAction`
+  (`app/admin/skus/[id]/actions.ts:7`). SQL `fn_require_admin` already blocks them
+  (`028:141,195`).
+- Add tests for `webhooks/stripe` `POST` -> 503 on handled events; for
+  `createCheckoutAction` / `createRedemptionCheckoutAction` / `completeRedemptionAction`
+  refusals; and for the missing-secret and missing-flag branches of reconcile.
+- v2 `receipt` sets warehouse before authentication (`061:174`). Fix before enabling
+  funding. Not reachable while there are no escrows.
+- Connect readiness is never revoked (`webhooks/stripe-connect`, Codex). `consignor/connect`
+  mutates `is_consignor` before the key check. Both are moot while Stripe is dormant.
+- The link-wallet message lacks a domain or cluster binding (1g). Low risk.
+- No runtime cross-check of cluster, mint and Privy chain (section 3). Remove the
+  unused `@coral-xyz/anchor`. Dev-tool audit highs.
+- Dead code: legacy Stripe handlers in `webhooks/stripe/route.ts`, `issueQuote`,
+  `verifyBuyTransaction`, `treasuryAddress`, `maxTradeUnits`,
+  `isPrivyCheckoutEnabled`. These can be removed in a cleanup pass.
+
+UNKNOWN (not determinable read-only from source):
+- production DB grants, applied migrations and `platform_config` rows;
+- the deployed env values, and whether main auto-deploys;
+- whether Vercel's image optimiser is affected by the next/sharp advisories;
+- the compiled Server Action manifest.
