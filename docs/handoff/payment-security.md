@@ -4667,3 +4667,228 @@ Preserved untouched:
 - Not established even after a pass: production archive retention, production worker
   daemons, browser/API recovery, or a rounding-remainder amount. totalUnits is fixed at
   1,000,000; a different amount needs another harness parameter, which is not proposed.
+
+## 2026-10-20 - Milestone 4 phase 2: retained-evidence ACK recovery EXECUTED (PASS)
+
+**Outcome: PASS.** Under current code (074 applied), new synthetic direct sales on the
+owned local validator durably persisted verified evidence that includes `compiledRpcResult`.
+A process stopped deliberately after the ACK evidence committed and before the ACK
+lifecycle committed was recovered from retained evidence alone, with no chain reachable.
+Two repeat recoveries returned the identical receipt and changed zero rows.
+Every changed row across 8 snapshots is attributed to the new sales and buyers, or to the
+global scan cursor's `updated_at`. The three historical blocked cases and the
+milestone-3 sale have identical checksums in every snapshot.
+
+Founder decisions D1, D1b, D2, D3 and D4 were approved together with amendments A1-A4
+(see the founder message). Commits:
+- `910cfc7` is the harness change, committed alone before any execution;
+- this section is committed separately.
+
+`flexsoar_payment_v2_test` was not connected to. No container was created, removed or
+reset. No `.sql` file was created, edited or executed outside the unedited `02`/`04`
+fixtures and the read-only `03` audit, all run by the harness `sql()` helper. No GRANT,
+REVOKE or DDL. Package files and debris were untouched. The tree is still behind main,
+as authorized.
+
+### Harness change (`910cfc7`, tests/payment-integration only, no app code)
+
+- `integrated.mjs` gains a new mode,
+  `--retained-ack-recovery-isolated-integration <run> <13|14|15> [--inject-crash-after-ack-evidence]`.
+  - The argument guard accepts the extra flag only when the index is `14` and there
+    are exactly 4 args (`injectAckCrash`). The wrapper exists only when
+    `injectAckCrash&&index===14`. Every other mode's argument check now explicitly
+    excludes this one (`resume&&!retainedAck&&args.length===2`).
+  - Each process runs one direct (mode 1) scenario. Fresh buyers are added through the
+    unedited `04` fixture, with ATAs and test-USDC mints signed by bootstrap on the
+    owned validator.
+  - Index 14: after `retainAuthorityEvidence` commits the ACK evidence, the verifier
+    wrapper writes `crash-after-ack-evidence-14.json` (eventId, saleId, attemptId,
+    ackSignature, evidenceId). It does **not forward** `fn_payment_v2_record_lifecycle`,
+    and throws `INJECTED ...`. Re-running index 14 in this mode refuses: "recover ONLY
+    with retained-ack-recover.mjs, never by re-observing the chain".
+  - Index 15: `totalUnits=1000019n`, `feeUnits=totalUnits*500n/10000n`,
+    `netUnits=totalUnits-feeUnits`, asserted to be literally 50000/950019 with
+    net+fee=total. The buyer debit, seller and treasury deltas, the persisted `attempts`
+    split and the MYR snapshot of `attempts` and `orders` are all asserted in the
+    harness. The 1000000 constants of indices 0-12 are unchanged in value.
+  - The `03` audit takes `[13,14]` (14 only after recovery); 15 is excluded. The
+    terminal-envelope audit `[1,2]`, the archival ACK recheck and its summary result
+    are skipped in this mode.
+- `retained-ack-recover.mjs` (new) is recovery only.
+  - It asserts the attestation, netns, `lo` only and no routes, and that ports
+    18899/18900/18901 refuse connections. So no validator and no chain is reachable.
+  - It uses only `payment_integration_verifier` and `payment_integration_settler`
+    (distinct identities). It checks the retained ACK row equals the marker's
+    evidenceId and signature and carries `compiledRpcResult`.
+  - It runs `recoverCommittedClaimAcknowledgement`. Attempt 1 must be exactly
+    `{kind:'reconciled',signature,claim:'available'}`. Attempts 2 and 3 must be
+    `receipt` with the same signature and sale, and attempt 3 must `deepEqual`
+    attempt 2.
+- **D1b, `evidence-db-readback.mjs:70,77`.** The assertion text and strictness are
+  unchanged; the subject is now the one actually read at `:50`/`:53`.
+  ```
+  - const readback=await readVerifiedPaymentEvidence(verifier,'payment_event',ack.attemptId,'direct');
+  + const readback=await readVerifiedPaymentEvidence(verifier,subjectKind,subjectId,subjectAction);
+  - const afterConflict=await readVerifiedPaymentEvidence(verifier,'payment_event',ack.attemptId,'direct');
+  + const afterConflict=await readVerifiedPaymentEvidence(verifier,subjectKind,subjectId,subjectAction);
+  ```
+
+### Commands (from Windows: `wsl.exe -d Ubuntu -- bash -lc "bash <scratch>/m4/run-m4.sh LABEL KIND ARGS"`)
+
+`run-m4.sh` runs these steps, in order, for every process:
+1. strict helper verification: Id `3a59f47b...`, Running, not privileged,
+   `container:71c4856a...`, read-only root, uid 1000, ports `{}`, exact mounts, `lo`
+   only, no routes, same netns;
+2. DB verification, with the same checks as milestone 3;
+3. `bash tests/payment-integration/attest-helper.sh flexsoar-payment-integration-20261016T075407Z`;
+4. `docker exec <helper> /tools/runtime/ld-linux-x86-64.so.2 --library-path /tools/runtime /tools/node --no-warnings --loader /work/tests/payment-integration/ts-loader.mjs <script> <args>`.
+
+Each verification printed `VERIFY_HELPER_OK` and `VERIFY_DB_OK`, and the attestation
+namespace was `net:[4026532483]` every time. Processes (all exits as expected):
+
+| Label | Script / args | Exit |
+|---|---|---|
+| idx13 | `integrated.mjs --retained-ack-recovery-isolated-integration /state/integrated-JXopR6 13` | 0 |
+| idx14-crash | `integrated.mjs ... 14 --inject-crash-after-ack-evidence` | 1 (`INJECTED process stop after retained ACK evidence, before lifecycle database commit`) |
+| recover1/2/3 | `retained-ack-recover.mjs --recover-retained-ack-isolated-only /state/integrated-JXopR6 1|2|3` | 0 / 0 / 0 |
+| idx15 | `integrated.mjs ... 15` | 0 |
+| readback | `evidence-db-readback.mjs --read-existing-evidence-isolated-only` | 0 |
+
+After every process, the helper ran only `sleep infinity`; the validator was SIGTERMed by
+the harness `finally`. At the end, the only TCP listener was `127.0.0.1:5432`.
+
+A3, ledger: `/state/integrated-JXopR6/ledger` was 518,531,186 bytes (496M), at most 5 GB,
+with no validator running. `cp -a` went to the new sibling
+`/state/integrated-JXopR6/ledger-backup-20261020T060800Z`. File-listing sha256
+(`find . -printf '%y %P %s %m\n' | sort | sha256sum`) is
+`ec49ee0989c350aa39246866ec84fb211460d727f4b4d2707022711dab108fa8`, identical for the
+original and the backup, and rechecked unchanged at the end. Content sha256 is
+`e32bb728...ab3b`, also identical. The original was not modified by the copy. It grew to
+605M only through the authorized validator runs. Genesis asserted by the harness
+(`:129`): `FAiPDLaech8zexAiuEiKUWzapfJbegZyfrkBgDLYunyF`.
+
+### Step results
+
+| Step | Result |
+|---|---|
+| D4 vitest `npx --no-install vitest run tests/payment-context-evidence.test.ts` | PASS: 1 file, **16/16** tests (offline, 1.64 s) |
+| Harness commit before execution | `910cfc7` (3 files, +96/-15) |
+| S0 BEFORE | byte-identical to milestone 3 final (`5cbfc0e6...`); 426 row lines |
+| A3 ledger backup | PASS (above) |
+| 4a index 13 normal direct | PASS: buyer debit 1000000, **seller +950000, treasury +50000**, MYR 2000/100/1900, loser debit 0, ACK finalized, claim `available`, receipt, `03` audit PASS (1 sale) |
+| 4b index 14 crash | PASS: exit 1 at the injected point, after `direct-funded-and-reconciled` and `direct-split-exact-base-units` (950000/50000) |
+| A4 crash proof (S2) | PASS (excerpt below) |
+| 4b recovery 1 (no validator) | PASS: `{"kind":"reconciled","signature":"5yUaqamLh7jGvudV...","claim":"available"}`, `chainContacted:false` |
+| 4c recovery 2 and 3 | PASS: identical `receipt` (signature `5yUaqam...`, evidenceId `e98d70c4-edef-4c2f-8343-91e9016fbad2`, slot 3107); S4 and S5 byte-identical to S3 |
+| A2 index 15 remainder | PASS: total 1000019, **buyer debit 1000019, seller +950019, treasury +50000**; persisted attempt `total/fee/net=1000019/50000/950019`; MYR attempt and order `2000/100/1900`; ACK and receipt; `03` audit over 13 and 14 = 2 sales PASS (15 excluded) |
+| A1 store-evidence negatives | PASS 5/5 plus control (table below) |
+| Permission negatives (milestone-3 set) | PASS: identical to milestone 3 (11 permission denials, unknown-subject NULLs, `PAYMENT_V2_CONTEXT_KIND_UNSUPPORTED`; context md5 `ba7307ad...` x3) |
+| D1b DB readback | PASS: `ISOLATED_DATABASE_EVIDENCE_READBACK_PASS`, sale `f86ba6b4...` (index 15), subject lifecycle/acknowledged, evidence `f9741867...`, `compiledResponsePersisted:true`, `idempotentPersistedSameId:true`, `tamperRejectedBeforeLifecycle:true`, `conflictingPersistRejected:true` |
+| S7 after negatives and readback | byte-identical to S6 |
+| Preserved cases | identical md5 `261874eb8ca6fdc44c8221531fb41f90` (all four `case|` rows) in S0-S7 |
+| Containers | both running; validator stopped; final verification OK 06:17:24Z |
+
+### Changed rows per snapshot (row-level dump `table|pk|md5(row)`, read-only admin)
+
+| Interval | Rows | Attribution |
+|---|---|---|
+| S0 -> S1 (index 13) | 34 | 29 sale-13 rows, 4 new-buyer rows (`users` x2, `wallet_accounts` x2, fixture 04), 1 `payment_v2.cursors` (`updated_at` only) |
+| S1 -> S2 (index 14 crash) | 29 | 28 sale-14 rows (the 29-row footprint minus the acknowledged `lifecycle_evidence`), 1 cursor |
+| S2 -> S3 (recovery 1) | 4 | sale 14: +1 `lifecycle_evidence`(acknowledged, evidenceId `e98d70c4`); `sales.chain_acknowledged` f->t; `inventory` custody_version -> 2; `operations` acknowledge_claim -> observed. The end state equals uninterrupted sale 13 (state direct, ack t, custody_version 2, both operations observed). |
+| S3 -> S4 (recovery 2) | 0 | none |
+| S4 -> S5 (recovery 3) | 0 | none |
+| S5 -> S6 (index 15) | 30 | 29 sale-15 rows, 1 cursor |
+| S6 -> S7 (negatives and readback) | 0 | none |
+| S0 -> S7 total | 92 | 87 = 3 x 29 sale rows, plus 4 buyer rows and 1 cursor. 0 pre-existing rows changed except the cursor; 0 removed |
+
+The 29-row direct-sale footprint, per sale:
+- fixture `02`: `sku_models`, `skus`, `items`, `cards` (owner later set to the buyer),
+  `listings`, `payment_v2.inventory`, and a `ledger_entries` mint;
+- `prepare_sale` (issuer): `quote_books`, `sales`;
+- open (issuer, plus verifier evidence): `verified_chain_evidence`(lifecycle/opened),
+  `lifecycle_evidence`(opened, evidenceId), `operations`(open_sale);
+- initiate (customer) x2: `attempts` (winner `direct`, loser `authorized`);
+- reconcile (verifier evidence, then settler): `verified_chain_evidence`(payment_event/direct),
+  `events`(direct, evidenceId), `consumptions`, `orders`, `usdc_journal` x3 (sum 0),
+  `claim_history`, `outbox` x2, and 2 claim-transfer `ledger_entries`;
+- ACK (reconciler on chain, then verifier): `verified_chain_evidence`(lifecycle/acknowledged),
+  `operations`(acknowledge_claim), `lifecycle_evidence`(acknowledged).
+
+Automatic attribution (`attribute.py`) passed for every interval: each added or changed
+row's text contains a public ID of that scenario.
+
+### A4 crash-proof excerpt (S2, read-only)
+
+```
+sale|db6f6c10-3328-471e-82de-402ddf6c2a37|direct|f          (state, chain_acknowledged=false)
+evidence|lifecycle|opened|d194235c-...|3fGhE3RBamjtBmoG|primary|t
+evidence|payment_event|direct|028a4d77-...|48VkRqjRhxvG7yaZ|primary|t
+evidence|lifecycle|acknowledged|e98d70c4-edef-4c2f-8343-91e9016fbad2|5yUaqamLh7jGvudV|primary|t   <- ACK evidence present, has compiledRpcResult
+lifecycle_rows|opened|d194235c-...                          (no acknowledged lifecycle row)
+acknowledged_lifecycle_count|0
+settler_ack_context_receipt|null                            (payment_integration_settler)
+customer_claim|unreconciled|direct                          (payment_integration_customer; claim NOT available)
+```
+
+### A1 store-evidence negatives (verifier login, `BEGIN TRANSACTION READ ONLY; SET LOCAL ROLE payment_v2_verifier`, `VERBOSITY verbose`, ROLLBACK)
+
+The base envelope is the index-13 retained ACK evidence read through
+`fn_payment_v2_read_chain_evidence`, with `id`/digest fields removed and base64 newlines
+stripped.
+
+| Case | Mutation | Expected | Actual SQLSTATE: message | Result |
+|---|---|---|---|---|
+| C0 control | none | returns the existing id, no INSERT | exit 0, `6008354b-bb28-4cb2-96dd-2c07e516db90` | PASS (payload valid) |
+| N1 | `networkId` changed to the inactive `d6fa9d50-...` | NETWORK_MISMATCH | `P0001: PAYMENT_V2_VERIFIED_NETWORK_MISMATCH` (line 12) | PASS |
+| N2 | `parsedRpcResult` removed | EVIDENCE_SHAPE | `P0001: PAYMENT_V2_VERIFIED_EVIDENCE_SHAPE` (line 6) | PASS |
+| N3 | base64 char 10 flipped (signature bytes) | TRANSACTION_IDENTITY | `P0001: PAYMENT_V2_VERIFIED_TRANSACTION_IDENTITY` (line 8) | PASS |
+| N4 | base64 char len-10 flipped (message bytes) | RESULT_MISMATCH | `P0001: PAYMENT_V2_VERIFIED_RESULT_MISMATCH` (line 9) | PASS |
+| N5 | `genesis` changed to the other network's genesis | NETWORK_MISMATCH | `P0001: PAYMENT_V2_VERIFIED_NETWORK_MISMATCH` (line 12) | PASS |
+
+No case returned 25006: validation refused before the INSERT in every negative case.
+
+### Results by category
+
+- **Real chain/DB integration:**
+  - three direct sales on the owned local validator, coupled to PostgreSQL through
+    dedicated worker logins;
+  - exact USDC base-unit splits, including the remainder amount;
+  - durable verified-evidence persistence with `compiledRpcResult`;
+  - ACK lifecycle recovery from retained evidence after an injected stop;
+  - idempotent repeats;
+  - the DB readback, tamper and conflict harness.
+- **Offline/mocked:** vitest `payment-context-evidence.test.ts`, 16/16.
+- **Simulated outages:** the injected process stop between ACK evidence and lifecycle
+  commit (index 14). Recovery ran with every validator port closed. There was no
+  archive-adapter outage run this time.
+- **Intentional fail-closed:**
+  - A1 N1-N5;
+  - 11 permission denials, the unsupported kind and unknown-subject NULLs;
+  - the losing buyer of each race failed on chain with 0 debit;
+  - re-running index 14 in the mode refuses by design (not executed).
+- **Blocked/unimplemented, unchanged:**
+  - the pruned ACK, case 0, is not reverifiable;
+  - the expired escrow op `27bc0cae...` stays `unknown`/REVIEW_REQUIRED;
+  - the unresolved registration, case 3, stays `opening`;
+  - the milestone-3 sale `6e2a2198...` keeps no evidence;
+  - there is no production archival retention or worker daemon;
+  - there is no browser or API recovery.
+
+### Limits and notes
+
+- The rounding remainder was exercised in USDC only. The MYR snapshot is fixed by the
+  listing price (2000 sen, giving 100/1900) and is independent of `totalUnits`
+  (`066:52`).
+- `evidence-db-readback.mjs` still prints the hard-coded literal
+  `pendingAcknowledgementFixtureAvailable:false`. That is now stale, because index 14 is
+  such a fixture. It was not changed beyond D1b.
+- To build the attribution ID list, the scratch `ids.sh` parsed
+  `EPHEMERAL-LOCAL-ONLY-m4-buyers.json` and extracted only the `id` fields. No secret was
+  printed or copied.
+- The harness reads verification rows as `supabase_admin` through `sql()` (existing
+  behaviour: order count, owner, journal, and the new attempt/order split reads).
+  The only admin writes were the unedited `02` (x3) and `04` (x1) fixtures.
+- Local chain transactions, all on the owned validator only:
+  - 2 ATA creations and 2 mints for the new buyers;
+  - per index: `register_card`, ALT create and extend, `open_sale`, 2 racing `buy_v2`
+    (1 failed on chain) and `acknowledge_claim`.
