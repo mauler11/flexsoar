@@ -127,14 +127,10 @@ export default async function PayoutsPage() {
   const overview = await getPayoutOverview(me);
   const connected =
     connectStatus.payoutsEnabled && connectStatus.accountId != null;
-  // Bank cash-out is PAUSED (wallet-only decision): Connect onboarding is a
-  // dead end while no cash can flow, so the setup button stays hidden until
-  // this flips back. Existing connections render as-is, harmless.
+  // No bank payout (founder decision 2026-10-20): Connect onboarding is a
+  // dead end, so the setup button stays hidden. Existing connections render
+  // as-is, labelled as not used for payouts.
   const cashPayoutsPaused = true;
-  // Progressive onboarding: the Connect wall only becomes the hero when
-  // there is actually money waiting to cash out.
-  const cashoutReady =
-    !cashPayoutsPaused && !connected && overview.availableCents > 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -176,11 +172,7 @@ export default async function PayoutsPage() {
       {/* Connect Payout Setup — paused while wallet-only. */}
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-bold tracking-tight text-foreground">
-          {connected
-            ? "Payout setup"
-            : cashoutReady
-              ? `Cash out ${formatRm(overview.availableCents)}`
-              : "Bank payouts"}
+          {connected ? "Stripe Connect account" : "Payout method"}
         </h2>
         {cashPayoutsPaused && !connected ? (
           <p className="text-[12px] leading-snug text-muted">
@@ -188,42 +180,12 @@ export default async function PayoutsPage() {
             Nothing to set up here.
           </p>
         ) : (
-          <>
-            {cashoutReady && (
-              <p className="text-[12px] leading-snug text-muted">
-                You have money waiting. Cashing out to a bank needs a
-                one-time Stripe verification (~2 minutes) — after that,
-                payouts are automatic.
-              </p>
-            )}
-            {!connected && !cashoutReady && (
-              <p className="text-[12px] leading-snug text-muted">
-                Bank payouts need a one-time Stripe verification, and only
-                when you withdraw. Skip it for now —{" "}
-                {connectStatus.isConsignor ? (
-                  "it'll be waiting here when you've sold."
-                ) : (
-                  <>
-                    <Link href="/list" className="text-accent hover:underline">
-                      list your first shoe
-                    </Link>{" "}
-                    instead.
-                  </>
-                )}
-              </p>
-            )}
-            <PayoutSetup
-              accountId={connectStatus.accountId}
-              payoutsEnabled={connectStatus.payoutsEnabled}
-              isConsignor={connectStatus.isConsignor}
-              countryCode={connectStatus.countryCode}
-              ctaLabel={
-                cashoutReady
-                  ? `Cash out ${formatRm(overview.availableCents)}`
-                  : undefined
-              }
-            />
-          </>
+          <PayoutSetup
+            accountId={connectStatus.accountId}
+            payoutsEnabled={connectStatus.payoutsEnabled}
+            isConsignor={connectStatus.isConsignor}
+            countryCode={connectStatus.countryCode}
+          />
         )}
       </section>
 

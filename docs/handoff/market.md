@@ -41,6 +41,19 @@ provider supports" vs Malaysia-only), `:124` (storage fee in `$`).
 Unverified: `npm run build` not run (worktree `node_modules` lacks
 `@solana/web3.js` and `resend`; no install allowed).
 
+**Follow-up, same day (lane widened by founder for this task only):** the
+blocked component copy above now uses `payout-copy.ts` (ListForm,
+PricePayout incl. its read-only indicator "cash" -> "USDC", PayoutSetup,
+SellerGuideModal, WelcomeForm), CardDetail's `vaulted` doc comment points at
+`vaultState()`, and `/payouts` dropped the unreachable bank-cash-out
+branch. PricePayout test expectations replaced with the new copy.
+**Still blocked:** `app/admin/fulfilment/page.tsx:292-294` cannot use
+`vaultState()` until `components/admin/db-reads.ts` (track/admin/data,
+not widened) adds `authenticated_at` to `getSellerHeldRedemptions`'s
+`item:items!inner(...)` select (`:638`) and to the two item shapes
+(`:561-566`, `:585-596`). Also `app/styleguide/page.tsx:493` still describes
+"earned-only store credit" (design track).
+
 ## 2026-08-25 — Payout UI stopped contradicting the database; dashboard Submissions was silently empty, fixed
 
 Task: the /list step 4 payout toggle and the "cash unlocks at N fulfilments"

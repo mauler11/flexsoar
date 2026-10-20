@@ -1806,7 +1806,7 @@ describe('PricePayout — country-driven payout disclosure (docs/handoff/market.
         cashPayoutCountryCodes: ['MY'],
       }),
     );
-    expect(html).toContain("You&#x27;ll be paid in cash");
+    expect(html).toContain("You&#x27;ll be paid in USDC");
   });
 
   it('picking a cash-eligible country overrides a stale credit sellerPayoutMethod', () => {
@@ -1818,7 +1818,7 @@ describe('PricePayout — country-driven payout disclosure (docs/handoff/market.
         cashPayoutCountryCodes: ['MY'],
       }),
     );
-    expect(html).toContain("You&#x27;ll be paid in cash");
+    expect(html).toContain("You&#x27;ll be paid in USDC");
   });
 
   it('picking a non-MY country blocks selling without FSC, overriding a stale cash sellerPayoutMethod', () => {
@@ -1831,7 +1831,7 @@ describe('PricePayout — country-driven payout disclosure (docs/handoff/market.
       }),
     );
     expect(html).toContain("Selling isn&#x27;t available in your country yet");
-    expect(html).toContain('There is no store credit');
+    expect(html).toContain('There is no bank or cash payout and no store credit.');
     expect(html).not.toContain('FSC');
     expect(html).toContain('Blocked above: pick a supported country to continue.');
   });
@@ -1879,8 +1879,9 @@ describe('PricePayout — country-driven payout disclosure (docs/handoff/market.
         cashPayoutCountryCodes: ['MY'],
       }),
     );
-    expect(cashHtml).toContain("You&#x27;ll be paid in cash");
-    expect(cashHtml).toMatch(/aria-label="Payout method \(determined by your country, not a choice\)"[^>]*>cash<\/div>/);
+    expect(cashHtml).toContain("You&#x27;ll be paid in USDC");
+    expect(cashHtml).toMatch(/aria-label="Payout method \(determined by your country, not a choice\)"[^>]*>USDC<\/div>/);
+    expect(cashHtml.toLowerCase()).not.toMatch(/to bank|bank payout|paid in cash/);
 
     const blockedHtml = renderToStaticMarkup(
       createElement(PricePayout, {

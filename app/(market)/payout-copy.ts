@@ -17,3 +17,8 @@ export const SELLER_PAYOUT_SUMMARY =
 export const NO_BANK_PAYOUT = "There is no bank or cash payout and no store credit.";
 
 export const PAYMENTS_NOT_LIVE = "Payments aren't live yet, so no sale can be paid out today.";
+
+export const SELLING_MALAYSIA_ONLY = "Selling is Malaysia-only at launch.";
+
+/** The read-only payout indicator's label for the `payout_method` enum value 'cash'. */
+export const SELLER_PAYOUT_METHOD_LABEL = "USDC";

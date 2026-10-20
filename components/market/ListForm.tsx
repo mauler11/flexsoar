@@ -26,6 +26,13 @@ import { Input } from "@/components/ui/Input";
 import { Banner } from "@/components/market/Banner";
 import { formatMyr } from "@/components/card/format";
 import { COUNTRIES, isValidCountryCode } from "@/components/market/intake/intake-config";
+import {
+  NO_BANK_PAYOUT,
+  PAYMENTS_NOT_LIVE,
+  SELLER_PAYOUT_SUMMARY,
+  SELLER_PAYOUT_TITLE,
+  SELLING_MALAYSIA_ONLY,
+} from "@/app/(market)/payout-copy";
 
 export interface ListFormProps {
   cardId: string;
@@ -101,13 +108,12 @@ export function ListForm({
     <div className="flex flex-col gap-2 border border-line bg-overlay p-3">
       {blocked && (
         <Banner tone="error" title="Selling isn't available in your country yet">
-          FlexSoar pays sellers in cash to bank, Malaysia-only at launch.
-          There is no store credit and no other payout route.
+          {SELLING_MALAYSIA_ONLY} {NO_BANK_PAYOUT}
         </Banner>
       )}
       {sellerPayoutMethod === "cash" && (
-        <Banner tone="info" title="You'll be paid in cash">
-          Your account routes to a cash bank payout.
+        <Banner tone="info" title={SELLER_PAYOUT_TITLE}>
+          {SELLER_PAYOUT_SUMMARY} {PAYMENTS_NOT_LIVE}
         </Banner>
       )}
 
@@ -136,8 +142,8 @@ export function ListForm({
             ))}
           </select>
           <span className="text-[10px] tracking-tight text-muted">
-            No country on file yet — Malaysia sellers are paid cash to
-            bank, and selling is Malaysia-only at launch. Required to list.
+            No country on file yet. {SELLING_MALAYSIA_ONLY} Required to
+            list.
           </span>
         </div>
       )}
