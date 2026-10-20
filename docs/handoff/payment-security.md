@@ -3558,3 +3558,461 @@ readback harness, run with its required `--read-existing-evidence-isolated-only`
   live connection — flagging this so it isn't mistaken for an oversight.
 - I did not re-run `npx tsc --noEmit` or `npm test` this session, per instruction 2 —
   so I have nothing to report there this round.
+
+### 2026-10-20 rev 2
+
+**Rev 2 supersedes rev 1's SQL.** Discard everything in rev 1 §(e): the md5
+PRE-GUARD, the multi-line `old_text`/`new_text` pair and the POST-GUARD. Do not
+create 074 from it. The only SQL proposed for 074 is the block in §(d) below.
+Rev 1's prose root cause (§a), redefinition check (§b) and test plan (§g) still
+stand, with the corrections noted here. Rev 1's text above is unchanged.
+
+Constraints this session, same as rev 1: no `.sql` file created, edited, deleted or
+executed (the proposed SQL lives only in this document); no database connection; no
+`npm`/`tsc`/test run. The founder-owned `package.json`/`package-lock.json` changes and
+the debris files (`0`, `3`, the four SHA256-named files, `payment-security-5c3db0e.diff`)
+were not touched. The commit stages only this file.
+
+**Pre-flight deviation (AGENT_RULES.md §0), recorded rather than hidden.**
+`git log HEAD..main --oneline` printed one commit:
+`afae327 deps: add @solana-program/memo for Privy Solana wallet (founder npm install 2026-09-26)`.
+`git show --stat afae327` shows it touches only `package.json` (+1) and
+`package-lock.json`, with no migration, handoff or `lib/` change. Following the
+data.md:304 precedent, I stopped and asked the founder. The founder gave an explicit
+go-ahead to continue without a reset, because this pass only appends docs. No
+reset, merge or rebase was performed.
+
+#### a) Rev 1 errors found while revising (verified offline)
+
+1. **Rev 1's md5 values could never match, with or without 070.**
+   070's own preflight (`070_payment_v2_context_governance_order.sql:9`) pins the
+   pre-070 body by
+   `encode(sha256(convert_to(prosrc,'UTF8')),'hex')='e1334b1600032f250e8cde4a70c618b73a0a3cb2662bbfa7b394f77cfd9b0114'`.
+   I took the text between `AS $$` and `$$;` of 068's `CREATE FUNCTION` (068:88 to
+   068:117, LF) as the body. Its sha256 is exactly `e1334b16…d9b0114`. That reconstruction
+   starts with `\n` (the newline after `AS $$`) and ends with `END ` (trailing space
+   before `$$`). Rev 1 hashed `sed -n '89,116p'` + `END`, which drops both. I reproduced
+   rev 1's `209bda0e…` value from that command, so the method is the error. Rev 1's
+   PRE-GUARD would therefore have refused on every database.
+2. **Rev 1's PRE-GUARD also ignored 070** (the architect's finding 1). Removed entirely.
+3. **Rev 1 §h claimed nothing about the stored form.** The 070 constant now gives
+   a checked prediction of every hash and length. See §(f). They are predictions, not catalog reads.
+
+#### b) Schema: read from source, not assumed
+
+- `068_payment_v2_contexts_evidence.sql:87`:
+  `CREATE FUNCTION public.fn_payment_v2_verifier_context(p_kind text,p_subject_id uuid) RETURNS jsonb`
+- `068_payment_v2_contexts_evidence.sql:88`:
+  `LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$`
+- `068_payment_v2_contexts_evidence.sql:224` (owner/revoke loop):
+  `FOR f IN SELECT p.oid::regprocedure sig FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname IN('fn_payment_v2_issuer_context','fn_payment_v2_verifier_context',…`
+  followed at 068:225 by `EXECUTE format('ALTER FUNCTION %s OWNER TO payment_v2_owner',f.sig);`
+- `068_payment_v2_contexts_evidence.sql:234`:
+  `GRANT EXECUTE ON FUNCTION public.fn_payment_v2_verifier_context(text,uuid),… TO payment_v2_verifier;`
+- `070_payment_v2_context_governance_order.sql:6` and `:19`:
+  `WHERE oid='public.fn_payment_v2_verifier_context(text,uuid)'::regprocedure;`
+
+Schema is `public`. Every regprocedure cast and `pronamespace` filter in §(d) uses
+`'public.fn_payment_v2_verifier_context(text,uuid)'::regprocedure` /
+`'public'::regnamespace`.
+
+#### c) The two fragments: exact before/after
+
+Each fragment lies wholly inside **one** source line of 068 and contains no `\n` or
+`\r`, so the applied body's line-ending convention cannot affect matching. The
+PRE-GUARD also asserts this at run time.
+
+- **Fragment 1**, inside 068:108 (the attempt branch's `jsonb_build_object` span).
+  It starts at `jsonb_build_object(` and ends at the line's last character `)`, with
+  1052 characters old and 1066 new. It holds 14 `s.` alias references, all
+  renamed to `sl.`.
+- **Fragment 2**, inside 068:109 (the FROM/JOIN span), 68/70 characters.
+
+```diff
+-jsonb_build_object('formatVersion',1,'kind','attempt','attemptId',a.id,'saleId',s.id,'listingId',s.listing_id,'cardId',s.card_id,'itemId',s.item_id,'buyerId',a.buyer_id,'sellerId',s.seller_id,'networkId',s.network_id,'genesis',payment_v2.b58((s.network_snapshot).genesis),'program',payment_v2.b58((s.network_snapshot).program),'config',payment_v2.b58((s.network_snapshot).config),'sale',payment_v2.b58(s.sale_address),'attemptCommitment',payment_v2.b58(a.attempt_commitment),'permitHex',encode(a.permit,'hex'),'mode',s.mode,'generation',s.generation::text,'revision',s.revision::text,'custodyVersion',s.custody_version::text,'buyerWallet',payment_v2.b58(a.buyer_wallet),'sellerWallet',payment_v2.b58(a.seller_wallet),'buyerToken',payment_v2.b58(a.buyer_token),'sellerToken',payment_v2.b58(a.seller_token),'treasuryToken',payment_v2.b58(a.treasury_token),'refundToken',payment_v2.b58(a.refund_token),'totalUnits',a.total_units::text,'netUnits',a.net_units::text,'feeUnits',a.fee_units::text,'validFrom',a.valid_from::text,'expiresAt',a.expires_at::text)
++jsonb_build_object('formatVersion',1,'kind','attempt','attemptId',a.id,'saleId',sl.id,'listingId',sl.listing_id,'cardId',sl.card_id,'itemId',sl.item_id,'buyerId',a.buyer_id,'sellerId',sl.seller_id,'networkId',sl.network_id,'genesis',payment_v2.b58((sl.network_snapshot).genesis),'program',payment_v2.b58((sl.network_snapshot).program),'config',payment_v2.b58((sl.network_snapshot).config),'sale',payment_v2.b58(sl.sale_address),'attemptCommitment',payment_v2.b58(a.attempt_commitment),'permitHex',encode(a.permit,'hex'),'mode',sl.mode,'generation',sl.generation::text,'revision',sl.revision::text,'custodyVersion',sl.custody_version::text,'buyerWallet',payment_v2.b58(a.buyer_wallet),'sellerWallet',payment_v2.b58(a.seller_wallet),'buyerToken',payment_v2.b58(a.buyer_token),'sellerToken',payment_v2.b58(a.seller_token),'treasuryToken',payment_v2.b58(a.treasury_token),'refundToken',payment_v2.b58(a.refund_token),'totalUnits',a.total_units::text,'netUnits',a.net_units::text,'feeUnits',a.fee_units::text,'validFrom',a.valid_from::text,'expiresAt',a.expires_at::text)
+-FROM payment_v2.attempts a JOIN payment_v2.sales s ON s.id=a.sale_id
++FROM payment_v2.attempts a JOIN payment_v2.sales sl ON sl.id=a.sale_id
+```
+
+Offline verification against three reconstructions of the stored body (068-only LF,
+068+070 LF, 068+070 CRLF):
+
+- Each fragment occurs exactly once.
+- Fragment 2 still occurs exactly once after fragment 1 is substituted.
+- `\bsl\b` occurs zero times before the change.
+- No bare `s.` remains in the attempt branch after the change.
+- A line diff of 068+070 against the result changes exactly two lines (body lines 20–21 = 068:108–109).
+- The decision and lifecycle branches are byte-identical.
+
+**`sl` is new.** The function declares `d, x, s, st, keys, action_code, ix_name`
+(068:89) and has parameters `p_kind, p_subject_id` (068:87). There are no OUT
+parameters and no RETURNS TABLE (`RETURNS jsonb`). `sl` appears nowhere in the 068
+or 068+070 body as a whole word. The PRE-GUARD re-checks this against the live
+`prosrc` (`v_src ~ E'\\msl\\M'`).
+
+#### d) Full proposed SQL for `074_payment_v2_verifier_context_attempt_alias.sql` (founder creates; NOT executed)
+
+```sql
+-- Rename the attempt-branch sales alias (s -> sl) so it no longer collides with the
+-- function's PL/pgSQL row variable s (42702). Self-relative guards: the only permitted
+-- change is the two single-line fragment substitutions below; metadata, owner, ACL,
+-- SECURITY DEFINER and search_path must be identical before and after.
+BEGIN;
+CREATE TEMP TABLE payment_v2_verifier_alias_before ON COMMIT DROP AS
+ SELECT fn.oid,fn.proowner,fn.proacl,fn.prosecdef,fn.proconfig,fn.provolatile,fn.proisstrict,
+  fn.proparallel,fn.proleakproof,pg_get_function_identity_arguments(fn.oid) AS identity_args,
+  pg_get_function_result(fn.oid) AS result_type,to_jsonb(fn)-'prosrc' AS metadata,fn.prosrc,
+  'jsonb_build_object(''formatVersion'',1,''kind'',''attempt'',''attemptId'',a.id,''saleId'',s.id,''listingId'',s.listing_id,''cardId'',s.card_id,''itemId'',s.item_id,''buyerId'',a.buyer_id,''sellerId'',s.seller_id,''networkId'',s.network_id,''genesis'',payment_v2.b58((s.network_snapshot).genesis),''program'',payment_v2.b58((s.network_snapshot).program),''config'',payment_v2.b58((s.network_snapshot).config),''sale'',payment_v2.b58(s.sale_address),''attemptCommitment'',payment_v2.b58(a.attempt_commitment),''permitHex'',encode(a.permit,''hex''),''mode'',s.mode,''generation'',s.generation::text,''revision'',s.revision::text,''custodyVersion'',s.custody_version::text,''buyerWallet'',payment_v2.b58(a.buyer_wallet),''sellerWallet'',payment_v2.b58(a.seller_wallet),''buyerToken'',payment_v2.b58(a.buyer_token),''sellerToken'',payment_v2.b58(a.seller_token),''treasuryToken'',payment_v2.b58(a.treasury_token),''refundToken'',payment_v2.b58(a.refund_token),''totalUnits'',a.total_units::text,''netUnits'',a.net_units::text,''feeUnits'',a.fee_units::text,''validFrom'',a.valid_from::text,''expiresAt'',a.expires_at::text)'::text AS frag1_old,
+  'jsonb_build_object(''formatVersion'',1,''kind'',''attempt'',''attemptId'',a.id,''saleId'',sl.id,''listingId'',sl.listing_id,''cardId'',sl.card_id,''itemId'',sl.item_id,''buyerId'',a.buyer_id,''sellerId'',sl.seller_id,''networkId'',sl.network_id,''genesis'',payment_v2.b58((sl.network_snapshot).genesis),''program'',payment_v2.b58((sl.network_snapshot).program),''config'',payment_v2.b58((sl.network_snapshot).config),''sale'',payment_v2.b58(sl.sale_address),''attemptCommitment'',payment_v2.b58(a.attempt_commitment),''permitHex'',encode(a.permit,''hex''),''mode'',sl.mode,''generation'',sl.generation::text,''revision'',sl.revision::text,''custodyVersion'',sl.custody_version::text,''buyerWallet'',payment_v2.b58(a.buyer_wallet),''sellerWallet'',payment_v2.b58(a.seller_wallet),''buyerToken'',payment_v2.b58(a.buyer_token),''sellerToken'',payment_v2.b58(a.seller_token),''treasuryToken'',payment_v2.b58(a.treasury_token),''refundToken'',payment_v2.b58(a.refund_token),''totalUnits'',a.total_units::text,''netUnits'',a.net_units::text,''feeUnits'',a.fee_units::text,''validFrom'',a.valid_from::text,''expiresAt'',a.expires_at::text)'::text AS frag1_new,
+  'FROM payment_v2.attempts a JOIN payment_v2.sales s ON s.id=a.sale_id'::text AS frag2_old,
+  'FROM payment_v2.attempts a JOIN payment_v2.sales sl ON sl.id=a.sale_id'::text AS frag2_new
+ FROM pg_proc fn WHERE fn.oid='public.fn_payment_v2_verifier_context(text,uuid)'::regprocedure;
+
+DO $preguard$
+DECLARE v_overloads bigint;v_rows bigint;v_src text;v_f1 text;v_f2 text;v_n1 text;v_n2 text;v_secdef boolean;v_config text[];
+BEGIN
+ SELECT count(*) INTO v_overloads FROM pg_proc
+  WHERE proname='fn_payment_v2_verifier_context' AND pronamespace='public'::regnamespace;
+ IF v_overloads<>1 THEN
+  RAISE EXCEPTION '074: expected exactly one public.fn_payment_v2_verifier_context overload, found %',v_overloads;
+ END IF;
+ SELECT count(*) INTO v_rows FROM payment_v2_verifier_alias_before;
+ IF v_rows<>1 THEN RAISE EXCEPTION '074: snapshot captured % rows, expected 1',v_rows;END IF;
+ SELECT snap.prosrc,snap.frag1_old,snap.frag2_old,snap.frag1_new,snap.frag2_new,snap.prosecdef,snap.proconfig
+  INTO v_src,v_f1,v_f2,v_n1,v_n2,v_secdef,v_config FROM payment_v2_verifier_alias_before snap;
+ IF v_src IS NULL THEN RAISE EXCEPTION '074: snapshot prosrc is NULL';END IF;
+ IF position('ORDER BY a.staff_id' IN v_src)=0 OR position('ORDER BY g.staff_id' IN v_src)>0 THEN
+  RAISE EXCEPTION '074: 070 governance-order fix not present as expected; inspect catalog before repair';
+ END IF;
+ IF (length(v_src)-length(replace(v_src,v_f1,'')))/length(v_f1)<>1
+  OR (length(v_src)-length(replace(v_src,v_f2,'')))/length(v_f2)<>1 THEN
+  RAISE EXCEPTION '074: each repair fragment must occur exactly once in prosrc (frag1 %, frag2 %)',
+   (length(v_src)-length(replace(v_src,v_f1,'')))/length(v_f1),(length(v_src)-length(replace(v_src,v_f2,'')))/length(v_f2);
+ END IF;
+ IF (length(replace(v_src,v_f1,v_n1))-length(replace(replace(v_src,v_f1,v_n1),v_f2,'')))/length(v_f2)<>1 THEN
+  RAISE EXCEPTION '074: frag2 occurrence count changed after frag1 substitution';
+ END IF;
+ IF position(E'\n' IN v_f1||v_f2||v_n1||v_n2)>0 OR position(E'\r' IN v_f1||v_f2||v_n1||v_n2)>0 THEN
+  RAISE EXCEPTION '074: repair fragments must not contain a line terminator';
+ END IF;
+ IF v_src ~ E'\\msl\\M' THEN RAISE EXCEPTION '074: identifier sl already present in prosrc';END IF;
+ IF v_secdef IS DISTINCT FROM true OR v_config IS DISTINCT FROM ARRAY['search_path=pg_catalog']::text[] THEN
+  RAISE EXCEPTION '074: verifier context is not SECURITY DEFINER with search_path=pg_catalog';
+ END IF;
+END $preguard$;
+
+DO $repair$
+DECLARE v_definition text;v_f1 text;v_f2 text;v_n1 text;v_n2 text;
+BEGIN
+ SELECT snap.frag1_old,snap.frag2_old,snap.frag1_new,snap.frag2_new INTO v_f1,v_f2,v_n1,v_n2
+  FROM payment_v2_verifier_alias_before snap;
+ SELECT pg_get_functiondef(oid) INTO v_definition FROM pg_proc
+  WHERE oid='public.fn_payment_v2_verifier_context(text,uuid)'::regprocedure;
+ IF (length(v_definition)-length(replace(v_definition,v_f1,'')))/length(v_f1)<>1
+  OR (length(v_definition)-length(replace(v_definition,v_f2,'')))/length(v_f2)<>1 THEN
+  RAISE EXCEPTION '074: repair fragments not found exactly once in pg_get_functiondef output';
+ END IF;
+ EXECUTE replace(replace(v_definition,v_f1,v_n1),v_f2,v_n2);
+END $repair$;
+
+DO $postguard$
+BEGIN
+ IF (SELECT count(*) FROM pg_proc
+     WHERE proname='fn_payment_v2_verifier_context' AND pronamespace='public'::regnamespace)<>1 THEN
+  RAISE EXCEPTION '074: overload count changed during repair';
+ END IF;
+ IF NOT EXISTS(SELECT 1 FROM payment_v2_verifier_alias_before snap JOIN pg_proc live ON live.oid IS NOT DISTINCT FROM snap.oid
+  WHERE live.oid IS NOT DISTINCT FROM 'public.fn_payment_v2_verifier_context(text,uuid)'::regprocedure
+   AND live.proowner IS NOT DISTINCT FROM snap.proowner
+   AND live.proacl IS NOT DISTINCT FROM snap.proacl
+   AND live.prosecdef IS NOT DISTINCT FROM snap.prosecdef
+   AND live.proconfig IS NOT DISTINCT FROM snap.proconfig
+   AND live.provolatile IS NOT DISTINCT FROM snap.provolatile
+   AND live.proisstrict IS NOT DISTINCT FROM snap.proisstrict
+   AND live.proparallel IS NOT DISTINCT FROM snap.proparallel
+   AND live.proleakproof IS NOT DISTINCT FROM snap.proleakproof
+   AND pg_get_function_identity_arguments(live.oid) IS NOT DISTINCT FROM snap.identity_args
+   AND pg_get_function_result(live.oid) IS NOT DISTINCT FROM snap.result_type
+   AND (to_jsonb(live)-'prosrc') IS NOT DISTINCT FROM snap.metadata
+   AND live.prosrc IS NOT DISTINCT FROM replace(replace(snap.prosrc,snap.frag1_old,snap.frag1_new),snap.frag2_old,snap.frag2_new)
+   AND position('JOIN payment_v2.sales s ON s.id=a.sale_id' IN live.prosrc)=0
+   AND live.prosecdef IS NOT DISTINCT FROM true) THEN
+  RAISE EXCEPTION '074: verifier context changed beyond the attempt-branch sales alias rename; rolling back';
+ END IF;
+END $postguard$;
+COMMIT;
+```
+
+How it answers each review finding:
+
+- **1.** There is no hardcoded hash. The snapshot table stores the old `prosrc`. The
+  PRE-GUARD refuses unless:
+  - exactly one `public` overload exists;
+  - `ORDER BY a.staff_id` is present and `ORDER BY g.staff_id` is absent;
+  - each fragment occurs **exactly** once, counted with the
+    `(length-length(replace))/length` idiom from 070/071/073;
+  - fragment 2's count is unchanged after fragment 1 is substituted;
+  - neither fragment contains a line terminator;
+  - `sl` is absent;
+  - the function is still SECURITY DEFINER with `search_path=pg_catalog`.
+
+  The POST-GUARD requires
+  `live.prosrc IS NOT DISTINCT FROM replace(replace(snap.prosrc,frag1_old,frag1_new),frag2_old,frag2_new)`.
+  That makes the two substitutions the only change to the body. The fragments are
+  stored once, in the snapshot table, so the three blocks cannot drift apart.
+- **2.** Two single-line fragments, as shown in §(c).
+- **3.** Every snapshot vs post-state comparison uses `IS NOT DISTINCT FROM`,
+  including the oid join. The comparisons cover owner, ACL, secdef, config,
+  volatility, strictness, parallel, leakproof, identity args, result type and the
+  full `to_jsonb(pg_proc)-'prosrc'` metadata, which 070/072/073 used as their
+  postflight.
+- **4.** Schema `public` comes from the source, as shown in §(b).
+- **6.** The snapshot alias is `snap` and the catalog alias is `live`. The CREATE TEMP
+  TABLE uses `fn`. None of these is a variable anywhere in this migration. The DO
+  blocks declare only `v_`-prefixed variables (`v_overloads, v_rows, v_src, v_f1, v_f2,
+  v_n1, v_n2, v_secdef, v_config, v_definition`), and the POST-GUARD declares none.
+  No DO-block statement references a bare column whose name equals one of those
+  variables.
+
+No GRANT, REVOKE, OWNER, DROP, arity change (AGENT_RULES §7) or other object is touched.
+
+#### e) Why the alias, not the variable
+
+This is unchanged from rev 1. Renaming the alias changes two lines in one branch.
+Renaming the variable `s` would touch every `s.` reference in the decision and
+lifecycle branches for no gain.
+
+#### f) Hashes: informational only, used by NO guard
+
+| What | md5(prosrc) | length | Source |
+|---|---|---|---|
+| Rev 1 values (computed from 068 **without** 070; and, per §a, a wrong reconstruction missing the leading `\n` and trailing space) | LF `209bda0e6b3b6251270d21f7bbb02e6e`, CRLF `29178c1a83f3282c65c66a0dfa19bcde` | — | rev 1 §e; informational, never valid |
+| 068 only (pre-070), LF | `37b628ba0ede96918692b992c306e1b5` | 7283 | sha256 `e1334b16…d9b0114` = 070:9's pinned constant |
+| 068 only, CRLF | `a776f9825bb485c527afed61aa6ff7b7` | 7312 | offline |
+| **068 + 070, LF (expected live)** | `647ef1758fb6468cfbda1dc72a557cd0` | 7283 | offline |
+| 068 + 070, CRLF | `28d99ad4ae7edb02ad5d5963778fa154` | 7312 | offline |
+| After 074 on 068+070 LF | `3e39cf76a408b38d7b665116ded63101` | 7299 | offline |
+| After 074 on 068+070 CRLF | `c19e803cec154ecbbb7c197e419efc8f` | 7328 | offline |
+
+#### g) Re-sweep, migrations 059–073: variable/parameter vs UNQUALIFIED column (42702)
+
+**Method.** This was a static read. Nothing was executed.
+
+- A scratch Python parser extracted every `CREATE [OR REPLACE] FUNCTION` in 059–073:
+  70 definitions. 063:137 is an `EXECUTE format(...)`, not a definition.
+- For each definition it took the name, IN parameters, OUT/INOUT parameters,
+  RETURNS TABLE columns, DECLARE names and `FOR <v> IN` loop variables.
+- It collected the tables named after `FROM/JOIN/UPDATE/INSERT INTO/DELETE FROM`.
+- Column sets for those tables came from every `CREATE TABLE`/`ALTER TABLE … ADD|RENAME
+  COLUMN` in migrations 001–073.
+- A hit is a declared or parameter name that equals a column of a table in scope
+  in the same statement, used bare. Bare excludes `INTO` targets, INSERT column
+  lists and `SET` left-hand sides.
+
+**Validation.** The parser re-finds both known historical defects of this class: 061's
+`action` (fixed by 067) and 069's `action` (fixed by 073). Every overlap it reported
+was then read by hand.
+
+**Findings.**
+
+- **No function in 059–073 has OUT parameters or RETURNS TABLE/SETOF**:
+  `grep 'RETURNS TABLE\|SETOF'` over 059–073 returns zero.
+- Only four definitions have any declared name that equals a column of a table they touch.
+
+| Verdict | Count |
+|---|---|
+| CONFIRMED live | **0** |
+| CONFIRMED historical (already repaired by 067/069→073) | 3 definitions |
+| POSSIBLE | **0** |
+| CLEAR | rest |
+
+Nothing was fixed. This is a report only.
+
+| # | Function | Defined at | Status | Lang | Params (IN) | OUT / RETURNS TABLE | DECLARE / loop vars | Tables touched (`payment_v2.` unless prefixed) | Declared name = column of touched table | Verdict |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | `payment_v2.immutable` | 059:207 | effective | plpgsql | — | — | — | — | — | CLEAR: no table referenced in static SQL (EXECUTE text, if any, does not see PL/pgSQL variables) |
+| 2 | `payment_v2.journal_balanced` | 059:220 | effective | plpgsql | — | — | — | usdc_journal | — | CLEAR: no declared/param name equals a column of any touched table |
+| 3 | `payment_v2.require_role` | 060:3 | effective | plpgsql | `p_role` | — | — | — | — | CLEAR: no table referenced in static SQL (EXECUTE text, if any, does not see PL/pgSQL variables) |
+| 4 | `payment_v2.proof_shape` | 060:14 | effective | plpgsql | `p` | — | — | — | — | CLEAR: no table referenced in static SQL (EXECUTE text, if any, does not see PL/pgSQL variables) |
+| 5 | `payment_v2.funding_configuration` | 060:19 | effective | sql | `p_network` | — | — | networks, staff | — | CLEAR (N/A): `LANGUAGE sql`, which has no PL/pgSQL variables. In SQL functions a name clash resolves to the column and never raises 42702; all params are `p_`-prefixed and no touched table has such a column |
+| 6 | `payment_v2.actor` | 060:28 | effective | plpgsql | — | — | `v` | public.users | — | CLEAR: no declared/param name equals a column of any touched table |
+| 7 | `payment_v2.b58` | 060:33 | superseded by 064 | plpgsql | `p` | — | `n`, `r`, `i`, `z`, `a` / loop: `i` | — | — | CLEAR: no table referenced in static SQL (EXECUTE text, if any, does not see PL/pgSQL variables) |
+| 8 | `payment_v2.unb58` | 060:41 | superseded by 064 | plpgsql | `p` | — | `n`, `r`, `i`, `j`, `z`, `a` / loop: `i` | — | — | CLEAR: no table referenced in static SQL (EXECUTE text, if any, does not see PL/pgSQL variables) |
+| 9 | `payment_v2.le64` | 060:51 | superseded by 064 | plpgsql | `p` | — | `v`, `r`, `i` / loop: `i` | — | — | CLEAR: no table referenced in static SQL (EXECUTE text, if any, does not see PL/pgSQL variables) |
+| 10 | `payment_v2.enqueue` | 060:58 | effective | plpgsql | `p_sale`, `p_action`, `p_payload`, `p_revision`, `p_command`, `p_decision`, `p_ready` | — | `v` | operations | — | CLEAR: no declared/param name equals a column of any touched table |
+| 11 | `payment_v2.lock_card` | 060:67 | effective | plpgsql | `p_card` | — | `v_item` | public.cards, public.items | — | CLEAR: no declared/param name equals a column of any touched table |
+| 12 | `payment_v2.lock_sale` | 060:75 | effective | plpgsql | `p_sale` | — | `v_card`, `v_listing` | sales, public.listings | — | CLEAR: no declared/param name equals a column of any touched table |
+| 13 | `payment_v2.owns_claim` | 060:83 | effective | sql | `p_card`, `p_owner` | — | — | public.ledger_entries | — | CLEAR (N/A): `LANGUAGE sql`, which has no PL/pgSQL variables. In SQL functions a name clash resolves to the column and never raises 42702; all params are `p_`-prefixed and no touched table has such a column |
+| 14 | `payment_v2.attempt_status` | 060:87 | effective | sql | `p_id` | — | — | attempts, escrows, events, operations, sales | — | CLEAR (N/A): `LANGUAGE sql`, which has no PL/pgSQL variables. In SQL functions a name clash resolves to the column and never raises 42702; all params are `p_`-prefixed and no touched table has such a column |
+| 15 | `public.fn_payment_v2_prepare_sale` | 060:96 | effective | plpgsql | `p_listing_id`, `p_network_id`, `p_terms` | — | `l`, `c`, `i`, `v`, `n`, `w`, `s`, `raw`, `gen`, `prior_listing`, `prior_network`, `prior_terms` | inventory, networks, quote_books, sales, wallet_accounts, public.cards, public.items, public.listings, public.users | — | CLEAR: no declared/param name equals a column of any touched table |
+| 16 | `public.fn_payment_v2_initiate` | 060:125 | superseded by 066 | plpgsql | `p_listing_id`, `p_idempotency_key`, `p_policy_version`, `p_policy_digest` | — | `u`, `a`, `s`, `n`, `q`, `w`, `v_id`, `v_card`, `v_now` | attempts, networks, policies, quote_books, sales, wallet_accounts, public.cards, public.listings, public.users | — | CLEAR: no declared/param name equals a column of any touched table |
+| 17 | `public.fn_payment_v2_authorize_attempt` | 060:155 | effective | plpgsql | `p_attempt_id` | — | `a`, `s`, `n`, `v`, `p`, `policy` | attempts, inventory, networks, policies, sales | — | CLEAR: no declared/param name equals a column of any touched table |
+| 18 | `public.fn_payment_v2_own_attempts` | 060:171 | effective | sql | `p_listing_id` | — | — | attempts | — | CLEAR (N/A): `LANGUAGE sql`, which has no PL/pgSQL variables. In SQL functions a name clash resolves to the column and never raises 42702; all params are `p_`-prefixed and no touched table has such a column |
+| 19 | `public.fn_payment_v2_attach_candidate` | 060:174 | effective | plpgsql | `p_attempt_id`, `p_signature` | — | — | attempts, candidates | — | CLEAR: no declared/param name equals a column of any touched table |
+| 20 | `public.fn_payment_v2_recovery_binding` | 060:179 | effective | plpgsql | `p_attempt`, `p_genesis`, `p_program` | — | `a` | attempts, consumptions, events, sales | — | CLEAR: no declared/param name equals a column of any touched table |
+| 21 | `public.fn_payment_v2_record_verified_event` | 060:189 | effective | plpgsql | `p_event` | — | `a`, `s`, `e`, `v_kind`, `v_id` | attempts, events, sales | — | CLEAR: no declared/param name equals a column of any touched table |
+| 22 | `payment_v2.move_claim` | 061:9 | effective | plpgsql | `p_event`, `p_card`, `p_from`, `p_to`, `p_conditional` | — | — | claim_history, public.ledger_entries | — | CLEAR: no declared/param name equals a column of any touched table |
+| 23 | `public.fn_payment_v2_reconcile_event` | 061:18 | effective | plpgsql | `p_event_id` | — | `e`, `a`, `s`, `c`, `o`, `x`, `d`, `v_result`, `ref`, `n` | attempts, attestations, consumptions, decisions, escrows, events, inventory, operations, outbox, sales, staff, usdc_journal, public.cards, public.items, public.listings, public.orders | — | CLEAR: no declared/param name equals a column of any touched table |
+| 24 | `public.fn_payment_v2_record_decision` | 061:99 | superseded by 067 | plpgsql | `p_decision` | — | `u`, `x`, `s`, `st`, `d`, `action`, `cmd`, `required_role`, `v_op`, `v_person` | attempts, attestations, decisions, escrows, governance_approvals, inventory, operations, sales, staff, public.cards | `action` = column of decisions/operations | **CONFIRMED (historical)**: variable `action` vs bare `action` in `SELECT id,escrow_id,action,... FROM payment_v2.decisions WHERE id=cmd`. Already repaired by 067 (`decision_row.action`); not live if 067 applied |
+| 25 | `public.fn_payment_v2_approve_refund` | 061:138 | effective | plpgsql | `p_command_id` | — | `st`, `d`, `x`, `v` | decisions, escrows, governance_approvals, operations, staff | — | CLEAR: no declared/param name equals a column of any touched table |
+| 26 | `public.fn_payment_v2_record_attestation` | 061:153 | effective | plpgsql | `p_proof` | — | `d`, `x`, `s`, `old`, `r` | attestations, decisions, escrows, governance_approvals, operations, sales, staff, public.items | — | CLEAR: no declared/param name equals a column of any touched table |
+| 27 | `public.fn_payment_v2_record_lifecycle` | 061:181 | effective | plpgsql | `p_proof` | — | `s`, `old`, `k` | consumptions, events, inventory, lifecycle_evidence, operations, sales, public.listings | — | CLEAR: no declared/param name equals a column of any touched table |
+| 28 | `public.fn_payment_v2_admin_queue` | 061:207 | effective | plpgsql | — | — | — | escrows, staff | — | CLEAR: no declared/param name equals a column of any touched table |
+| 29 | `public.fn_payment_v2_admin_obligations` | 061:212 | effective | plpgsql | — | — | — | operations, staff, unresolved | — | CLEAR: no declared/param name equals a column of any touched table |
+| 30 | `public.fn_payment_v2_begin_scan` | 062:3 | effective | plpgsql | `p_genesis`, `p_program`, `p_limit` | — | `n`, `c`, `v` | cursors, networks | — | CLEAR: no declared/param name equals a column of any touched table |
+| 31 | `public.fn_payment_v2_finish_scan` | 062:17 | effective | plpgsql | `p_lease_id`, `p_last_address`, `p_failures` | — | `c`, `f` / loop: `f` | cursors, unresolved | — | CLEAR: no declared/param name equals a column of any touched table |
+| 32 | `public.fn_payment_v2_claim_operations` | 062:32 | effective | plpgsql | `p_worker_id`, `p_limit` | — | `o`, `v`, `r` / loop: `o` | operations | — | CLEAR: no declared/param name equals a column of any touched table |
+| 33 | `public.fn_payment_v2_finish_operation` | 062:46 | effective | plpgsql | `p_operation_id`, `p_lease_id`, `p_outcome`, `p_signature`, `p_error` | — | `o` | operations, signed_operations | — | CLEAR: no declared/param name equals a column of any touched table |
+| 34 | `public.fn_payment_v2_operation_context` | 062:63 | effective | plpgsql | `p_operation_id`, `p_lease_id` | — | `o`, `s` | attempts, decisions, escrows, inventory, operations, sales | — | CLEAR: no declared/param name equals a column of any touched table |
+| 35 | `public.fn_payment_v2_claim_outbox` | 062:76 | effective | plpgsql | `p_limit` | — | `o`, `v`, `r` / loop: `o` | outbox | — | CLEAR: no declared/param name equals a column of any touched table |
+| 36 | `public.fn_payment_v2_finish_outbox` | 062:87 | effective | plpgsql | `p_id`, `p_lease_id`, `p_delivered`, `p_error` | — | `o` | outbox | — | CLEAR: no declared/param name equals a column of any touched table |
+| 37 | `public.fn_payment_v2_record_operation_failure` | 062:100 | effective | plpgsql | `p_operation_id`, `p_proof` | — | `o`, `s`, `old` | operation_failures, operations, sales | — | CLEAR: no declared/param name equals a column of any touched table |
+| 38 | `public.fn_payment_v2_list_card` | 062:117 | effective | plpgsql | `p_card_id`, `p_seller_id`, `p_price_cents`, `p_payout_method`, `p_fair_price_cents` | — | `c`, `v`, `r` | inventory, sales, public.cards, public.listings | — | CLEAR: no declared/param name equals a column of any touched table |
+| 39 | `public.fn_payment_v2_request_cancel` | 062:127 | effective | plpgsql | `p_listing_id`, `p_actor` | — | `l`, `s` | sales, public.listings | — | CLEAR: no declared/param name equals a column of any touched table |
+| 40 | `public.fn_payment_v2_redeem_card` | 062:145 | effective | plpgsql | `p_card_id`, `p_user_id`, `p_address`, `p_fee_cents` | — | — | — | — | CLEAR: no table referenced in static SQL (EXECUTE text, if any, does not see PL/pgSQL variables) |
+| 41 | `public.fn_payment_v2_review_dispatch` | 062:158 | effective | plpgsql | `p_id`, `p_escrow_id`, `p_kind`, `p_digest`, `p_route`, `p_accepted_at` | — | `x`, `st`, `old` | dispatch_reviews, escrows, staff | — | CLEAR: no declared/param name equals a column of any touched table |
+| 42 | `public.fn_payment_v2_worker_identity` | 062:172 | effective | plpgsql | `p_required_role` | — | — | — | — | CLEAR: no table referenced in static SQL (EXECUTE text, if any, does not see PL/pgSQL variables) |
+| 43 | `payment_v2.exit_plan` | 062:179 | effective | plpgsql | `p_operation` | — | `op`, `s`, `a`, `n`, `accounts` | attempts, escrows, operations, sales | — | CLEAR: no declared/param name equals a column of any touched table |
+| 44 | `public.fn_payment_v2_signed_operation` | 062:195 | effective | plpgsql | `p_operation_id`, `p_lease_id` | — | `o`, `stored` | operations, signed_operations | — | CLEAR: no declared/param name equals a column of any touched table |
+| 45 | `public.fn_payment_v2_stage_signed_operation` | 062:205 | effective | plpgsql | `p_operation_id`, `p_lease_id`, `p_envelope` | — | `o`, `plan`, `old`, `raw`, `message` | escrows, operations, signed_operations | — | CLEAR: no declared/param name equals a column of any touched table |
+| 46 | `payment_v2.terms_guard` | 063:9 | superseded by 065 | plpgsql | — | — | `excluded` | events | — | CLEAR: no declared/param name equals a column of any touched table |
+| 47 | `payment_v2.audit_configuration` | 063:30 | effective | plpgsql | — | — | — | configuration_history | — | CLEAR: no declared/param name equals a column of any touched table |
+| 48 | `payment_v2.staff_identity` | 063:34 | effective | plpgsql | — | — | — | staff | — | CLEAR: no declared/param name equals a column of any touched table |
+| 49 | `payment_v2.correspondence` | 063:41 | effective | plpgsql | — | — | `ok` | attempts, events, sales, staff, public.cards, public.items, public.orders | — | CLEAR: no declared/param name equals a column of any touched table |
+| 50 | `payment_v2.attempt_correspondence` | 063:60 | effective | plpgsql | — | — | `s`, `q` | quote_books, sales, wallet_accounts | — | CLEAR: no declared/param name equals a column of any touched table |
+| 51 | `payment_v2.consumption_correspondence` | 063:78 | effective | plpgsql | — | — | `e`, `a`, `s`, `bad` | attempts, events, sales, usdc_journal, public.cards, public.ledger_entries, public.orders | — | CLEAR: no declared/param name equals a column of any touched table |
+| 52 | `public.fn_payment_v2_managed` | 063:103 | effective | sql | `p_table`, `p_row` | — | — | inventory, sales | — | CLEAR (N/A): `LANGUAGE sql`, which has no PL/pgSQL variables. In SQL functions a name clash resolves to the column and never raises 42702; all params are `p_`-prefixed and no touched table has such a column |
+| 53 | `public.fn_payment_v2_legacy_guard` | 063:111 | effective | plpgsql | — | — | — | — | — | CLEAR: no table referenced in static SQL (EXECUTE text, if any, does not see PL/pgSQL variables) |
+| 54 | `payment_v2.b58` | 064:13 | effective | plpgsql | `p` | — | `n`, `r`, `i`, `z`, `a` / loop: `i` | — | — | CLEAR: no table referenced in static SQL (EXECUTE text, if any, does not see PL/pgSQL variables) |
+| 55 | `payment_v2.unb58` | 064:21 | effective | plpgsql | `p` | — | `n`, `r`, `i`, `j`, `z`, `a` / loop: `i` | — | — | CLEAR: no table referenced in static SQL (EXECUTE text, if any, does not see PL/pgSQL variables) |
+| 56 | `payment_v2.le64` | 064:31 | effective | plpgsql | `p` | — | `v`, `r`, `i` / loop: `i` | — | — | CLEAR: no table referenced in static SQL (EXECUTE text, if any, does not see PL/pgSQL variables) |
+| 57 | `payment_v2.terms_guard` | 065:12 | effective | plpgsql | — | — | `excluded` | events | — | CLEAR: no declared/param name equals a column of any touched table |
+| 58 | `public.fn_payment_v2_initiate` | 066:25 | effective | plpgsql | `p_listing_id`, `p_idempotency_key`, `p_policy_version`, `p_policy_digest` | — | `u`, `a`, `s`, `n`, `q`, `w`, `v_id`, `v_card`, `v_now` | attempts, networks, policies, quote_books, sales, wallet_accounts, public.cards, public.listings, public.users | — | CLEAR: no declared/param name equals a column of any touched table |
+| 59 | `public.fn_payment_v2_record_decision` | 067:7 | effective | plpgsql | `p_decision` | — | `u`, `x`, `s`, `st`, `d`, `action`, `cmd`, `required_role`, `v_op`, `v_person` | attempts, attestations, decisions, escrows, governance_approvals, inventory, operations, sales, staff, public.cards | `action` = column of decisions/operations | CLEAR: `action` = `decisions.action`/`operations.action` by name, but every bare `action` is in an outer IF expression, `CASE action`, `INSERT ... VALUES(...)` or the `enqueue(...)` call, none of which has those tables in scope; all subquery uses are qualified (`pending.`, `resolution.`, `fd.`, `rd.`, `prev.`, `ad.`) |
+| 60 | `payment_v2.consumption_digest` | 068:48 | effective | plpgsql | `p_event` | — | `e`, `c` | consumptions, events | — | CLEAR: no declared/param name equals a column of any touched table |
+| 61 | `public.fn_payment_v2_issuer_context` | 068:59 | effective | plpgsql | `p_sale_id`, `p_action` | — | `s`, `v`, `n`, `q`, `actor`, `template`, `fee`, `net` | events, inventory, policies, quote_books, sales | — | CLEAR: no declared/param name equals a column of any touched table |
+| 62 | `public.fn_payment_v2_verifier_context` | 068:87 | effective, text-edited by 070 | plpgsql | `p_kind`, `p_subject_id` | — | `d`, `x`, `s`, `st`, `keys`, `action_code`, `ix_name` | attempts, decisions, escrows, governance_approvals, sales, staff | — | CLEAR for this class: no declared name equals a column of a touched table. (The separate alias-vs-variable `s` defect is the one 074 repairs) |
+| 63 | `public.fn_payment_v2_ack_context` | 068:119 | effective, text-edited by 072 | plpgsql | `p_event_id` | — | `e`, `c`, `s`, `v`, `actors`, `old`, `digest` | attempts, consumptions, events, inventory, lifecycle_evidence, sales, staff | — | CLEAR: no declared/param name equals a column of any touched table |
+| 64 | `public.fn_payment_v2_store_chain_evidence` | 068:136 | superseded by 069 | plpgsql | `p_evidence` | — | `n`, `a`, `s`, `d`, `x`, `o`, `raw`, `existing`, `v_id`, `sid`, `kind`, `action`, `net`, `slot_value`, `time_value` | attempts, consumptions, decisions, escrows, events, networks, operations, sales, verified_chain_evidence | `action` = column of decisions/operations; `kind` = column of events | **CONFIRMED (historical)**: same `action` defect as the 069 row; this body was replaced by 069 |
+| 65 | `public.fn_payment_v2_read_chain_evidence` | 068:178 | superseded by 069 | plpgsql | `p_subject_kind`, `p_subject_id`, `p_subject_action` | — | — | verified_chain_evidence | — | CLEAR: no declared/param name equals a column of any touched table |
+| 66 | `payment_v2.evidence_insert_guard` | 068:185 | effective | plpgsql | — | — | `ev`, `expected_action`, `sid`, `sig`, `slot_value`, `network`, `genesis_bytes`, `program_bytes`, `evidence_id` | decisions, escrows, operations, sales, verified_chain_evidence | — | CLEAR: no declared/param name equals a column of any touched table |
+| 67 | `payment_v2.consumption_evidence_guard` | 068:206 | effective | plpgsql | — | — | `e`, `ev` | events, verified_chain_evidence | — | CLEAR: no declared/param name equals a column of any touched table |
+| 68 | `public.fn_payment_v2_attempt_context` | 069:19 | effective | plpgsql | `p_attempt`, `p_genesis`, `p_program` | — | `a`, `s` | attempts, sales | — | CLEAR: no declared/param name equals a column of any touched table |
+| 69 | `public.fn_payment_v2_store_chain_evidence` | 069:30 | effective, text-edited by 071 and 073 | plpgsql | `p_evidence` | — | `n`, `a`, `s`, `d`, `x`, `o`, `raw`, `existing`, `v_id`, `sid`, `kind`, `action`, `net`, `slot_value`, `time_value` | attempts, consumptions, decisions, escrows, events, networks, operations, sales, verified_chain_evidence | `action` = column of decisions/operations; `kind` = column of events | **CONFIRMED, repaired by 073** (applied per this file): variable `action` vs bare `action` in `SELECT id,escrow_id,action INTO d.id,d.escrow_id,d.action FROM payment_v2.decisions WHERE id=sid`. Remaining overlaps CLEAR: `kind` (= `events.kind`) bare only in `ELSIF kind=...` and `subject_kind=kind` against `verified_chain_evidence`, which has no `kind` column; the events subquery uses `e.kind`. The operations SELECT projects only `id,sale_id,signature` |
+| 70 | `public.fn_payment_v2_read_chain_evidence` | 069:71 | effective | plpgsql | `p_subject_kind`, `p_subject_id`, `p_subject_action` | — | — | verified_chain_evidence | — | CLEAR: no declared/param name equals a column of any touched table |
+
+**Out of scope of this sweep, stated plainly:**
+
+- Top-level `DO` blocks in 059–073 already ran at apply time, and a 42702 there
+  would have aborted that migration.
+- Dynamic SQL inside `EXECUTE` cannot see PL/pgSQL variables.
+- Table detection is regex-based. A table reached only through a view, or a
+  function call that returns rows, is not expanded. The 059–073 functions select
+  from no view.
+
+#### h) Founder runbook: read-only catalog check BEFORE 074 is approved (founder runs; I did not)
+
+Sources:
+
+- Container name, container ID, image digest and the three RO mounts:
+  `tests/payment-integration/attest-helper.sh:5,14-17` and this file's "only executed database container" entry.
+- Database name: `tests/payment-integration/README.md:4`.
+- Loopback-only `docker exec` + `PGHOST/PGPORT/PGDATABASE/PGUSER` pattern:
+  `tests/payment-db/README.md:500-505`.
+- `supabase_admin` as the setup/audit identity for this database: the target guards
+  at `tests/payment-integration/01_signable_fixtures.sql:6-7`,
+  `02_inventory_fixture.sql:3` and `04_additional_buyers.sql:4`
+  (`session_user<>'supabase_admin'` → refuse), plus `integrated.mjs:59`
+  (`login='supabase_admin'`).
+- `wsl.exe -d Ubuntu`: this file's earlier commands (e.g. line 760).
+
+```text
+REM ---- 1. Windows cmd.exe: enter the documented Ubuntu distro ----
+wsl.exe -d Ubuntu
+
+# ---- 2. Ubuntu bash: container verification. STOP at the first mismatch ----
+N=flexsoar-payment-db-69c6161-20261016T022841Z
+docker inspect --format '{{.Id}}' "$N"
+#   expect: 71c4856abae69c7fa2a544052c6fe7bdb54403dec121f6aa39be982ac1f8cc92
+docker inspect --format '{{.State.Running}} {{.HostConfig.NetworkMode}} {{.HostConfig.Privileged}}' "$N"
+#   expect: true none false
+docker inspect --format '{{json .HostConfig.PortBindings}}' "$N"
+#   expect: {} or null  (no published ports)
+docker inspect --format '{{.Config.Image}}' "$N"
+#   expect: supabase/postgres@sha256:6058a6759ab9268cff8ee70641d61f1bd75953316281b76427cf5a6b4db2eafc
+docker inspect --format '{{range .Mounts}}{{.Destination}} rw={{.RW}}{{println}}{{end}}' "$N"
+#   expect exactly 3 lines, all rw=false: /audit/hba.conf, /audit/migrations, /audit/tests/payment-db
+docker exec "$N" cat /proc/net/dev
+#   expect: the two header lines plus lo only
+docker exec "$N" cat /proc/net/route
+#   expect: the header line only (no routes)
+
+# ---- 3. psql over container loopback as the setup/audit identity ----
+docker exec -it -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGDATABASE=flexsoar_payment_v2_integration_test -e PGUSER=supabase_admin "$N" psql -X -v ON_ERROR_STOP=1
+#   if a password is requested: STOP. <UNKNOWN: supabase_admin loopback password, if HBA requires one>
+
+-- ---- 4. inside psql: confirm target, then run the query verbatim ----
+SELECT current_database(), inet_server_addr(), session_user;
+--   expect: flexsoar_payment_v2_integration_test | 127.0.0.1 | supabase_admin   (anything else: \q and STOP)
+BEGIN TRANSACTION READ ONLY;
+SELECT p.oid::regprocedure AS fn, n.nspname AS schema,
+       pg_get_userbyid(p.proowner) AS owner, p.proacl, p.prosecdef, p.proconfig,
+       md5(p.prosrc) AS src_md5, length(p.prosrc) AS src_len,
+       position(E'\r' IN p.prosrc) > 0 AS has_cr,
+       left(p.prosrc, 1) = E'\n' AS leading_newline,
+       position('ORDER BY a.staff_id' IN p.prosrc) > 0 AS has_070_fix,
+       position('ORDER BY g.staff_id' IN p.prosrc) > 0 AS has_068_original,
+       position('JOIN payment_v2.sales s ON s.id=a.sale_id' IN p.prosrc) > 0 AS has_defect
+FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE p.proname = 'fn_payment_v2_verifier_context';
+SELECT to_regclass('supabase_migrations.schema_migrations') AS migrations_table;
+ROLLBACK;
+\q
+
+# ---- 5. back in Ubuntu bash ----
+exit
+```
+
+**What to send back:** the full output of every command above. **Approve 074 only if:**
+
+- exactly one row comes back, with `schema` = `public`;
+- `prosecdef` = `t` and `proconfig` = `{search_path=pg_catalog}`;
+- `has_070_fix` = `t`, `has_068_original` = `f` and `has_defect` = `t`;
+- `src_md5`/`src_len` equal `647ef1758fb6468cfbda1dc72a557cd0`/`7283` with
+  `has_cr` = `f`, or `28d99ad4ae7edb02ad5d5963778fa154`/`7312` with `has_cr` = `t`.
+  These are predictions from §(f). 074 itself does not depend on them, but a
+  mismatch means the live body differs from repo history and needs explaining first.
+
+If `has_070_fix` = `f`, 074's PRE-GUARD will refuse by design. Report that state
+instead of editing the guard. The expected `owner` is `payment_v2_owner` (068:225),
+but this has not been verified for this function.
+
+#### i) Open questions: unverifiable without a DB connection
+
+- **Whether 070 (and 069/071/072) is applied to `flexsoar_payment_v2_integration_test`.**
+  This file records no apply for 069–072 by filename. The runbook query answers 070
+  directly (`has_070_fix`).
+- **Exact stored `prosrc` bytes.** §(f) is an offline prediction anchored to 070's
+  pinned sha256, not a catalog read. 074 does not depend on it.
+- **That `pg_get_functiondef` output contains each fragment exactly once.** Inferred,
+  because it embeds `prosrc` verbatim between `$function$` delimiters and the header
+  contains neither fragment. The repair block re-checks this at run time and refuses
+  on mismatch.
+- **That `CREATE OR REPLACE` leaves `to_jsonb(pg_proc)-'prosrc'` identical.** The
+  evidence is that 073 used the same postflight and is recorded applied (this file,
+  the 073 entry). That is not proof for this function. If it differs, the POST-GUARD
+  rolls back.
+- **Postgres syntax of §(d).** No parser was available offline, so the block has
+  not been compiled. The fragment literals were round-tripped through quote-doubling
+  and compared byte-for-byte against the source.
+- **Runbook environment.** Two things are not documented in the repo: whether
+  `supabase_admin` needs a password over container loopback (`<UNKNOWN: supabase_admin
+  loopback password, if HBA requires one>`), and whether this machine's Ubuntu
+  `docker` CLI still talks to the daemon that holds the container. `attest-helper.sh`
+  assumes it does.
+- **Whether `supabase_migrations.schema_migrations` exists in the integration DB.**
+  The query reports it. The README says the schema came from a pg_dump restore, not
+  the Supabase CLI.
+- **Exact `proacl` contents.** These are compared by catalog value and never asserted
+  as a literal.
