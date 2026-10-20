@@ -1,5 +1,46 @@
 # Handoff — track/market
 
+## 2026-10-20 — Seller payout copy (USDC, no bank) + Vaulted badge needs custody AND authentication
+
+Founder decisions: (1) sellers are paid 95% of the buyer's USDC on Solana to
+their linked wallet, FlexSoar keeps 5%, Malaysia-only, no bank/cash payout,
+no store credit, payments not live yet; (2) "Vaulted" only with
+`custody = 'warehouse'` AND non-null `authenticated_at`.
+
+**Done in lane (`app/(market)/**`):** new `vault-status.ts`
+(`vaultState`/`isVaulted`/`VAULT_STATE_LABEL`) and `payout-copy.ts` (shared
+strings). `card/[id]/page.tsx` badge now goes through `vaultState(item)`
+(`getCard` already projects `authenticated_at`, no new fetch) and the Details
+panel shows a Custody row (Vaulted / Awaiting vault intake / Held by seller).
+Copy fixed in `settings/page.tsx`, `payouts/page.tsx`, `list/page.tsx`.
+
+**Blocked — outside track/market's §1 lane, not edited (founder to decide):**
+`components/market/ListForm.tsx:104-105,109-110,139-140`,
+`components/market/intake/PricePayout.tsx:174-175,182-183,189-190,242-243`
+(+ its `tests/invariants.test.ts` expectations at 1809/1821/1882, which must
+change in the same commit), `components/market/PayoutSetup.tsx:133`,
+`components/market/SellerGuideModal.tsx:31`,
+`components/auth/WelcomeForm.tsx:163,167`. All can import from
+`app/(market)/payout-copy.ts`. Also `components/card/CardDetail.tsx:39`
+doc comment ("True when the physical pair sits in the warehouse") is now
+stale; `app/admin/fulfilment/page.tsx:292-294` says "held at <location>" for
+any non-seller custody, i.e. from custody alone.
+
+**Server-side, same flaw as the badge (migrations, human only):**
+`031_vaulted_listing_fix.sql:55` (`fn_list_card`: `v_is_vaulted :=
+custody = 'warehouse'` → skips early access and the lock) and
+`050_vaulted_instant_release.sql:46` (skips the 7-day clearing hold on
+custody alone). With the 'warehouse' column default, an item that never
+reached the vault gets vaulted treatment, including instant payout release.
+
+**Legal text left alone:** `docs/TERMS.md:160` ("Bank payouts ... not
+currently offered. If we bring them back ..."), `:157` ("we send payment
+automatically in USDC" — reads as live today), `:162` ("countries our payout
+provider supports" vs Malaysia-only), `:124` (storage fee in `$`).
+
+Unverified: `npm run build` not run (worktree `node_modules` lacks
+`@solana/web3.js` and `resend`; no install allowed).
+
 ## 2026-08-25 — Payout UI stopped contradicting the database; dashboard Submissions was silently empty, fixed
 
 Task: the /list step 4 payout toggle and the "cash unlocks at N fulfilments"

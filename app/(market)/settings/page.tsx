@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getUser } from "@/lib/api/contract";
 import { currentUserId } from "@/app/(market)/queries";
+import { NO_BANK_PAYOUT, PAYMENTS_NOT_LIVE } from "@/app/(market)/payout-copy";
 import { UsernameEditor } from "@/components/market/UsernameEditor";
 import { FiatSelect } from "@/components/market/Fiat";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -37,8 +38,8 @@ export default async function SettingsPage() {
       <section aria-label="Payment options" className="flex flex-col gap-3 rounded-2xl border border-line bg-raised p-4">
         <h2 className="text-sm font-extrabold tracking-tight">Payment options</h2>
         <p className="text-[13px] leading-snug text-muted">
-          Card payments, Stripe Connect bank payouts, and your USDC wallet
-          live here.
+          Your USDC payout wallet lives here. {NO_BANK_PAYOUT}{" "}
+          {PAYMENTS_NOT_LIVE}
         </p>
         <Link
           href="/payouts"

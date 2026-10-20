@@ -25,6 +25,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { currentUserId } from "@/app/(market)/queries";
+import {
+  NO_BANK_PAYOUT,
+  PAYMENTS_NOT_LIVE,
+  SELLER_PAYOUT_SUMMARY,
+} from "@/app/(market)/payout-copy";
 import { PayoutSetup } from "@/components/market/PayoutSetup";
 import { EmbeddedLinkButton } from "@/components/market/EmbeddedWalletSection";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -112,7 +117,7 @@ export default async function PayoutsPage() {
         <h1 className="text-2xl font-extrabold tracking-tight">Payouts</h1>
         <EmptyState
           title="Sign in to manage payouts"
-          description="Your Stripe Connect payout setup and USDC payout wallet show up here once you're signed in."
+          description="Your USDC payout wallet shows up here once you're signed in."
         />
       </div>
     );
@@ -137,8 +142,7 @@ export default async function PayoutsPage() {
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight">Payouts</h1>
           <p className="text-sm text-muted">
-            Sell first, cash out when you&apos;re ready — proceeds release
-            after the 7-day clearing hold once the vault confirms receipt.
+            {SELLER_PAYOUT_SUMMARY} {PAYMENTS_NOT_LIVE}
           </p>
         </div>
       </div>
@@ -147,7 +151,7 @@ export default async function PayoutsPage() {
       <section className="flex flex-col gap-2 rounded-2xl border border-line bg-raised px-4 py-3">
         <div className="flex items-baseline justify-between gap-3">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-            Available to cash out
+            Available
           </span>
           <span className="text-2xl font-extrabold tracking-tight text-accent">
             {formatRm(overview.availableCents)}
@@ -176,12 +180,12 @@ export default async function PayoutsPage() {
             ? "Payout setup"
             : cashoutReady
               ? `Cash out ${formatRm(overview.availableCents)}`
-              : "Cashing out (when you're ready)"}
+              : "Bank payouts"}
         </h2>
         {cashPayoutsPaused && !connected ? (
           <p className="text-[12px] leading-snug text-muted">
-            Bank cash-out is paused — sale proceeds go straight to your
-            linked wallet in USDC. Nothing to set up here.
+            {NO_BANK_PAYOUT} Sellers are paid in USDC to the wallet below.
+            Nothing to set up here.
           </p>
         ) : (
           <>

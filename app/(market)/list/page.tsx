@@ -20,7 +20,7 @@ const STEPS: ReadonlyArray<{ title: string; hot?: boolean }> = [
   { title: "Submit your pair — photos, honest condition, your price." },
   { title: "We authenticate it and your listing goes live." },
   { title: "Ship within 48 hours when it sells.", hot: true },
-  { title: "Receive your payout after the clearing hold." },
+  { title: "Get 95% of the sale in USDC to your linked Solana wallet — once payments go live." },
   { title: "One flat 5% platform fee on every sale — no tiers, no surprises." },
 ];
 

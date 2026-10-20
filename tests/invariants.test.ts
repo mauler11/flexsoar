@@ -3266,3 +3266,69 @@ describe('welcome username rules — mirror of provision.ts normalizeHandle', ()
     expect(isCleanUsername('x'.repeat(25))).toBe(false);
   });
 });
+
+import { isVaulted, vaultState, VAULT_STATE_LABEL } from '@/app/(market)/vault-status';
+import {
+  NO_BANK_PAYOUT,
+  PAYMENTS_NOT_LIVE,
+  SELLER_PAYOUT_SUMMARY,
+  SELLER_PAYOUT_TITLE,
+} from '@/app/(market)/payout-copy';
+
+describe('track/market: Vaulted requires warehouse custody AND authenticated_at', () => {
+  const AUTHENTICATED = '2026-10-01T00:00:00Z';
+
+  it('(warehouse, authenticated) -> vaulted', () => {
+    const item = { custody: 'warehouse' as const, authenticated_at: AUTHENTICATED };
+    expect(isVaulted(item)).toBe(true);
+    expect(vaultState(item)).toBe('vaulted');
+    expect(VAULT_STATE_LABEL[vaultState(item)]).toBe('Vaulted');
+  });
+
+  it('(warehouse, null) -> not vaulted: the column default alone proves nothing', () => {
+    const item = { custody: 'warehouse' as const, authenticated_at: null };
+    expect(isVaulted(item)).toBe(false);
+    expect(VAULT_STATE_LABEL[vaultState(item)]).toBe('Awaiting vault intake');
+  });
+
+  it('(seller, authenticated) -> not vaulted: an approved review is not physical custody', () => {
+    const item = { custody: 'seller' as const, authenticated_at: AUTHENTICATED };
+    expect(isVaulted(item)).toBe(false);
+    expect(VAULT_STATE_LABEL[vaultState(item)]).toBe('Held by seller');
+  });
+
+  it('listed by an admin/mod account but (seller, null) -> not vaulted: the lister is never an input', () => {
+    const listedByAdmin = {
+      custody: 'seller' as const,
+      authenticated_at: null,
+      seller: { handle: 'wizzy', is_admin: true, role: 'mod' },
+    };
+    expect(isVaulted(listedByAdmin)).toBe(false);
+    expect(VAULT_STATE_LABEL[vaultState(listedByAdmin)]).toBe('Held by seller');
+  });
+
+  it('missing custody (pre-013 Item shape) -> not vaulted even when authenticated', () => {
+    expect(isVaulted({ authenticated_at: AUTHENTICATED })).toBe(false);
+    expect(isVaulted({ custody: null, authenticated_at: AUTHENTICATED })).toBe(false);
+  });
+});
+
+describe('track/market: seller payout copy matches the USDC model (founder decision 2026-10-20)', () => {
+  const all = [SELLER_PAYOUT_TITLE, SELLER_PAYOUT_SUMMARY, NO_BANK_PAYOUT, PAYMENTS_NOT_LIVE].join(' ');
+
+  it('states USDC, the 95/5 split, the linked wallet, and Malaysia-only', () => {
+    expect(SELLER_PAYOUT_TITLE).toBe("You'll be paid in USDC");
+    expect(SELLER_PAYOUT_SUMMARY).toContain('priced in RM');
+    expect(SELLER_PAYOUT_SUMMARY).toContain('95%');
+    expect(SELLER_PAYOUT_SUMMARY).toContain('USDC');
+    expect(SELLER_PAYOUT_SUMMARY).toContain('linked wallet');
+    expect(SELLER_PAYOUT_SUMMARY).toContain('FlexSoar keeps 5%');
+    expect(SELLER_PAYOUT_SUMMARY).toContain('Malaysia-only');
+  });
+
+  it('never promises a bank/cash payout or store credit, and says payments are not live', () => {
+    expect(all).not.toMatch(/paid in cash|cash to bank|bank payout via|to your bank/i);
+    expect(NO_BANK_PAYOUT).toBe('There is no bank or cash payout and no store credit.');
+    expect(PAYMENTS_NOT_LIVE).toContain("aren't live yet");
+  });
+});
