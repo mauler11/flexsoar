@@ -3570,7 +3570,7 @@ stand, with the corrections noted here. Rev 1's text above is unchanged.
 Constraints this session, same as rev 1: no `.sql` file created, edited, deleted or
 executed (the proposed SQL lives only in this document); no database connection; no
 `npm`/`tsc`/test run. The founder-owned `package.json`/`package-lock.json` changes and
-the debris files (`0`, `3`, the four SHA256-named files, `payment-security-5c3db0e.diff`)
+the debris files (`0`, `3`, the five SHA256-named files, `payment-security-5c3db0e.diff`)
 were not touched. The commit stages only this file.
 
 **Pre-flight deviation (AGENT_RULES.md §0), recorded rather than hidden.**
