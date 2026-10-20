@@ -103,21 +103,6 @@ import {
   isValidCountryCode,
 } from '../components/market/intake/intake-config';
 
-// SkuModelForm calls useRouter() (next/navigation) unconditionally at the top
-// of the component. Outside a real app-router tree that hook throws
-// ("invariant expected app router to be mounted") rather than returning null,
-// so a static render needs this mock regardless of which branch runs.
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({
-    push: () => {},
-    back: () => {},
-    forward: () => {},
-    refresh: () => {},
-    replace: () => {},
-    prefetch: () => {},
-  }),
-}));
-
 // SkuModelForm and VariantsTable both import Server Actions ("use server")
 // from this module at module scope. Mirrors, not imports, same reasoning as
 // the stripe webhook section below: the real module pulls in
@@ -242,59 +227,6 @@ vi.mock('@/components/admin/db-reads', () => ({
     proofOfPossessionDays: 90,
   }),
 }));
-
-// PARTIAL mock: this file also imports real contract functions elsewhere
-// (upsertSku, createSkuModel, …) via the relative path and tests their real
-// throwing behaviour directly — those must keep running for real. Only
-// getConsignment/getRedemptions are overridden here, everything else in the
-// module passes through via importOriginal(), same module either way vitest
-// resolves it by, so a plain vi.mock without importOriginal would have
-// silently replaced those real exports with undefined too.
-vi.mock('@/lib/api/contract', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../lib/api/contract')>();
-  return {
-    ...actual,
-    getConsignment: async () => ({
-      id: 'consignment-1',
-      consignor_id: 'consignor-1',
-      consignor: { id: 'consignor-1', handle: 'sneakerhead', level: 2 },
-      status: 'in_review',
-      item_count: 1,
-      intake_fee_cents: 1500,
-      submitted_at: '2026-01-01T00:00:00Z',
-      received_at: null,
-      completed_at: null,
-      notes: null,
-      created_at: '2026-01-01T00:00:00Z',
-      items: [],
-      events: [],
-    }),
-    getRedemptions: async () => [
-      {
-        id: 'redemption-1',
-        card_id: 'card-1',
-        item_id: 'item-1',
-        user_id: 'redeemer-1',
-        handling_fee_cents: 995,
-        shipping_address: { name: 'A. Buyer', line1: '1 Market St', city: 'SF', country: 'US' },
-        status: 'requested',
-        carrier: null,
-        tracking_number: null,
-        requested_at: '2026-01-01T00:00:00Z',
-        shipped_at: null,
-        card: {
-          id: 'card-1',
-          mint_number: 4,
-          float_value: 0.062,
-          sku: { brand: 'Nike', model: 'Air Max 1', colorway: 'Seed Grey', size_us: 10 },
-        },
-        item: { id: 'item-1', status: 'redemption_hold', custody_location: 'warehouse-a' },
-        redeemer: { id: 'redeemer-1', handle: 'buyer1', level: 1 },
-        fulfiller: null,
-      },
-    ],
-  };
-});
 
 // ------------------------------------------------------------
 // SQL MIRRORS
@@ -2921,22 +2853,6 @@ vi.mock('next/navigation', () => ({
   }),
   usePathname: () => '/',
   useSearchParams: () => new URLSearchParams(),
-}));
-
-// Mock Supabase/cookies for market page
-vi.mock('@/lib/supabase/server', () => ({
-  createServerSupabase: vi.fn(() => ({
-    from: vi.fn(() => ({
-      select: vi.fn(() => ({
-        eq: vi.fn(() => ({
-          order: vi.fn(() => Promise.resolve({ data: [], error: null })),
-        })),
-      })),
-    })),
-    auth: {
-      getUser: vi.fn(() => Promise.resolve({ data: { user: null }, error: null })),
-    },
-  })),
 }));
 
 // Mock getPlatformConfig, getListings, getSkus for market page

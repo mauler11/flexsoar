@@ -67,26 +67,29 @@ delete another track's.
 ## 2. Never
 
 - Never `merge`, `rebase`, `cherry-pick`, or `checkout` another branch.
-- Never create, edit, delete, or execute a `.sql` file. Schema is human-only.
-  If you need a schema change, describe it and file a handoff item.
-- Never edit `package.json`. Append what you need to `DEPS.md` as
-  `- package@version — why`, and a human installs it. Parallel edits to
-  `package.json` and the lockfile are the fastest way to deadlock this build.
-- Never edit `app/globals.css` unless you are `track/design`. This is
-  **Tailwind v4** — design tokens live in the `@theme` block of `globals.css`.
-  There is no `tailwind.config.ts` and none should ever be created.
-- Never change one of the 16 frozen signatures in `lib/api/contract.ts`.
-  Additive exports are allowed. Only `track/data` writes that file at all.
-- Never write SQL in a component, and never call `supabase.from(...).insert()`
-  outside `track/data`. `components/admin/db-writes.ts` is a sanctioned
-  temporary exception awaiting four contract exports; do not add a second one.
-- Never write to the live database. You have credentials in `.env.local`;
-  reading to verify a signature, an enum, or a policy is fine and encouraged.
-  Writing is not — a "test purchase" against the project is a real purchase.
-- Never suppress a type error with `any`, `@ts-ignore`, or a cast to make `tsc`
-  pass. A type error is usually the schema telling you something.
-- Never `select *`. Project the columns you need.
-- Never swallow a server error. Surface it verbatim on failure.
+- Schema is human-applied. Never create, edit, delete, or execute a `.sql`
+  file; describe needed schema changes in a handoff instead.
+  **Sole exception:** only when the current task prompt explicitly authorizes
+  it, an agent on `track/payment-security` may author new forward migration
+  files and execute them only against `flexsoar_payment_v2_integration_test`
+  (or another database explicitly named by that task) inside the verified
+  isolated container. Authorization is per task, never standing. Never target
+  the cloud Supabase project or any shared or production database. Never edit
+  applied migrations; fixes are new forward migrations. Without that explicit
+  authorization, the prohibition above applies in full.
+- Never edit `package.json`; request dependencies in `DEPS.md` as
+  `- package@version — why` for a human to install.
+- Never edit `app/globals.css` unless on `track/design`; Tailwind v4 tokens
+  belong in its `@theme` block, and no `tailwind.config.ts` may be created.
+- Never change the 16 frozen `lib/api/contract.ts` signatures; additive
+  exports are allowed, and only `track/data` writes that file.
+- Never write SQL in a component or call `supabase.from(...).insert()` outside
+  `track/data`; `components/admin/db-writes.ts` remains the sole temporary
+  exception awaiting four contract exports.
+- Never write to a live database; live verification is read-only.
+- Never suppress type errors with `any`, `@ts-ignore`, or casts to pass `tsc`.
+- Never `select *`; project the columns needed.
+- Never swallow a server error; surface it verbatim on failure.
 
 ---
 

@@ -51,3 +51,10 @@ graphify-out/
 
 .vercel
 .env*
+
+# Local state, Git bundles, and signing material
+/state/
+*.bundle
+*keypair*.json
+id.json
+*.key
