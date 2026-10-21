@@ -54,6 +54,12 @@ not widened) adds `authenticated_at` to `getSellerHeldRedemptions`'s
 (`:561-566`, `:585-596`). Also `app/styleguide/page.tsx:493` still describes
 "earned-only store credit" (design track).
 
+**Resolved 2026-10-21 (lane widened again):** `db-reads.ts` now selects and
+types `authenticated_at` on the seller-held redemption item (additive only);
+`app/admin/fulfilment/page.tsx` shows custody via `vaultState()` ("held at
+<location>" only when vaulted, otherwise "held by seller" / "awaiting vault
+intake"); styleguide footer no longer mentions store credit.
+
 ## 2026-08-25 — Payout UI stopped contradicting the database; dashboard Submissions was silently empty, fixed
 
 Task: the /list step 4 payout toggle and the "cash unlocks at N fulfilments"

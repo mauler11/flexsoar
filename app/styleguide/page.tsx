@@ -489,9 +489,8 @@ export default function StyleguidePage() {
             tier — the red 1 OF 1 ribbon sits on top of tier 5, never instead of it.
           </div>
           <div className="mt-1">
-            All prices are MYR — the marketplace&apos;s unit of account. FSC is
-            earned-only store credit (1 FSC = RM1 internally) and is never a
-            price.
+            All prices are MYR — the marketplace&apos;s unit of account. There
+            is no store credit; sellers are paid in USDC.
           </div>
         </footer>
       </main>

@@ -563,6 +563,7 @@ export interface SellerHeldRedemption {
     status: SubmissionStatus;
     custody: CustodyModel;
     custody_location: string | null;
+    authenticated_at: Timestamptz | null;
   };
   card: { id: UUID; mint_number: number; float_value: FloatValue };
   sku: { brand: string; model: string; colorway: string; size_us: number };
@@ -587,12 +588,14 @@ interface SellerHeldRow {
         status: SubmissionStatus;
         custody: CustodyModel;
         custody_location: string | null;
+        authenticated_at: Timestamptz | null;
       }
     | {
         id: UUID;
         status: SubmissionStatus;
         custody: CustodyModel;
         custody_location: string | null;
+        authenticated_at: Timestamptz | null;
       }[]
     | null;
   card:
@@ -635,7 +638,7 @@ export async function getSellerHeldRedemptions(
         "tracking_number, handling_fee_cents, shipping_address, " +
         "fulfiller:public_profiles!redemptions_fulfiller_id_fkey(id, handle, level), " +
         "requester:public_profiles!redemptions_user_id_fkey(id, handle, level), " +
-        "item:items!inner(id, status, custody, custody_location), " +
+        "item:items!inner(id, status, custody, custody_location, authenticated_at), " +
         "card:cards!inner(id, mint_number, float_value, " +
         "sku:skus!inner(brand, model, colorway, size_us))",
     )
