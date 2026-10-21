@@ -1,6 +1,8 @@
 # FlexSoar — Terms of Service
 
-Last updated: 26/08/2026
+Last updated: 21/10/2026
+
+**Payments are not live yet. New payment funding is disabled. The buying, payment and seller-payout terms below describe how those services will work when enabled; they do not mean you can pay or receive sale proceeds today.**
 
 ## 1. Who we are
 
@@ -12,9 +14,9 @@ By creating an account or using flexsoar.net, you agree to these Terms. If you d
 
 ## 2. What FlexSoar is
 
-FlexSoar is a marketplace for authenticated secondhand sneakers.
+FlexSoar is a marketplace for secondhand sneakers. Seller-held shoes have not been physically authenticated by us. A pair is vaulted only when we physically hold it and have authenticated it.
 
-Every pair listed on FlexSoar is represented by a Card. A Card is a digital record of ownership of one specific physical pair of shoes. Cards can be bought, sold and traded on FlexSoar. The holder of a Card may at any time redeem it — meaning the Card is destroyed and we ship the physical shoes to them.
+Every pair listed on FlexSoar is represented by a Card. A Card is a digital record of ownership of one specific physical pair of shoes. When the relevant services are enabled, Cards can be bought, sold and traded on FlexSoar. The holder of an active Card for vaulted shoes may redeem it — meaning the Card is destroyed and we ship the physical shoes to them.
 
 A Card is a claim on a specific, identified pair of shoes. It is not:
 
@@ -31,7 +33,7 @@ You must be at least 18 and legally able to enter contracts.
 
 One account per person. You are responsible for activity under your account and for keeping your sign-in secure.
 
-You must give accurate information, including your country of residence. Your country determines whether we can pay you (see section 10). Giving a false country does not create a right to be paid.
+You must give accurate information, including your country of residence. Sellers must be resident in Malaysia at launch (see section 10). Giving a false country does not make you eligible to sell or be paid.
 
 ## 4. Listing shoes (Consignors)
 
@@ -51,7 +53,7 @@ When you list a pair, you confirm that:
 
 We review every submission before it goes live. Review is normally completed within 24 hours and we will email you when it is. We may reject a submission for any reason, including suspicion of counterfeit, insufficient photographs, or a condition assessment we cannot reconcile with the photographs.
 
-Review is a documentary review, not a physical inspection. We have not held your shoes at this point. See section 11.
+Review is a documentary review, not a physical inspection or authentication. We have not held your shoes at this point. Seller-held shoes are not vaulted. See section 11.
 
 ### 4.3 You keep the shoes until they sell
 
@@ -65,7 +67,7 @@ We may ask you to photograph the shoes again at any point to confirm you still h
 
 **This is the most important obligation in these Terms.**
 
-When your Card first sells, ownership passes immediately to the buyer, and the Card is frozen — it cannot be resold, traded or redeemed by anyone.
+When your seller-held Card sells and the buyer's USDC funds the on-chain escrow, ownership passes to the buyer, and the Card is frozen — it cannot be resold, traded or redeemed by anyone until we receive and authenticate the shoes and the sale settles.
 
 You must ship the physical shoes to us within 48 hours, using the instructions we send you, and provide a tracking number.
 
@@ -75,12 +77,12 @@ You may not withdraw the listing after it has sold. The shoes are no longer your
 
 If the shoes do not reach us, we will:
 
-- cancel the sale and refund the buyer in full
+- cancel the sale and refund the buyer the full USDC amount paid for the Card
 - destroy the Card
 - cancel your pending payout
 - restrict your account and remove your other live listings
 
-Your payout is held for 7 days after a sale precisely so that this can be unwound without anyone chasing you for money already paid.
+The buyer's USDC stays in on-chain escrow until we receive and authenticate the shoes. Only then does the Solana program release your 95% share to your linked wallet. Otherwise, the buyer receives a full refund of the USDC paid for the Card and no seller payout is released.
 
 Repeatedly failing to ship, or shipping shoes that are not the shoes you listed, is fraud and we will treat it accordingly.
 
@@ -94,21 +96,21 @@ Keep your tracking number — if you ship within 48 hours with tracking and the 
 
 ## 5. Buying
 
-Prices are shown in US dollars. We do not display local-currency estimates, because comparability across the market matters more than familiarity.
+Listings are priced in Malaysian ringgit (MYR, shown as RM). When payments are enabled, checkout will quote the amount payable in USDC, with the MYR-to-USDC rate locked for a short window. We will show you the rate, the USDC amount and when the quote expires before you confirm. If the quote expires before payment, you need a new quote. Buyers may be international; sellers must be resident in Malaysia at launch.
 
-When you buy a Card:
+When payments are enabled and you buy a Card:
 
-- ownership passes to you on payment
-- if this is the Card's first sale, it is frozen until the shoes reach our vault. During this period you own the Card but cannot resell, trade or redeem it. This normally takes a few days
-- if the Consignor fails to deliver, we cancel and refund you in full, by the same method you paid
+- for vaulted shoes, ownership passes to you when the direct sale settles; the Solana program pays the seller 95% of your USDC payment on-chain at settlement and FlexSoar receives the remaining 5%
+- for seller-held shoes, your USDC is held in on-chain escrow. Ownership passes to you when escrow is funded, but the Card is frozen: you cannot resell, trade or redeem it until we receive and authenticate the shoes and the sale settles
+- if we receive and authenticate seller-held shoes, the Solana program releases 95% of the escrowed USDC to the seller and 5% to FlexSoar. Otherwise, you receive a full refund of the USDC paid for the Card on Solana
 
-Once the shoes are vaulted, the Card becomes fully tradeable and redeemable.
+A pair becomes vaulted only when we physically hold it and have authenticated it. Once the seller-held sale settles after those checks, the Card becomes tradeable and redeemable. Read the accrued storage amount shown on the Card page before buying: that balance follows the Card and is payable by whoever redeems it (section 7).
 
 **Prices can go down.** Nothing on FlexSoar is investment advice, we do not guarantee that any Card can be resold, and we do not guarantee a price. Market values shown on the site are our own estimates, not offers to buy.
 
 ## 6. The vault
 
-Once shoes reach us we inspect them, record them, and store them.
+Once shoes reach us we inspect them, authenticate them, record them, and store them. A pair is vaulted only when we physically hold it and have authenticated it. Shoes still held by a seller are never vaulted.
 
 While we hold them:
 
@@ -119,14 +121,15 @@ While we hold them:
 
 ## 7. Storage fees
 
-Storing shoes costs money. From 26/8/2026, a storage fee accrues on every vaulted pair.
+Storage fees accrue against the Card while the shoes are vaulted.
 
-- The fee accrues at $2 per pair every 14 days, starting when the shoes reach our vault
-- You are not billed and nothing is charged to you. The accrued amount is deducted when the Card next sells, or paid alongside shipping when it is redeemed
-- The current accrued amount is always shown on the Card
-- Accrual stops at 25% of the item's value. If it reaches that cap, we may sell the shoes, deduct what is owed and any costs, and remit the remainder to you. We will give you 14 days notice first and you can settle or redeem at any time before that
+- The fee is RM9 per pair every 14 days, accruing from vault-in: the point when FlexSoar physically holds and has authenticated the shoes
+- The accrued balance follows the Card when it is sold or traded. It is paid by whoever redeems the Card, as part of the redemption quote
+- Storage fees are never deducted from the seller's 95% USDC sale proceeds
+- The current accrued amount is shown on the Card page so buyers can see it before buying
+- Accrued storage fees are capped at 25% of the item's value. Accrual stops at that cap. Once the cap is reached, we may liquidate the shoes to settle the accrued storage fees and any liquidation costs, and remit the remainder to the Card holder. We will give the Card holder 14 days' notice before liquidation, during which they may settle the storage balance or redeem the Card
 
-We keep the shoes until what is owed on them is settled.
+We keep the shoes until the amount owed on them is settled.
 
 ## 8. Trading
 
@@ -140,33 +143,35 @@ You may offer a Card in exchange for another user's Card.
 
 ## 9. Redemption
 
-You may redeem any active Card you hold. Redemption destroys the Card permanently and we ship you the shoes.
+When redemption is enabled, you may redeem an active Card you hold for vaulted shoes. Redemption destroys the Card permanently and we ship you the shoes.
 
-- We quote you the shipping cost before the Card is destroyed. You confirm the quote; then it is burned
-- You pay shipping at cost, plus a handling fee. International shipping from Malaysia is expensive — typically USD 40–80 — and we do not mark it up
+- Before the Card is destroyed, we show you a redemption quote in RM that includes shipping at cost, the handling fee and all accrued storage fees. Whoever redeems the Card pays that total. You confirm and pay the quote before the Card is burned
+- International shipping from Malaysia is expensive, and we do not mark it up
 - Import duties, taxes and customs charges in your country are yours. We cannot tell you what they will be
 - We ship within 5 business days of a confirmed quote
 - Redemption is final. There is no un-redeeming a Card
 
 ## 10. Getting paid
 
-When your Card sells, your proceeds — the sale price less our commission and any accrued storage fee — become an amount owed to you by FlexSoar.
+When payments are enabled, the buyer pays the USDC amount quoted at checkout for the RM listing price. You receive 95% of that USDC in your linked Solana wallet; FlexSoar receives 5% as its commission.
 
-- Proceeds are shown as owed to you, with the date they will be sent
-- Payment is held for 7 days after the sale, so that a cancelled or disputed transaction can be unwound before money leaves
-- After that, we send payment automatically in USDC on Solana, to the wallet you linked. Your wallet signs nothing for this — it is a straight transfer to your address
-- Once paid, the funds are yours: keep them, move them, or spend them on FlexSoar like any other buyer
+- **Direct sale of vaulted shoes:** FlexSoar already physically holds and has authenticated the shoes. The Solana program pays your 95% share on-chain when the sale settles
+- **Sale of seller-held shoes:** the buyer's USDC is held in on-chain escrow. It is released only after FlexSoar receives and authenticates the shoes, with 95% paid to your linked wallet and 5% to FlexSoar. Otherwise, the buyer receives a full refund of the USDC paid for the Card and you receive no sale proceeds
+- Accrued storage fees stay with the Card and are paid by whoever redeems it as part of the redemption quote. They are never deducted from your 95% share
+- Once paid to your wallet, the USDC is yours: keep it or move it. When checkout is enabled, you may use USDC to buy on FlexSoar like any other buyer
 
-Bank payouts to a bank account are not currently offered. If we bring them back, we will ask you to complete a one-time verification before your first withdrawal — selling and buying never require it.
+We do not offer bank or cash payouts, store credit, or FSC. Seller payouts are in USDC on Solana to your linked wallet.
 
-**We can only pay sellers in countries our payout provider supports.** If we cannot pay you, you cannot list or sell — we will tell you before you try, not after. This is a limitation of international payment infrastructure, not a choice about who we want as sellers, and we are working to widen it.
+**Sellers must be resident in Malaysia at launch and have a linked Solana wallet.** Buyers may be international. Being able to buy does not make you eligible to list or sell.
 
 ## 11. Grading and authentication
 
 Every Card states its source:
 
-- **Seller-declared** — the Consignor assessed the shoes themselves, and we reviewed their photographs. Nobody at FlexSoar has held these shoes
+- **Seller-declared** — the Consignor assessed the condition and we reviewed their photographs. That documentary review is not a physical inspection or authentication by FlexSoar
 - **FlexSoar-graded** — we have physically inspected them
+
+A grade describes condition. It does not by itself mean a pair is vaulted. “Vaulted” means we physically hold the shoes and have authenticated them.
 
 A condition grade is an opinion, not a warranty. Photographs are the evidence behind it and are shown on every Card.
 
@@ -176,10 +181,10 @@ If we determine shoes are counterfeit at any point, we will remove them, cancel 
 
 ## 12. Fees
 
-- **Seller commission**: a percentage of the sale price, shown before you list
+- **Seller commission**: 5% of the USDC amount paid by the buyer for the Card; the seller receives 95% at the settlement or escrow-release point in section 10. Shown before you list. Storage fees are never deducted from this share
 - **Trade fee**: charged on trades, shown before you make an offer
-- **Storage fee**: see section 7
-- **Redemption**: shipping at cost, plus a handling fee, quoted before you commit
+- **Storage fee**: RM9 per pair every 14 days from vault-in, capped at 25% of the item's value; follows the Card and is paid on redemption (section 7)
+- **Redemption**: shipping at cost, plus a handling fee and accrued storage fees, included in the RM quote before you commit
 
 We will give 30 days notice before increasing any fee. Changes do not apply retroactively to a sale already completed.
 
@@ -191,7 +196,7 @@ We will give 30 days notice before increasing any fee. Changes do not apply retr
 - Interfere with the site, scrape it, or attempt to bypass its controls
 - Use FlexSoar to launder money or move the proceeds of crime
 
-We may restrict or close an account that does any of these, cancel affected transactions, and withhold payouts pending investigation.
+We may restrict or close an account that does any of these and cancel affected transactions where the applicable settlement process permits. Seller-held sale proceeds remain subject to the receipt-and-authentication escrow rules in section 10. An account restriction does not allow us to withhold or reverse a USDC payout already settled on-chain.
 
 ## 14. Loss, damage and liability
 
@@ -205,7 +210,7 @@ We are not responsible for:
 
 ## 15. Suspension, closure and shutting down
 
-You may close your account at any time. Before we can close it, you must redeem or sell any Cards you hold and we must have paid you anything owed.
+You may close your account at any time. Before we can close it, you must redeem or sell any Cards you hold and any pending sale, escrow, refund or redemption obligations must be resolved.
 
 We may suspend or close an account that breaches these Terms.
 
@@ -222,3 +227,17 @@ Talk to us first — info@flexsoar.net. Most things are resolvable without anyon
 We may update these Terms. If a change materially affects your rights, we will give 30 days notice by email. Continuing to use FlexSoar after that means you accept the change.
 
 Transactions already completed are governed by the Terms in force at the time.
+
+## Legal review notes
+
+[LEGAL REVIEW] Card classification (sections 2 and 5). Counsel should assess the actual ownership/claim model and the categorical statements that Cards are not securities, investment products, cryptocurrency, blockchain assets, e-money or payment instruments. Separating the physical-item Card from USDC payment is a product description, not a legal classification. These assertions are retained pending review; do not treat them as resolved.
+
+[LEGAL REVIEW] USDC payments under Malaysian law (5, 10, 12, 13). Review the proposed USDC/Solana settlement, custody/escrow and release arrangements, linked wallets, conversion disclosure, any licensing/registration implications, identity checks, AML obligations, sanctions, records and tax treatment. Do not carry forward a blanket promise that buyers/sellers never require verification. No regulatory status or exemption is asserted here.
+
+[LEGAL REVIEW] Consumer refunds and remedies (4.5, 5, 9, 11, 14). Review full-USDC-refund promises, refund processing, conversion and exchange-rate disclosures, network charges, the seven-day complaint period, final redemption wording, counterfeits, courier loss and compensation. The stated refund is the full USDC amount paid for the Card; network charges must not silently reduce that principal. Confirm required consumer remedies and treatment of any separate charges before publication.
+
+[LEGAL REVIEW] International buyers (3, 5, 9, 10, 14, 16). Review destination-country consumer rights, shipping restrictions, customs/tax disclosures, payment restrictions, eligibility to resell/trade, jurisdiction and enforceability of Malaysia-only governing-law/court wording. International buying does not waive any applicable rights or establish eligibility to sell.
+
+[LEGAL REVIEW] Title, custody, storage and disposal (2, 4.3–4.5, 6, 7, 15). Review title passing when escrow is funded or a direct sale settles, “bailee” before sale, the claim that user shoes are unavailable to creditors, vault-in fee accrual, 14-day billing treatment and the valuation used for the 25% cap, retention rights, forced sale at the 25% cap, 14-day notice, liquidation costs and remittance, account closure and shutdown. Review the receipt and authentication prerequisites for payout against the actual escrow contract. No property, insolvency or lien conclusion is made here.
+
+[LEGAL REVIEW] Contract changes and notices (12, 17). Review adoption/effective dates, notice, acceptance and treatment of existing users, storage balances and completed transactions. Updating the date alone does not establish acceptance or authorize retroactive fees.
