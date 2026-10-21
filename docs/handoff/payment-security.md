@@ -5210,3 +5210,296 @@ UNKNOWN (not determinable read-only from source):
 - the deployed env values, and whether main auto-deploys;
 - whether Vercel's image optimiser is affected by the next/sharp advisories;
 - the compiled Server Action manifest.
+
+## 2026-10-21 - Cloud schema drift audit (read-only vs cloud; replay in a new isolated container)
+
+Scope: how the CLOUD schema (founder export `cloud-schema-20261020.csv`, 699 objects, sha256
+`f0e77e0d...c02c831`) differs from what `supabase/migrations` 001-075 produce, and which objects
+created by 059-075 anon/authenticated could use under the cloud's default privileges.
+No cloud access. No migration or repo `.sql` file was edited or created. HEAD at start `641a4ca`, clean.
+
+### Method and environment
+
+- New disposable container `flexsoar-schema-replay-20261021-0031`,
+  Id `6ef7375a8c4e4516b2edf3a5828c20269962905eac73ca70c1dd9c982f4fff21`, image
+  `supabase/postgres@sha256:6058a6759ab9268cff8ee70641d61f1bd75953316281b76427cf5a6b4db2eafc`
+  (same digest as the existing DB container). Verified before every connection: Running, NetworkMode none,
+  PortBindings {}, Privileged false, no docker.sock, `/proc/net/dev` = lo only, `/proc/net/route` header only,
+  3 mounts all rw=false (worktree `supabase/migrations`, `replay-auth-prereq-20261020.sql`, `inventory-query.sql`).
+  No `payment_v2_*` / `payment_integration_*` roles existed before the replay.
+  **The container is now STOPPED (not removed).**
+- Prereq file sha256 `4295d81f...a748652a` verified (matches). Inventory query sha256 `f4e13174...42adee8`, run unmodified.
+- Founder rulings this session:
+  1. The new database is named `flexsoar_schema_replay_20261020` (not `_b`), because the hash-verified prereq
+     hard-guards on that name.
+  2. Part A (001-058 drift) uses an inventory taken in the new container immediately after 058, instead of
+     restarting the existing container (found Exited 255).
+
+  The existing container and its databases were not touched. The payment test DBs were not accessed.
+- Replay (`psql -X -v ON_ERROR_STOP=1`, stdin, as `supabase_admin`): pre001, 001-022, pre022b, 022b-051, pre052,
+  052-058, **inventory@058**, 059-075, **inventory@075**. **All 87 migrations returned rc=0, with no stop.
+  `replay-prereq-b-20261021.sql` was not needed and was not created.** The 059 preflight passed (no pre-existing roles).
+- Inventories: cloud 699; replay@058 730; replay@075 1330.
+
+### 1. 001-058 drift (cloud vs replay@058)
+
+Raw differences: only in the cloud 5, only in the replay 36, differing 144 (128 functions, 16 policies).
+
+- Owner differences (cloud `postgres` vs replay `supabase_admin`, 83 functions) were normalised out and not counted.
+- ACLs were compared on PUBLIC/anon/authenticated/service_role, after dropping the owner/postgres/supabase_admin entries.
+- Tables, columns, constraints, triggers and enums: no other differences.
+
+Classified:
+
+| Category | Count | Real drift? | Evidence |
+|---|---|---|---|
+| Policies: qual md5 differs | 16 | **No** (deparse artifact) | The replay session's search_path for `supabase_admin` includes `auth`, so `pg_get_expr` prints `uid()`/`jwt()`. Re-qualifying them to `auth.uid()`/`auth.jwt()` makes all 16 md5s equal the cloud. |
+| citext functions: `proconfig search_path=public` only in the replay | 45 | **No** (artifact of the executing role) | 034's first loop alters every public function whose proconfig is NULL. In the cloud it ran as `postgres`, which doesn't own the citext functions, so they were skipped. In the replay it ran as superuser and succeeded. |
+| pgcrypto functions only in the replay | 36 | **No** (environment) | In the replay, `create extension pgcrypto` lands in public. The cloud has none in public, presumably because they're in Supabase's `extensions` schema (inferred: the inventory covers only public/payment_v2). |
+| App function bodies: md5 differs, identical after LF->CRLF | 78 | **No** (cosmetic) | Every one of the 83 app functions in the cloud stores a **CRLF** body. 78 equal the repo body byte-for-byte once `\n` becomes `\r\n`. The main checkout and this worktree have 001-058 as LF, so the CR came from the paste path into the SQL editor. |
+| ACL: `fn_purchase_card`, `fn_redeem_card` revoked from authenticated | 2 | **No** (expected) | The cloud has 075 applied and replay@058 does not. `fn_purchase_card_core` already matched. |
+| `fn_mark_shipped(uuid,text,text)` body | 1 | **YES** | The cloud body is the **009_rls_sweep.sql** version (CRLF); 014_fixes.sql's redefinition is not in the cloud. It lacks the seller-held guard (`if v_red.fulfiller_id is not null then raise 'use fn_confirm_shipment'`). The function is admin-only (`fn_require_admin`), so the impact is seller-held parcels being marked shipped on the wrong path, losing fulfilment credit. |
+| `fn_confirm_shipment(uuid,text,text)`, `fn_mark_default(uuid,text)`, `fn_record_proof(uuid,jsonb)` bodies | 3 | **YES** (unknown body) | They match no committed version of any migration: 122 historical blobs across 96 commits (`--all`), tried with LF/CRLF/rstrip/strip/tab variants. 013 and 014 each have a single commit, so what ran was an uncommitted draft or a direct SQL-editor edit. |
+| `fn_purchase_credit(uuid,bigint,text)` body | 1 | **YES** (unknown body) | Matches neither 011 commit. Moot after 063, which retires it. |
+| `sku_models.external_id`, `.gender`, `.source` (text not null default 'manual'), `.style_code`: only in the cloud | 4 | **YES** (the cloud is ahead of the repo) | No migration in any commit creates them. `scripts/seed-sneakerdb.mjs` calls this "the style_code migration", and `app/(market)/list/actions.ts` reads `style_code`. Indexes aren't in the inventory, so they're unknown. |
+| `skus.skus_art_url_check`: only in the cloud | 1 | Yes, harmless | Same md5 as `skus_art_url_https` (`CHECK (art_url IS NULL OR art_url ~ '^https://')`). It's a duplicate left by the hand-added column that 012 documents. |
+
+**Real 001-058 drift: 10 items** (5 function bodies, 4 columns, 1 duplicate constraint).
+None of them changes privileges. `fn_mark_shipped` is a logic regression on an admin-only path.
+
+The suspected edited-after-apply files, and what the catalog can and can't show (it compares only final bodies,
+grants and policies):
+
+- 013, 014 (not on the suspect list): **confirmed**. Their cloud bodies match no committed version (above).
+- 011: **confirmed** for `fn_purchase_credit` (2 commits, neither matches).
+- 035 (proven earlier), 034, 036, 038: the final effect matches HEAD. ACLs and policies are identical after
+  normalisation, and 034's config effect is consistent once the role that ran it is accounted for.
+- 001, 007, 030, 032, 037, 048, 051, 057: every surviving function body equals the HEAD body (CRLF only).
+  Edits to objects that a later migration replaced can't be detected from the catalog.
+
+### 2. Privilege drift: SECURITY DEFINER functions, effective EXECUTE for anon/authenticated
+
+Effective privilege is derived from proacl: PUBLIC, or the role itself (anon and authenticated have no role memberships).
+I checked this derivation against `has_function_privilege` on all 226 replay functions: 0 mismatches.
+
+- **cloud vs replay@058:** only `fn_purchase_card` and `fn_redeem_card` differ (cloud anon -/auth -, replay auth Y).
+  075 explains both.
+- **cloud vs replay@075** (what applying 059-075 changes): 9 SECURITY DEFINER functions lose EXECUTE.
+  063 does this on purpose: it retires the legacy paths and replaces each body with a `PAYMENT_V2_LEGACY_PATH_RETIRED` raise.
+  - auth Y -> -: `fn_accept_trade_offer`, `fn_cancel_listing`, `fn_confirm_sale_cancellation`, `fn_create_trade_offer`,
+    `fn_reserve_credit`, `fn_vault_mark_defaulted`, `fn_vault_mark_shipped`, `fn_vault_receive`.
+  - anon Y, auth Y -> -: `fn_list_card` (5-arg).
+
+  No function gains anon/authenticated EXECUTE.
+- For context (not drift; the repo and the cloud agree): the cloud has 66 SECURITY DEFINER functions.
+  46 are executable by authenticated and 8 by anon:
+  - `fn_approve_submission` (PUBLIC; guarded by `fn_require_admin()`)
+  - `fn_current_user_id`, `fn_is_admin`
+  - `fn_list_card` (PUBLIC; retired by 063)
+  - `fn_sale_history_public` (no guard; public by design)
+  - `fn_set_card_visibility` (PUBLIC; checks owner/admin)
+  - `trg_sku_model_propagate`, `trg_vaulted_instant_release` (trigger functions, which can't be called directly)
+
+### 3. The 059-075 exposure list (replay@075 with the cloud default ACLs)
+
+pre001 reproduced the cloud defaults exactly (its self-check passed). For `postgres` and `supabase_admin` in public,
+new tables get arwdDxtm, functions X and sequences rwU, granted to postgres/anon/authenticated/service_role.
+
+Replay result:
+
+- **Schema `payment_v2`:** ACL `{payment_v2_owner=UC/payment_v2_owner}`. anon/authenticated have no USAGE (059:36).
+  The cloud has no default-ACL row for payment_v2, so default privileges never apply there.
+- **payment_v2 tables (27) and sequences (3):** owner payment_v2_owner, RLS on, ACL owner-only.
+  anon/authenticated have no SELECT/INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER, no column privileges
+  and no sequence privileges.
+- **payment_v2 functions (25):** owner-only ACL. They're unreachable anyway without schema USAGE.
+- **Public functions created by 059-075** (all named `fn_payment_v2_*`, owner payment_v2_owner):
+  - **Executable by authenticated: 11.** All are SECURITY DEFINER. Each grant is **explicit in 063's `$grants$` block**,
+    not default-derived, and no later migration revokes any of them:
+    - `fn_payment_v2_admin_obligations()`, `_admin_queue()`, `_approve_refund(uuid)`, `_attach_candidate(uuid,text)`
+    - `_initiate(uuid,uuid,text,text)` [060, replaced in 066]
+    - `_list_card(uuid,uuid,integer,text,integer)`, `_own_attempts(uuid)`
+    - `_record_decision(jsonb)` [061, replaced in 067]
+    - `_redeem_card(uuid,uuid,jsonb,bigint)`, `_request_cancel(uuid,uuid)`, `_review_dispatch(uuid,uuid,text,text,text,timestamptz)`
+
+    Each is expected to do its own authorisation inside the SQL (not re-audited here).
+  - **Executable by anon and authenticated, through an explicit PUBLIC grant in 063:**
+    - `fn_payment_v2_legacy_guard()`: a trigger function, not SECURITY DEFINER, and not callable directly.
+    - **`fn_payment_v2_managed(text,jsonb)`, which is SECURITY DEFINER.** It is a boolean oracle: given a card, item or
+      listing UUID, it says whether that object is in v2 inventory or has a v2 sale. Low severity. PUBLIC is needed because
+      the SECURITY INVOKER trigger calls it. It could be narrowed later by making the guard SECURITY DEFINER.
+  - The other 26 `fn_payment_v2_*` functions are executable only by their worker role.
+- **Public tables altered by 059-075:**
+  - 063 revokes INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER, plus column-level INSERT/UPDATE/REFERENCES, from
+    PUBLIC/anon/authenticated/service_role on 9 tables: `cards, items, listings, orders, ledger_entries, redemptions,
+    vault_intakes, card_provenance, trade_offers`.
+  - **SELECT and MAINTAIN remain on those 9 tables** (both from the 001-era defaults).
+  - 063 also grants the listed table privileges to `payment_v2_owner` and adds `payment_v2_owner_access` policies.
+    Neither reaches anon/authenticated.
+- **Grants on 059-075 objects that exist only because of Supabase default privileges: none for anon or authenticated.**
+  - The `$seal$` blocks in 060/061/062 revoke ALL from PUBLIC/anon/authenticated/service_role on every public
+    `fn_payment_v2_%` function. Each runs inside its migration's single transaction, and 063/068/069 repeat the revoke.
+    So no committed boundary leaves a usable default grant. This comes from reading the transaction structure;
+    intermediate states were not snapshotted.
+  - The only surviving default-derived grant is **`postgres` EXECUTE** on the six SECURITY DEFINER functions created after
+    063, because 068/069 revoke only from PUBLIC/anon/authenticated/service_role: `fn_payment_v2_ack_context`,
+    `_attempt_context`, `_issuer_context`, `_read_chain_evidence`, `_store_chain_evidence`, `_verifier_context`.
+- Line endings: 059-067 are CRLF in this worktree checkout (the index is LF), so their replay md5s include CR.
+  Privileges are unaffected.
+
+### 4. Proposed forward fixes (TEXT ONLY; no files written)
+
+**URGENT, independent of 059-075: an existing cloud exposure found during this audit.**
+
+`public.public_profiles` is a simple auto-updatable view over `public.users` with `security_invoker=false`, and
+anon/authenticated hold `arwdDxtm` on it. That is the cloud ACL; the replay is identical.
+
+- Read-only proof in the replay: as `anon`, `EXPLAIN UPDATE public.public_profiles SET handle=handle WHERE id=...` and
+  `EXPLAIN DELETE FROM public.public_profiles ...` plan as `Update on users` / `Delete on users` with **no RLS filter**.
+- Negative case: `EXPLAIN UPDATE public.users ...` as anon does get the RLS filter.
+- `users` does not FORCE RLS, and its only trigger (`users_id_matches_auth`) checks only id=auth_id.
+
+So through PostgREST, anyone holding the anon key can likely PATCH any user's `handle, level, xp_total,
+portfolio_value_cents, show_collection, show_trade_history`, and DELETE any user that no FK references.
+**This was not executed anywhere and not tested on the cloud.** The Supabase REST endpoint stays reachable while Vercel
+is offline. The app only reads this view (`lib/api/contract.ts`, `components/auth/WelcomeForm.tsx`).
+
+Proposed:
+
+```sql
+-- 076_public_profiles_read_only.sql
+BEGIN;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN
+  ON public.public_profiles, public.items_proof_overdue
+  FROM PUBLIC, anon, authenticated;
+DO $post$
+DECLARE r text; v text; p text;
+BEGIN
+  FOREACH r IN ARRAY ARRAY['anon','authenticated'] LOOP
+    FOREACH v IN ARRAY ARRAY['public.public_profiles','public.items_proof_overdue'] LOOP
+      FOREACH p IN ARRAY ARRAY['INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN'] LOOP
+        IF has_table_privilege(r, v, p) THEN RAISE EXCEPTION '076: % still has % on %', r, p, v; END IF;
+      END LOOP;
+      IF has_any_column_privilege(r, v, 'INSERT') OR has_any_column_privilege(r, v, 'UPDATE') THEN
+        RAISE EXCEPTION '076: % still has column write on %', r, v; END IF;
+    END LOOP;
+  END LOOP;
+  IF NOT has_table_privilege('anon', 'public.public_profiles', 'SELECT') THEN
+    RAISE EXCEPTION '076: anon lost SELECT on public_profiles'; END IF;
+END $post$;
+COMMIT;
+```
+
+**(a) Bring the cloud's 001-058 drift to the intended state.**
+
+First, a founder read-only query to resolve the four unknown bodies:
+
+```sql
+select p.oid::regprocedure, md5(p.prosrc), pg_get_functiondef(p.oid)
+from pg_proc p
+where p.oid in ('public.fn_confirm_shipment(uuid,text,text)'::regprocedure,
+                'public.fn_mark_default(uuid,text)'::regprocedure,
+                'public.fn_record_proof(uuid,jsonb)'::regprocedure,
+                'public.fn_purchase_credit(uuid,bigint,text)'::regprocedure,
+                'public.fn_mark_shipped(uuid,text,text)'::regprocedure);
+-- plus: select indexdef from pg_indexes where schemaname='public' and tablename='sku_models';
+```
+
+Then `077_cloud_drift_catchup.sql`. CREATE OR REPLACE keeps the ACL. The definition below is the replay's
+`pg_get_functiondef` of 014's body, including the SET from 034:
+
+```sql
+BEGIN;
+-- repo catch-up: no-op on the cloud, makes a replay match it
+ALTER TABLE public.sku_models
+  ADD COLUMN IF NOT EXISTS external_id text,
+  ADD COLUMN IF NOT EXISTS gender      text,
+  ADD COLUMN IF NOT EXISTS source      text NOT NULL DEFAULT 'manual',
+  ADD COLUMN IF NOT EXISTS style_code  text;
+-- duplicate of skus_art_url_https (identical definition)
+ALTER TABLE public.skus DROP CONSTRAINT IF EXISTS skus_art_url_check;
+-- cloud still runs the 009 body; restore 014's seller-held guard
+CREATE OR REPLACE FUNCTION public.fn_mark_shipped(p_redemption_id uuid, p_carrier text, p_tracking text)
+ RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+declare v_red redemptions%rowtype;
+begin
+  perform fn_require_admin();
+
+  select * into v_red from redemptions where id = p_redemption_id for update;
+  if not found then raise exception 'redemption % not found', p_redemption_id; end if;
+
+  -- Seller-held parcels must go through fn_confirm_shipment, which is
+  -- what credits the seller's fulfilment count.
+  if v_red.fulfiller_id is not null then
+    raise exception
+      'redemption % is seller-held; use fn_confirm_shipment', p_redemption_id;
+  end if;
+
+  if v_red.status = 'shipped' then
+    raise exception 'redemption % is already shipped', p_redemption_id;
+  end if;
+
+  update redemptions set
+    status = 'shipped', carrier = p_carrier,
+    tracking_number = p_tracking, shipped_at = now()
+  where id = p_redemption_id;
+
+  update items set status = 'shipped' where id = v_red.item_id;
+end $function$;
+COMMIT;
+```
+
+- `fn_confirm_shipment`, `fn_mark_default`, `fn_record_proof`: after the export, if their bodies differ in substance,
+  re-issue the HEAD definitions (013/014 plus `SET search_path TO 'public'`) the same way.
+- `fn_purchase_credit` needs no fix (063 retires it).
+- The CRLF bodies need no fix.
+
+**(b) Are 059-075 safe to apply to the cloud as written?**
+
+**On privileges, yes.** No anon/authenticated grant on any 059-075 object comes from Supabase default privileges,
+so **no 076+ migration to revoke default grants is required.**
+
+Optional tidy-up (not security-critical):
+
+```sql
+REVOKE EXECUTE ON FUNCTION public.fn_payment_v2_ack_context(uuid), public.fn_payment_v2_attempt_context(text,text,text),
+  public.fn_payment_v2_issuer_context(uuid,text), public.fn_payment_v2_read_chain_evidence(text,uuid,text),
+  public.fn_payment_v2_store_chain_evidence(jsonb), public.fn_payment_v2_verifier_context(text,uuid) FROM postgres;
+REVOKE MAINTAIN ON public.cards, public.items, public.listings, public.orders, public.ledger_entries, public.redemptions,
+  public.vault_intakes, public.card_provenance, public.trade_offers FROM PUBLIC, anon, authenticated;
+```
+
+**Whether 059-075 will run on the cloud as written is NOT established.** Two blockers need clearing before any cloud apply:
+
+1. **The role that runs them (UNVERIFIED).**
+   - The replay ran as superuser `supabase_admin`. The cloud SQL editor runs as `postgres`, which in this image has
+     `rolsuper=f`, with `createrole_self_grant` empty.
+   - In PG16+, `CREATE SCHEMA payment_v2 AUTHORIZATION payment_v2_owner` (059:35) and the
+     `ALTER ... OWNER TO payment_v2_owner` statements (063/068/069) require the executing role to be able to SET ROLE
+     to payment_v2_owner.
+   - By default, a role created by a non-superuser CREATEROLE role gives its creator ADMIN only, not SET.
+     So 059 may fail atomically on the cloud.
+   - Needed: a replay of 001-075 as `postgres` in a fresh isolated container (this needs a new authorization), plus a
+     founder read-only `show createrole_self_grant;` on the cloud.
+   - If a `GRANT payment_v2_owner TO postgres` becomes part of the procedure, note that 063's postflight does not check
+     postgres's memberships.
+2. **CRLF.**
+   - 070:9, 071:10 and 072:9 compare `sha256(convert_to(prosrc,'UTF8'))` against fixed hashes **without** stripping
+     `chr(13)`. 065/066/067 do strip it.
+   - The cloud shows that SQL-editor pastes stored CRLF. If 068/069 are pasted the same way, 070-072 will refuse.
+     They fail closed, but they block.
+   - Apply from LF files with `psql -f`, or confirm `position(chr(13) in prosrc)=0` after 068/069.
+
+### Not verified / limits
+
+- Cloud privileges were derived from the exported ACL text, not from `has_*_privilege` on the cloud.
+  The derivation method was checked on the replay.
+- The public_profiles exposure is proven only at plan/permission level, and only in the replay. Nothing was executed.
+  The cloud behaviour is inferred from the identical ACLs and view definition (042).
+- Intermediate privilege states (between migrations) were not snapshotted. The argument rests on each migration being a
+  single transaction with its seal inside it.
+- Indexes, sequences in public, and the cloud's extension placement are outside the inventory query.
+
+Artifacts (outside the repo): the scripts, logs, inventories (`inv-058.txt`, `inv-075.txt`), diffs and `privs-075.json`
+are in the review ZIP in `C:\Users\Family\flexsoar-reviews\` (named in the report).
