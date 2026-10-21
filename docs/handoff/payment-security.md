@@ -5664,3 +5664,186 @@ Results:
   legacy timestamps include seller-review stamps (Codex analysis §3, founder query).
 - The app's error mapping for the new `sign in to …` strings belongs to track/data (above). The `fn_approve_submission`
   stamping of `authenticated_at` on seller review (041:54) remains, and is now neutralised at receipt only.
+
+## 2026-10-21 - Staging rehearsal of the production plan (059-078 on Supabase `flexsoar-staging`, as `postgres`)
+
+Founder authorization: AGENT_RULES §2 "Staging exception" (commit `3b96192`), this task only. Target: Supabase project
+`flexsoar-staging` (ref `krkydvvvtszceutprfmy`), PostgreSQL **17.11**, empty, `staging_marker` schema present. Production is
+**17.6** (see "Version gap"). No production connection was made. The URI was read from the secrets file by a wrapper and never
+printed. A scan of every log and artifact found no occurrence of the password or the URI.
+
+### Method
+
+- **Wrapper, before connecting:** the wrapper refuses unless `krkydvvvtszceutprfmy` is in the URI host or user. It matched in the
+  user (`postgres.<ref>`, session pooler). Credentials go to psql through PG* environment variables, never through argv.
+- **In-session guard, first in every session (ON_ERROR_STOP):** stops unless `staging_marker` exists with its comment,
+  `auth.users` has 0 rows, and `current_user` and `session_user` are both `postgres`. Negative tests: a wrong ref was refused
+  before connecting, and a missing marker raised before the next statement.
+- **Files:** applied with `psql -X -v ON_ERROR_STOP=1 -f`, one session per file, from LF copies taken from git blobs.
+  059-067 are CRLF in this worktree's checkout but LF in the index.
+- **Connection failures:** the pooler dropped 4 connections during setup (`SSL error: unexpected eof` / `server closed the
+  connection unexpectedly`), at 011, 026, 067 and the first step-3 query, always before any session existed. Only that case was
+  retried. After the 011 drop, a read-only check confirmed 011 had left nothing behind.
+
+### 1. Reproducing production
+
+| Step | Result |
+|---|---|
+| 001-058 | rc=0 for all. Needed only the founder-ruled pre-022b `DROP FUNCTION fn_list_card(uuid,uuid,integer,payout_method)`. 052 needed nothing: `supabase_realtime` already exists. |
+| 5 production bodies (from `cloud-unknown-bodies-20261021.csv`, sha `f6c95f85…`, CRLF verbatim) | md5, owner, SECURITY DEFINER flag, search_path and ACL all equal the production export for all 5. |
+| 075, 076 | rc=0. |
+| 077 | rc=0. **The preguard passed**, which proves 077 matches production's starting state. Its only NOTICE: `skus_art_url_check` does not exist (staging never had it). |
+
+Residual drift, production export (taken 2026-10-20 at 001-058 + drift + 075) vs staging@075:
+
+- **Only in production (5):** the 4 `sku_models` columns and `skus_art_url_check`. 077 adds the columns; after 077 they equal
+  production's definitions exactly. 077 drops production's constraint.
+- **CRLF only:** 75 bodies equal once LF→CRLF. Three more (`fn_require_actor`, `fn_require_self_or_admin`,
+  `fn_resolve_trade_offer`) differ only by CRLF; 077's preguard pins their CR-stripped md5s.
+- **ACL order:** `fn_is_admin` has the same grantees in a different order.
+- **Nothing else differs:** no tables, columns, constraints, triggers, enums or policies.
+- **Not covered by the inventory:** indexes and column order.
+- **Not exercised on staging:** 077's "columns already exist" branch, which only production takes.
+
+### 2. The rehearsal (what production runs next)
+
+- **059** ran in one session with `SET createrole_self_grant = 'set, inherit';`. rc=0; the setting was confirmed `set, inherit`
+  in-session, and a new session's default is still `''`.
+  - 059:37 printed `WARNING: no privileges were granted for "auth"`. This is expected on Supabase: `postgres` holds USAGE on
+    `auth` without grant option (`postgres=U/supabase_admin`).
+  - Memberships created for `postgres` on all six roles: one row `[ADMIN] by supabase_admin` and one row `[INHERIT,SET] by postgres`.
+- **060-067** passed without the setting. **No other file needs it:** none of 060-078 creates a role.
+- **068 FAILED** atomically (rolled back, objects confirmed absent):
+  `ERROR: permission denied for schema public / CONTEXT: ALTER FUNCTION fn_payment_v2_ack_context(uuid) OWNER TO payment_v2_owner`.
+  - Cause: 063:177 revokes CREATE on public from `payment_v2_owner`. 068 creates new public functions and transfers them to
+    `payment_v2_owner`, and the new owner needs CREATE on the schema. Superusers skip that check, which is why the container
+    runs (as supabase_admin) passed. 069:80 has the same pattern.
+  - **Founder decision:** bracket 068/069.
+- **`payment_v2.actor()` was unusable on Supabase.** It is owned by `payment_v2_owner` and read `auth.uid()`, and 059:37 could
+  not grant `payment_v2_owner` USAGE on `auth`. A rolled-back simulated signed-in call returned
+  `42501 permission denied for schema auth` (context `payment_v2.actor() line 3`). Every caller-resolving v2 RPC failed closed.
+  **Founder decision:** a new migration, 069c.
+- **New forward migrations** (this track; none of 001-078 was edited):
+  - `067b_payment_v2_owner_create_on_public.sql`: `GRANT CREATE ON SCHEMA public TO payment_v2_owner`.
+    - Preguard: owner NOLOGIN/NOSUPER, 059-067 applied, 068 not applied, owner lacks CREATE, no worker is a member of owner.
+    - Postguard: the grant took effect.
+  - `069b_payment_v2_owner_revoke_create_on_public.sql`: revokes the grant and asserts
+    `has_schema_privilege('payment_v2_owner','public','CREATE')` is false.
+    - Idempotent (run twice on staging, both rc=0), standalone, and checks nothing about 068/069.
+    - **If 068 or 069 fails, run 069b immediately.**
+  - `069c_payment_v2_actor_current_user_id.sql`: the only change to `actor()` is replacing
+    `SELECT id INTO v FROM public.users WHERE auth_id=auth.uid();` with `v:=public.fn_current_user_id();`, plus
+    `GRANT EXECUTE ON FUNCTION public.fn_current_user_id() TO payment_v2_owner`. Self-relative, in the style of 074/078.
+    - Preguard: one `actor()` overload with the 060 owner/definer/search_path; the fragment occurs exactly once; no other `auth.`
+      reference; `fn_current_user_id()` is the 004 body (CR-stripped md5 `58bf7a57…`), definer, owned by postgres,
+      `search_path=public`; the `users_id_matches_auth` trigger is enabled with the 004 body (md5 `4893a65a…`); zero users rows
+      with `id <> auth_id`.
+    - Postguard: all metadata identical except the body; no `auth.` reference left; one overload; owner can execute
+      `fn_current_user_id()`; anon/authenticated cannot reach `actor()`.
+    - Production's export has identical CR-stripped bodies for both pinned functions. Re-applying 069c refuses.
+    - Why 069c and not folded into 069b: 069b must stay the minimal emergency revoke.
+    - Why number 069c and not 074b: `actor()` is defined only in 060, and nothing in 061-078 replaces, re-owns or re-grants it,
+      so apply order equals filename order.
+- **Sequence that passed:** 067b, 068, 069, 069b, 069c, 070, 071, 072, 073, 074, 078. All rc=0, no WARNING/NOTICE. The body-hash
+  guards in 070-072 passed on the LF copies. 078's guards passed: no network has funding enabled, and inventory is empty.
+- **The users.id = auth_id condition (founder):**
+  - **The invariant is enforced, not assumed.** 004:96-107 `trg_users_id_matches_auth` (BEFORE INSERT OR UPDATE on users)
+    raises if `auth_id IS NOT NULL AND id <> auth_id`.
+  - Provisioning sets both: `lib/db/provision.ts:219` inserts `{ id: authUser.id, auth_id: authUser.id }`, and 006/040's
+    `users_self_insert` checks `auth_id = auth.uid() AND id = auth.uid()`.
+  - Rows with a NULL `auth_id` (seeds/imports) can never match `auth.uid()`.
+  - `fn_current_user_id()` (004:25) runs exactly the query the old `actor()` ran, so `actor()` still returns `users.id`, never
+    the auth id. The swap changes which role reads `auth`, not the value.
+  - Every place `actor()`'s result is compared or stored (final catalog, 11 functions):
+    - `staff.user_id` in `admin_obligations`, `admin_queue`, `approve_refund`, `review_dispatch`, `record_decision`;
+    - `attempts.buyer_id` in `attach_candidate`, `own_attempts`, and `initiate` (lookup and insert);
+    - in `initiate` also: `sales.seller_id`, `users.id` (country check), `wallet_accounts.user_id`, and the `sha256(uuid_send(u))`
+      attempt commitment;
+    - the client-supplied parameters `p_seller_id` (`list_card`), `p_user_id` (`redeem_card`) and `p_actor` (`request_cancel`).
+    - All of them are `users.id`-domain values.
+  - Rolled-back probe after 069c:
+    - signed-in caller with a users row: `fn_payment_v2_own_attempts` returns `[]`;
+    - session whose sub has no users row: `42501 PAYMENT_V2_SIGN_IN`;
+    - no claims at all: `42501 PAYMENT_V2_SIGN_IN`. Consistent with 077.
+- **Worker membership (founder decision: no 079).** `postgres` keeps `[ADMIN] by supabase_admin` on every payment_v2 role, and
+  only a superuser can revoke that. With ADMIN, `postgres` could grant itself SET/INHERIT again at any time, so revoking those
+  rows would be cosmetic.
+  - The real boundary is `require_role` (060:5-9): a non-superuser session must hold exactly one worker role and must NOT be a
+    member of `payment_v2_owner`, `service_role`, `authenticator`, `authenticated` or `anon`. `postgres` is a member of the last
+    four (and of `payment_v2_owner`).
+  - Proven on staging: every worker-gated 078 scenario was refused for `postgres` with
+    `42501 PAYMENT_V2_DEDICATED_CONNECTION_REQUIRED`, although `postgres` holds SET+INHERIT on all five worker roles.
+  - `postgres` must keep SET+INHERIT on `payment_v2_owner`: 068 runs `SET LOCAL ROLE payment_v2_owner`, and CREATE OR REPLACE
+    of owner-owned functions requires ownership privileges.
+
+### 3. Verification on staging (read-only unless noted)
+
+- **anon/authenticated (effective has_*_privilege) on everything 059-078 created** (62 functions, 27 tables, 3 sequences, schema
+  `payment_v2`): exactly **13 functions**, all from 063's explicit `$grants$` block, and nothing unexpected:
+  - authenticated only: `fn_payment_v2_admin_obligations`, `_admin_queue`, `_approve_refund`, `_attach_candidate`, `_initiate`,
+    `_list_card`, `_own_attempts`, `_record_decision`, `_redeem_card`, `_request_cancel`, `_review_dispatch`;
+  - PUBLIC (anon and authenticated): `fn_payment_v2_managed(text,jsonb)` and `fn_payment_v2_legacy_guard()`.
+  - No table, sequence, column or `payment_v2` schema privilege.
+- **Funding:** `payment_v2.networks` has 0 rows, 0 with `funding_enabled`, and the column default is `false`.
+- **077 checks** (unmodified `checks077.py`, rolled-back simulated PostgREST sessions, no worker login): all 30 ran. Their RESULT
+  and SIDE lines are **identical** to the container's final 001-078 run: 24/30 against the "after" expectations, and the 6
+  differences are 063's intended retirement of `fn_cancel_listing`/`fn_list_card`.
+- **078 checks** (unmodified `checks078.py`): the 4 that need no worker login passed:
+  - three correspondence refusals: enrol+prepare warehouse unauthenticated mode 1, seller+stamp mode 1, warehouse NULL mode 0;
+  - the manual cash order on a warehouse item keeps its hold.
+  - The other 8 need a dedicated worker login (refused for `postgres`, as above) and were not run end-to-end here.
+  - All harness data rolled back; afterwards users, networks, inventory, staff and orders all have 0 rows.
+- **Post-migration fingerprint** (`inventory-query.sql`, unmodified): **1295 objects**, sha256
+  `45f34be99f5fc6435fa6e50c3c086c379149b06b946dce9794dc38d0ec335cc4`, kept in the review ZIP.
+- **The runbook's read-only `verify-post.sql`** returns V1-V9 on staging:
+  - V1-V2: the 13 grants above; funding off.
+  - V3: 27 tables, 3 sequences, 25 payment_v2 functions, 37 public `fn_payment_v2_*`, RLS on for all of them.
+  - V4: owner has no CREATE on public, no `auth` access; it can execute `fn_current_user_id`; `actor()` has no `auth.` reference.
+  - V5: memberships as above.
+  - V6: CR-stripped body md5s.
+  - V7: `vaulted_instant_release` gone, `fn_purchase_credit` gone, 0 legacy functions executable by authenticated.
+  - V8: invariant holds.
+  - V9: a session with no users row gets PAYMENT_V2_SIGN_IN.
+- **Non-secret identifiers `postgres` can read:**
+  - `pg_control_system().system_identifier` = **7692131729119822239** on staging. Unique per cluster; the production guard pin.
+  - `cluster_name` = `main` and `current_database()` = `postgres`. Generic, not useful as pins.
+  - Also readable: `data_directory`, `config_file`, `hba_file`.
+
+### Version gap: staging 17.11 vs production 17.6 (same major)
+
+What this plan relies on, and whether a minor release could change it:
+
+- `createrole_self_grant` and the `inherit`/`set` options in `pg_auth_members`: PG16+ features, unchanged across 17.x.
+- The new-owner CREATE check in ALTER ... OWNER: long-standing behaviour.
+- `has_*_privilege` semantics and `pg_get_functiondef` output, which 069c uses for fragment replacement: stable within a major.
+- None of these is plausibly different in 17.6, but none was tested on 17.6.
+- **The larger risk is platform configuration, not the version.** The runbook's preflight therefore compares production's
+  `public`/`auth` ACLs, the `pg_default_acl` fingerprint (24 rows, md5 `79ee8190…`), the `postgres` role attributes and
+  memberships, and the pinned function bodies against staging before anything is applied.
+
+### Production runbook
+
+`C:\Users\Family\flexsoar-reviews\prod-runbook-059-078.md`, with supporting files in
+`C:\Users\Family\flexsoar-reviews\prod-runbook-059-078\`:
+
+- `prod.py`: wrapper. `<PROD-REF>` placeholder; refuses the staging ref and the staging URI.
+- `prod-guard-readonly.sql`: read-only session guard for steps 0 and 7.
+- `prod-guard.sql`: write session guard. `<PROD-SYSID>` placeholder; refuses the staging cluster.
+- `preflight-prod.sql`, `verify-post.sql`, `prod-common.sh`, `export-lf.sh`.
+- `manifest-lf.sha256`: the 20 file hashes that passed on staging.
+
+Negative tests against staging: the production wrapper refused the placeholder, the staging ref and the staging URI before
+connecting. The production guards raised inside a real staging session for: `staging_marker` exists, placeholder pin,
+pin = staging cluster, pin ≠ actual cluster.
+
+### Not verified / open
+
+- **End-to-end worker RPCs on Supabase:** 8 of the 12 078 scenarios and every worker role path need a dedicated worker login,
+  which this task did not create. Their privileges are as designed (V1/V5 and the 078 postguard grants), but no call was made.
+- **Production values** (`system_identifier`, ACLs, users invariant): the runbook makes the founder read and compare them first.
+- **077's "columns already exist" branch** was not exercised on staging; production takes it. The container test covered it.
+- **Supabase dashboard role:** whether the SQL editor's session is the same `postgres` setup as the pooler was not re-checked.
+  The runbook uses psql, not the editor (070-072 also require LF).
+- **Indexes** are outside the inventory, so production's indexes on the four `sku_models` columns are still unknown.
+- **`graphify update .`** was not run. It would rewrite tracked graph files outside this task's allowed commit set.
+- **Staging state at hand-off:** 001-078 plus 067b/069b/069c applied, no data, `staging_marker` intact.
