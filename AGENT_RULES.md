@@ -76,7 +76,15 @@ delete another track's.
   isolated container. Authorization is per task, never standing. Never target
   the cloud Supabase project or any shared or production database. Never edit
   applied migrations; fixes are new forward migrations. Without that explicit
-  authorization, the prohibition above applies in full.
+  authorization, the prohibition above applies in full.   **Staging exception:** only when the current task prompt explicitly authorizes it, an
+  agent on `track/payment-security` may connect over the network to the Supabase project
+  `flexsoar-staging` (project ref `krkydvvvtszceutprfmy`) and NO other cloud project, and there
+  run migration files and task-specified SQL as `postgres`. Every session must first pass a
+  guard that fails unless: schema `staging_marker` exists, `auth.users` has zero rows, and
+  the connection host/user contains `krkydvvvtszceutprfmy`. The URI is read from
+  `C:\Users\Family\secrets\flexsoar-staging-db-url.txt` and must never be printed, logged,
+  copied or committed. Staging holds no user data and is not a live database; only the
+  founder may reset it. This exception never extends to the production project.
 - Never edit `package.json`; request dependencies in `DEPS.md` as
   `- package@version — why` for a human to install.
 - Never edit `app/globals.css` unless on `track/design`; Tailwind v4 tokens
