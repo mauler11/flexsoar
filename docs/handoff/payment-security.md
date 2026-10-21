@@ -5503,3 +5503,164 @@ REVOKE MAINTAIN ON public.cards, public.items, public.listings, public.orders, p
 
 Artifacts (outside the repo): the scripts, logs, inventories (`inv-058.txt`, `inv-075.txt`), diffs and `privs-075.json`
 are in the review ZIP in `C:\Users\Family\flexsoar-reviews\` (named in the report).
+
+## 2026-10-21 - Forward migrations 077 and 078 authored and tested (isolated replay only; NOT applied to cloud)
+
+Founder authorization (AGENT_RULES §2 exception, this task only): create `077` and `078` and execute them only in the
+replay container `flexsoar-schema-replay-20261021-0031`. No cloud access, no network, no npm install.
+
+### Files
+
+- `supabase/migrations/077_drift_repair_and_null_identity_guards.sql`. Starts from the **cloud** state (001-058 + 075 + 076,
+  with 013/009-era bodies). Apply it **before** 059-074. Its preguard pins every body it replaces to the founder export
+  `cloud-unknown-bodies-20261021.csv` (sha256 `f6c95f85…c2f524e3`), using CR-stripped md5. A numeric 001→078 replay
+  therefore stops at 077 by design.
+- `supabase/migrations/078_vaulted_requires_authentication.sql`. Requires 059-074. Self-relative fragment repair in the
+  style of 074.
+
+### 077: what changed, and why
+
+All five CSV bodies hash exactly to the cloud inventory md5s (as CRLF). The cloud's `fn_confirm_shipment`,
+`fn_record_proof` and `fn_mark_default` are **013** bodies (014 never landed for them), and `fn_mark_shipped` is **009**'s.
+
+Null-identity audit: every SECURITY DEFINER function in the cloud state that derives the caller from
+`users.auth_id = auth.uid()`, directly or through `fn_current_user_id()`. The list was taken from the live catalog,
+not grep.
+
+| Function | Compares | Fails open? | Action |
+|---|---|---|---|
+| fn_confirm_shipment | fulfiller_id (nullable) IS DISTINCT FROM caller | **YES**: no-users-row session ships a warehouse parcel (proven) | null refusal |
+| fn_record_proof | custody_holder_id (nullable) IS DISTINCT FROM caller | guard yes; blocked downstream by admin-only fn_set_item_photos | null refusal |
+| fn_require_actor | caller IS DISTINCT FROM p_claimed (param) | **YES**: with p_actor NULL, fn_cancel_listing then tests `seller_id <> NULL` and cancels ANY listing (proven) | null refusal in the session branch |
+| fn_require_self_or_admin | caller IS DISTINCT FROM p_user | guard yes; no effect (balance of NULL = 0) | null refusal (it is a guard) |
+| fn_resolve_trade_offer | `recipient_id <> v_user` / `initiator_id <> v_user` | **YES**: `<>` NULL skipped both raises; any open offer resolved and its hold released (proven) | null refusal |
+| fn_payout_method_for_user | caller IS DISTINCT FROM p_user | guard yes; the body then raises 'no country' | none (refused, proven) |
+| fn_release_credit_hold, fn_set_card_visibility, fn_vault_mark_shipped, fn_mark_notification_read | NOT NULL columns, or a null check first | no | none |
+| fn_list_card, fn_redeem_card, fn_cancel_listing (via fn_require_actor) | `<>` after the helper | fixed by the helper; retired by 063 | none |
+| fn_purchase_card_core | caller IS DISTINCT FROM p_buyer_id | service_role-only after 075 | none |
+| fn_submit_listing, fn_reserve_credit, fn_set_country, trade create/accept, fn_ensure_sku_variant | null check first | no | none |
+
+New refusals all raise `sign in to …` with SQLSTATE 42501. `lib/db/errors.ts` maps 42501 to FORBIDDEN. **track/data**
+may want UNAUTHENTICATED rules for: `sign in to confirm a shipment`, `sign in to record proof`, `sign in to act on this account`,
+`sign in to read a balance`, `sign in to resolve a trade offer`.
+
+Also:
+
+- (b) `fn_mark_shipped` gets 014's seller-held guard back.
+- (c) `fn_purchase_credit(uuid,bigint,text)` is dropped. The preguard proves no body references it and nothing depends on it.
+  063's retirement loop is driven by name, so it is unaffected.
+- (d) `sku_models.external_id/gender/style_code text` and `source text NOT NULL DEFAULT 'manual'` are added IF NOT EXISTS,
+  with the existing-definition check.
+- (d) `skus_art_url_check` is dropped after proving it is an exact duplicate of `skus_art_url_https`: same contype `c`,
+  identical `pg_get_constraintdef` (md5 `c2915a82…`), both validated, same `connoinherit`.
+
+Owner, ACL, SECURITY DEFINER and `search_path=public` are asserted unchanged. One overload each. EXECUTE stays
+{authenticated, service_role} with no anon access. Each new body's md5 is pinned in the postguard.
+
+### 078: decisions
+
+- **prepare_sale (060:96)**: mode is derived as seller → 0, warehouse AND authenticated_at → 1, anything else → `SALE_FENCED`.
+  The item row is already locked by `lock_card`.
+- **correspondence (063:41)**: the inventory branch uses the same derivation. Quarantine stays the storage-only exception.
+- **record_attestation (061:153)**: KEEP warehouse custody on receipt (it is the truthful physical location), but CLEAR
+  `authenticated_at/by` in the same update.
+  - Why: an escrow sale is mode 0, so the item was seller-held. Any timestamp it carries came from seller review
+    (`fn_approve_submission`, 041:54).
+  - The baseline proved the problem: receipt alone made the item `vaulted=true` while the card was still pending_vault,
+    and it **stayed vaulted after an authentication FAIL and refund**.
+  - Release re-stamps the timestamp from the attested pass.
+  - No-window argument: between receipt and release the card is pending_vault, the listing is sold, the buyer holds the
+    claim, the sale fence is up and inventory is mode 0. After a refund, inventory is quarantined. Prepare refuses mode 1
+    without the conjunction.
+- **050 trg_vaulted_instant_release**: DETACHED and dropped.
+  - Proof, from the catalog and in the preguard: after 063 the only body that inserts orders is
+    `fn_payment_v2_reconcile_event`, which passes `seller_payout`/`payout_release_at` NULL (the trigger returns at its first
+    IF), and anon/authenticated/service_role have no INSERT on orders.
+  - Its only remaining reach was a manual owner SQL insert. The baseline showed that insert's 7-day hold zeroed for a
+    warehouse item.
+- 078 refuses if any network has funding enabled, or if any unquarantined inventory row violates the new rule.
+
+### Test run (container `6ef7375a…`, PG 17.11, verified Id / NetworkMode none / PortBindings {} / Privileged false / 3 ro mounts / lo only before each step)
+
+Founder rulings this session:
+
+1. The hash-verified prereq is streamed with only line 18's DB-name literal substituted (orig `4295d81f…`,
+   stream `fffc8553…`).
+2. Ownership is normalised to the cloud's owners: 125 public objects to postgres (83/83 function owners now match the
+   cloud), and the test DB owner set to postgres, as the `postgres` DB is in this image.
+3. 059-074, and 078 as a fallback, were run as supabase_admin when postgres failed.
+4. 077 uses minimal guards on the cloud bodies.
+5. The drift-audit DB `flexsoar_schema_replay_20261020` and its six payment_v2 roles were dropped (evidence is in the
+   486369d ZIP; 0 shdepend).
+
+DB: `flexsoar_mig_test_20261021`. Sequence:
+
+1. pre001, 001-058 (+pre022b/pre052), 075, 076 as supabase_admin.
+2. The 5 cloud bodies loaded verbatim from the CSV, plus the cloud-only `skus_art_url_check`.
+3. Ownership normalised.
+4. 077 as **postgres**.
+5. 059 as **postgres**, which failed.
+6. 059-074 as supabase_admin.
+7. 078 as **postgres**, which failed.
+8. 078 as supabase_admin.
+
+Results:
+
+- **077 as postgres: rc=0.** The first attempt failed with `permission denied for schema public` and rolled back atomically.
+  Cause: the test DB was owned by supabase_admin, so postgres had no CREATE through pg_database_owner. That is
+  replay-only; it was fixed by ruling 2. A re-apply is refused by the preguard (`fn_mark_shipped … found md5 682fc945…`).
+- **059 as postgres: FAILS atomically.** It got through the preflight and six `CREATE ROLE`s, then hit
+  `ERROR: must be able to SET ROLE "payment_v2_owner"` at `CREATE SCHEMA payment_v2 AUTHORIZATION payment_v2_owner`
+  (059:35). No roles or schema were left behind. `createrole_self_grant` is empty and postgres is NOSUPERUSER CREATEROLE.
+- **078 as postgres: FAILS atomically** with `must be owner of function fn_payment_v2_record_attestation` (owner
+  payment_v2_owner).
+- **Proposal (minimal; no migration edit; not tested end-to-end):** run 059 in a session with
+  `createrole_self_grant = 'set, inherit'`, e.g. `PGOPTIONS="-c createrole_self_grant=set,inherit" psql -X -v ON_ERROR_STOP=1 -f 059…`
+  or a first line `SET createrole_self_grant = 'set, inherit';` in the editor session.
+  - Rolled-back probes with a throwaway role, as postgres:
+    - default → the same 059 error;
+    - `'set'` → schema and OWNER TO succeed, but a later CREATE OR REPLACE of an owner-owned function fails
+      `must be owner` (this would break 064-074 and 078);
+    - `'set, inherit'` → all three succeed.
+  - Consequence: postgres becomes a SET+INHERIT member of all six payment_v2 roles. 063's postflight does not check
+    postgres. Worker RPCs still refuse postgres because `require_role` requires exactly one worker membership for
+    non-superusers. Optionally `REVOKE payment_v2_issuer, payment_v2_verifier, payment_v2_settler, payment_v2_executor,
+    payment_v2_notifier FROM postgres` after 063.
+  - Founder read-only prerequisites: `show server_version; show createrole_self_grant;` on the cloud.
+- **077 checks: 30/30 before, 30/30 after.** Each check is one rolled-back transaction under a simulated PostgREST
+  session (SET LOCAL ROLE + `request.jwt.claims`).
+  - Before (cloud bodies) proves the fail-opens: a ghost session ships a warehouse redemption, cancels a listing and
+    resolves trade offers; an admin can mark a seller-held parcel shipped.
+  - After: each is refused with 42501 and has no side effect. Holder, admin, recipient/initiator and service_role paths
+    still succeed.
+  - Rerun on the final 001-078 DB: 24/30 identical. The 6 differences are 063's retirement of
+    fn_cancel_listing/fn_list_card (`permission denied`).
+- **078 checks: 12/12 before (074 state), 12/12 after.** Synthetic v2 fixtures were ported from
+  tests/payment-db/01/02, plus retained-chain evidence for 068/069.
+
+  | Scenario | 074 | 078 |
+  |---|---|---|
+  | warehouse+authenticated → prepare | mode 1 | mode 1 |
+  | warehouse+NULL enrolled mode 1 → prepare | **mode 1 (direct sale)** | `PAYMENT_V2_CORRESPONDENCE: inventory` |
+  | enrolled authenticated, stamp cleared, then prepare | **mode 1** | `PAYMENT_V2_SALE_FENCED` |
+  | seller (with/without lister stamp) → prepare | mode 0 | mode 0 |
+  | seller+stamp enrolled mode 1 / warehouse+NULL enrolled mode 0 | refused | refused |
+  | quarantined warehouse+NULL → prepare | SALE_FENCED | SALE_FENCED |
+  | escrow receipt (lister-stamped item) | **vaulted=true**, pending_vault | vaulted=false, pending_vault |
+  | receipt + auth pass + release + ack | attested, mode 1, active | attested, mode 1, active |
+  | receipt + auth fail + refund | **vaulted=true**, quarantined | vaulted=false, quarantined |
+  | manual cash order, warehouse item | **hold released now** | hold kept |
+- `npx tsc --noEmit` rc=0. `npm test`: 20 files, **535/535**. `npm run build` rc=0.
+
+### Not verified / open
+
+- The cloud's real ACL, owner and `datdba` were taken from the founder export and from this image, not from has_*_privilege
+  on the cloud. Whether `postgres` can `SET createrole_self_grant` on the cloud's PG version is unverified.
+- Cloud indexes on the four sku_models columns are unknown (indexes are outside the inventory). 077 creates none.
+- **tests/payment-db/01_fixtures.sql** builds mode-1 fixtures as warehouse items with **NULL authenticated_at**. After 078
+  they are refused by correspondence (by design). Updating them is outside this lane: the fixture's item insert needs
+  `authenticated_at` for mode 1.
+- Data audit still recommended before enrolling legacy warehouse items. The conjunction trusts the columns, and
+  legacy timestamps include seller-review stamps (Codex analysis §3, founder query).
+- The app's error mapping for the new `sign in to …` strings belongs to track/data (above). The `fn_approve_submission`
+  stamping of `authenticated_at` on seller review (041:54) remains, and is now neutralised at receipt only.
