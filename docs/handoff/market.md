@@ -1315,3 +1315,37 @@ Four follow-ups from the Courtyard revamp pass, one commit.
      Meld KYB (paperwork), the documented long pole.
    - `NEXT_PUBLIC_ENABLE_PRIVY_CHECKOUT=1` gates the whole FundingOptions
      surface; harmless if unset in Vercel (panel simply won't render).
+## 2026-10-21 — C10 pre-deploy: wallet funding paused, copy, crons (shipped)
+
+Lane widened by the founder for this task (C10 deploy checklist §1, §2, §5, §8).
+
+1. **Funding paused at the call site.** `components/market/FundingOptions.tsx`
+   exports `fundingAvailable(): boolean` = `FUNDING_AVAILABLE`
+   (`lib/db/payment-v2.ts`, constant, no env override) **AND**
+   `NEXT_PUBLIC_PRIVY_APP_ID` set. Env can only take funding away. New
+   `FundingPausedNotice()` renders `PAYMENTS_NOT_LIVE` from
+   `app/(market)/payout-copy.ts`. `FundingOptions`, the wallet Deposit tab
+   (`WalletDepositPanel`), the Withdraw tab (`WalletWithdrawPanel`) and
+   `SendDialog` render the notice and never mount a Privy hook while it is
+   false; `useFundRail().start()` re-checks the gate before `addFunds`.
+   **Correction to the 2026-09-16 entry above:** `NEXT_PUBLIC_ENABLE_PRIVY_CHECKOUT`
+   never gated FundingOptions (`isPrivyCheckoutEnabled()` had no caller
+   there). The gate is now `fundingAvailable()`.
+   - `SendDialog` no longer has a no-provider signing fallback: without
+     funding it renders only the notice.
+   - Flipping `FUNDING_AVAILABLE` to true re-enables a **mainnet** funding
+     destination (`lib/solana/privy.ts` `FUNDING_CHAIN`). Review that before
+     the payments launch.
+2. **Copy.** IntakeWizard review shows payout as `SELLER_PAYOUT_METHOD_LABEL`
+   (USDC) plus `PAYMENTS_NOT_LIVE`; no "cash"/"credit". Approval email
+   (`lib/email/send.ts`) now says purchases open once payments go live.
+3. **`vercel.json`**: both crons (process-payouts, sync-comps) removed.
+   Existing dashboard cron jobs still need disabling by hand; keep
+   `CRON_SECRET` absent.
+4. **Tests**: `tests/funding-paused.test.tsx` (23, SSR render with a Privy
+   mock that records and throws on any hook call) + 2 in `tests/email.test.ts`.
+   Suite 535 → 560, 21 files.
+
+Unverified: browser behaviour (no jsdom in repo; SSR only), real Privy
+hook-without-provider behaviour (mocked), and a mutation check of the gate
+(denied by the permission classifier).

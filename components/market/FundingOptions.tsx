@@ -10,7 +10,15 @@
  *   - crypto-only (Transfer Crypto row): opens straight at Add funds,
  *     with conversion/routing handled by Relay.
  *
- * Always live — the wallet-only decision made funding the front door.
+ * PAUSED while payments aren't live: `fundingAvailable()` is false, every
+ * entry point renders `FundingPausedNotice` instead, and the Privy hooks
+ * (and so addFunds) never mount. The gate is FUNDING_AVAILABLE from
+ * lib/db/payment-v2 — a constant with no env override — AND the Privy
+ * provider being configured, so a missing NEXT_PUBLIC_PRIVY_APP_ID can only
+ * pause funding, never enable it, and no hook ever runs without its provider.
+ * The funding destination below is hard-coded mainnet; that is exactly why
+ * nothing may reach it until the payments launch flips the constant.
+ *
  * Deliberately narrower than the reference screenshots: no Exchange /
  * Cash App rows (provider- and region-specific; Cash App is US-only), no
  * promo rows. What renders is what can actually run.
@@ -24,6 +32,8 @@ import { useState } from "react";
 import { useAddFunds, usePrivy } from "@privy-io/react-auth";
 import { Button } from "@/components/ui/Button";
 import { Banner } from "@/components/market/Banner";
+import { PAYMENTS_NOT_LIVE } from "@/app/(market)/payout-copy";
+import { FUNDING_AVAILABLE } from "@/lib/db/payment-v2";
 import {
   FUNDING_CHAIN,
   FUNDING_ENV,
@@ -32,6 +42,28 @@ import {
 } from "@/lib/solana/privy";
 
 export type FundMode = "all" | "fiat" | "crypto";
+
+/**
+ * Whether any funding or send rail may mount. Both halves must hold: the
+ * payments launch constant (no env override) and a configured Privy
+ * provider. Env can only take funding away, never grant it.
+ */
+export function fundingAvailable(): boolean {
+  return FUNDING_AVAILABLE && Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
+}
+
+/**
+ * What every Deposit / Add funds / Transfer crypto / Send surface shows while
+ * funding is unavailable. Hook-free, so it renders with or without Privy.
+ */
+export function FundingPausedNotice() {
+  return (
+    <Banner tone="info" title="Payments aren't live yet">
+      {PAYMENTS_NOT_LIVE} Deposits, card top-ups, crypto transfers and sends
+      are paused until then.
+    </Banner>
+  );
+}
 
 function destinationFor(address: string) {
   return {
@@ -51,6 +83,9 @@ function isCancel(thrown: unknown): boolean {
  * Shared funding runner. `start("fiat")` opens Buy crypto, `start("crypto")`
  * opens Add funds, `start("all")` opens Privy's method picker. When the
  * user isn't logged in yet, call `login()` first — one tap, then funding.
+ *
+ * Calls Privy hooks: mount it ONLY behind `fundingAvailable()`. `start`
+ * re-checks the gate anyway, so no addFunds call can slip past it.
  */
 export function useFundRail(address: string) {
   const { ready, authenticated, login } = usePrivy();
@@ -60,7 +95,7 @@ export function useFundRail(address: string) {
   const [error, setError] = useState<string | null>(null);
 
   async function start(mode: FundMode) {
-    if (!ready || busy) return;
+    if (!fundingAvailable() || !ready || busy) return;
     if (!authenticated) {
       login();
       return;
@@ -119,6 +154,11 @@ export function useFundRail(address: string) {
 }
 
 export function FundingOptions({ address }: { address: string }) {
+  if (!fundingAvailable()) return <FundingPausedNotice />;
+  return <LiveFundingOptions address={address} />;
+}
+
+function LiveFundingOptions({ address }: { address: string }) {
   const rail = useFundRail(address);
 
   if (!rail.ready) {

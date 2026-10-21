@@ -10,6 +10,10 @@
  * fees — draining it bricks the wallet), and the recipient's USDC account
  * must already exist (any wallet creates it on first receive; we check and
  * refuse loudly instead of burning fees on a doomed transaction).
+ *
+ * Paused while `fundingAvailable()` is false (payments not live, or no
+ * Privy provider): renders FundingPausedNotice and never mounts the signing
+ * path or the Privy hook.
  */
 "use client";
 
@@ -18,6 +22,7 @@ import { Connection, PublicKey, Transaction } from "@solana/web3.js";
 import { useWallets } from "@privy-io/react-auth";
 import { Button } from "@/components/ui/Button";
 import { Banner } from "@/components/market/Banner";
+import { FundingPausedNotice, fundingAvailable } from "@/components/market/FundingOptions";
 import { base58Encode } from "@/lib/solana/base58";
 import { decodeAddress } from "@/lib/solana/base58";
 import { associatedTokenAddress } from "@/lib/solana/sdk";
@@ -56,17 +61,7 @@ export function SendDialog({
   usdcUnits: number;
   onClose: () => void;
 }) {
-  if (!process.env.NEXT_PUBLIC_PRIVY_APP_ID) {
-    return (
-      <SendDialogInner
-        walletAddress={walletAddress}
-        usdcMint={usdcMint}
-        usdcUnits={usdcUnits}
-        onClose={onClose}
-        privyWallets={[]}
-      />
-    );
-  }
+  if (!fundingAvailable()) return <FundingPausedNotice />;
   return (
     <PrivySendDialogInner
       walletAddress={walletAddress}
