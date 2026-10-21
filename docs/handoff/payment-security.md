@@ -5943,3 +5943,199 @@ production bodies), so replays must reproduce the drift first, as the staging re
 - **tests/payment-db/01_fixtures.sql** builds mode-1 fixtures with a NULL `authenticated_at`, which 078 refuses (outside this lane).
 - **`fn_mark_default`** still carries the production 013-era body (not repaired by 077; behaviour unaudited).
 - **Indexes** on the four `sku_models` columns are still unknown.
+
+## 2026-10-22 - Migration 079: seller review is not authentication; fn_mark_default audit (staging applied; production NOT touched)
+
+Founder authorization (this task only): author `079` on `track/payment-security` and apply/test it only on Supabase
+`flexsoar-staging` (ref `krkydvvvtszceutprfmy`) through the guarded staging wrapper. Lanes widened for this task:
+`tests/payment-db/**` and `lib/db/errors.ts` (plus its tests). **No production connection was made.**
+
+Pre-flight: the first run stopped (AGENT_RULES §0). `main` had `d7a755c`, an empty deploy-trigger commit that the branch
+lacked. The founder merged `fd72bc7` into main and fast-forwarded the branch. Re-run: HEAD == main == `35aa1d4`,
+`git log HEAD..main` empty.
+
+### 079_review_approval_is_not_authentication.sql
+
+Founder rule: `items.authenticated_at` means FlexSoar physically holds the pair AND has authenticated it.
+
+| Function | Before | 079 |
+|---|---|---|
+| `fn_approve_submission` (041:54) | Seller review stamped `authenticated_at/by`. | Stamps the new `items.review_approved_at/by`; no `authenticated_*` reference left. |
+| `fn_mint_card` (027) | Required `authenticated_at` for every item; approval passed it with its own stamp. | Custody `seller` requires `review_approved_at` (`item % is seller-held and has not been approved in review`). Any other custody still requires `authenticated_at` (unchanged message; fails closed for a future custody value). |
+| `fn_authenticate_item` (008) | Stamped any item in `pending_intake`/`in_custody`, whatever its custody. | Refuses custody other than `warehouse` (`item % is seller-held, cannot be authenticated`). |
+| `fn_mark_default` (production 013-era body) | No status check; a NULL note erased `grading_notes`. | Requires `status = 'awaiting_seller'` with neither `shipped_at` nor `defaulted_at` (`redemption % is %, expected awaiting_seller`). A NULL or blank note is refused (22023). |
+
+- **Why new columns.** No existing column records FlexSoar's review:
+  - `graded_at/graded_by` are written by the seller (`fn_submit_listing`: `graded_by = v_user`).
+  - `grade_source` is a label.
+  - `status = 'in_custody'` lasts only inside the approval.
+  - The `submission_approved` notification is a message, not an item record.
+
+  `review_approved_at timestamptz` and `review_approved_by uuid REFERENCES users(id)` are nullable with no default, like
+  `authenticated_by`. Comments are set on both, and on `authenticated_at` stating the rule.
+- **Style (074/078).** A temp snapshot, then single-line fragment substitutions on `pg_get_functiondef` (each must occur
+  exactly once and must not already be applied). Owner, ACL, SECURITY DEFINER, search_path and all other `pg_proc`
+  metadata must be identical before and after. One overload each; no arity change.
+- **Preguard also pins:**
+  - `fn_mark_default`'s CR-stripped md5 to the production export (`9e32bf38…`);
+  - approval's only `authenticated_` references are the two stamped columns;
+  - `custody_model = {warehouse, seller}`;
+  - the new columns are absent and `authenticated_at` has no comment.
+- **Postguard also checks:**
+  - the new columns' type, nullability, default and FK, and that they are empty;
+  - anon/authenticated/service_role have no INSERT/UPDATE/REFERENCES on them, and SELECT exactly as on `authenticated_by`.
+- **No data is rewritten.** Existing stamps are listed by the audit below for a separate founder decision.
+
+**Readers of `authenticated_at`, checked against the catalog and the code:**
+
+| Reader | Effect of 079 |
+|---|---|
+| 078 `prepare_sale` / `correspondence` | None. Seller → mode 0 without reading the stamp; warehouse needs it as before. |
+| 078 `record_attestation` receipt clear | Still correct. New seller items arrive unstamped; it still clears legacy stamps. |
+| 061 reconcile (release) | A writer; it stamps from the attested pass and sets custody warehouse in the same update. |
+| `fn_grade_item` | Promotes status when stamped. Only warehouse items reach `pending_intake`/`in_custody`. |
+| `app/(market)/vault-status.ts`, `CardDetail` | Seller → `held_by_seller` whatever the stamp. No change. |
+| `app/admin/grading/*`, `ItemActions` | The queue is `pending_intake`/`in_custody`, which is warehouse only. No change. |
+| `app/admin/cards/[id]`, `app/admin/consignments/[id]` ("Authenticated at") | New seller cards show "—" (correct). **Legacy seller cards still show the review time under that label** until the data decision below. |
+| `lib/api/contract.ts` `getItems({authenticated})` | Filters on the stamp. New seller items no longer count as authenticated (correct). |
+
+**fn_mark_default audit (production body = repo 013 body; the "unknown body" was whitespace-only drift).**
+- **Null identity:** safe. `fn_require_admin()` refuses NULL and non-admin callers before reading anything (proven on staging for
+  ghost, non-admin fulfiller and no-claims sessions).
+- **Behaviour before 079 (staging, rolled back):**
+  - a second default incremented `defaults_count` to 2;
+  - a shipped redemption could be defaulted, which flipped the item to `released`;
+  - a NULL note set `grading_notes` to NULL, erasing seller and REJECTED history;
+  - a blank note was accepted.
+
+  All four are fixed in 079 (above). The admin client (`components/admin/db-writes.ts`) already documented WRONG_STATUS for
+  "already shipped, or already defaulted"; the SQL now enforces it.
+- **Not changed (by design):** no buyer refund or ledger entry, and no `due_by` check. Restriction stays permanent.
+
+### Staging (PG 17.11, system_identifier 7692131729119822239): applied
+
+The wrapper, `guard.sql` and `common.sh` are the rehearsal's, unchanged except for paths and the app name.
+
+- **Guard:** `staging_marker` with its comment, `auth.users = 0`, `current_user = session_user = postgres`, and the ref in the URI user.
+- **Wrapper negative test:** a wrong ref was refused before connecting (rc=90).
+
+Sequence:
+1. Baseline: the read-only catalog state above.
+2. `checks079.sql` BEFORE 079.
+3. Dry run (079 with ROLLBACK): rc=0.
+4. Pre-apply fingerprint: 1295 objects, sha256 `45f34be9…`, **identical to the rehearsal's final state**.
+5. **079 applied: rc=0, COMMIT, no WARNING/NOTICE**, at 2026-10-21T16:56:50Z.
+6. Post fingerprint: 1298 objects. The diff is exactly:
+   - added: `items.review_approved_at`, `items.review_approved_by`, `items_review_approved_by_fkey`;
+   - body changed in 4 functions, with no metadata change.
+7. `verify-post.sql` (059-078) V1-V9: **byte-identical** before and after.
+8. `checks079.sql` AFTER 079.
+9. Re-apply: refused by the preguard (rc=3, fragment found 0 times), atomic.
+
+Checks (each case its own rolled-back transaction, simulated PostgREST sessions, 0 rows after):
+
+| Case | Before 079 | After 079 |
+|---|---|---|
+| A1 approve seller submission | ok, **authenticated_at set** | ok, authenticated_at NULL, review_approved_at/by (admin) set, card minted, listing public |
+| A2 approve pending_review **warehouse** item never authenticated | ok, **reads as vaulted** | refused `is not authenticated`, nothing minted |
+| A3 approve as non-admin / ghost / no claims | `admin privileges required` | same |
+| B1 mint seller item, not reviewed | `is not authenticated` | `is seller-held and has not been approved in review` |
+| B2 / B3 mint warehouse unauthenticated / authenticated | refused / ok | refused / ok |
+| B4 mint seller item, review-approved | (no column) | ok, not stamped, not vaulted |
+| C1 authenticate seller-held item | ok, **stamped** | refused `is seller-held, cannot be authenticated` |
+| C2 authenticate warehouse pending_intake | ok | ok |
+| C3/C4 authenticate as ghost / non-admin | `admin privileges required` | same |
+| D1 default awaiting_seller | ok, count 1, restricted, released | same |
+| D2 default twice | **ok twice, count 2** | 2nd refused `is defaulted, expected awaiting_seller`, count 1 |
+| D3 default a shipped redemption | **ok, item released** | refused `is shipped, expected awaiting_seller` |
+| D4 / D5 NULL / blank note | **ok; NULL erased notes** / ok | refused 22023, notes intact |
+| D6 warehouse redemption | `is warehouse-fulfilled` | same |
+| D7-D9 ghost / fulfiller / no claims | `admin privileges required` | same |
+
+**Post-079 CR-stripped body md5s** (the runbook's expected values): approve `947e0f9b…`, authenticate `1edea6fb…`,
+mark_default `05c85e9d…` (CRs kept, 23), mint `4eadd81b…`.
+
+### tests/payment-db/01_fixtures.sql
+
+Mode-1 (direct) fixture items now carry `authenticated_at = clock_timestamp()` and `authenticated_by` = the fixture's
+`authenticator` staff user. Mode-0 (seller) items carry neither.
+
+Proven on staging (rolled back):
+- with the fixture's own lines through the inventory insert, the **old** item line in mode 1 is refused by 078
+  (`PAYMENT_V2_CORRESPONDENCE: inventory`);
+- the **new** line enrols mode 1 (warehouse, stamped, stamped by the authenticator);
+- mode 0 works with either line;
+- a second fixture in the same transaction reuses the single authenticator.
+
+The rest of `fixture()` calls worker-gated RPCs, which refuse `postgres` on Supabase. **The full payment-db suite was not
+run** (it needs the isolated superuser container, which this task did not authorize).
+
+### lib/db/errors.ts
+
+The 42501 refusals now map by message to **UNAUTHENTICATED** instead of falling to the 42501→FORBIDDEN code map:
+- 077: `sign in to confirm a shipment`, `sign in to record proof`, `sign in to act on this account`,
+  `sign in to read a balance`, `sign in to resolve a trade offer`;
+- 060/069c: exactly `PAYMENT_V2_SIGN_IN`.
+
+Also:
+- 079's seller mint refusal maps to **WRONG_STATUS** (not NOT_AUTHENTICATED: that recovery is wrong for a seller item).
+- 079's other two messages ride existing rules (`, cannot be authenticated`, `, expected`).
+- The note refusal (22023) stays UNKNOWN, deliberately. No ContractErrorCode fits, the codes live in `contract.ts`
+  (track/data), and the admin action already refuses an empty note.
+
+Tests: one describe block appended to `tests/invariants.test.ts` (10 tests). Other 42501s (`permission denied`,
+`PAYMENT_V2_LEGACY_PATH_RETIRED`, `PAYMENT_V2_DEDICATED_CONNECTION_REQUIRED`) stay FORBIDDEN. Against HEAD's `errors.ts`
+the six sign-in cases return FORBIDDEN and the seller-mint case UNKNOWN, so the tests discriminate.
+
+`npx tsc --noEmit` rc=0. `npm test`: 21 files, **570/570**. `npm run build` rc=0.
+
+### Production data audit (read-only; run by the founder through the runbook)
+
+The file is `C:\Users\Family\flexsoar-reviews\prod-runbook-079\audit-079-authenticated-at.sql`.
+
+- **A1:** items with `authenticated_at` set and at least one of: custody ≠ warehouse; grade_source seller_declared; stamp equal
+  to the card's first provenance time (approval stamped and minted in one transaction); a `submission_approved` notification
+  for the item. Each row carries every flag, plus `f_v2_attested_pass` (legitimate) and `f_reads_as_vaulted`.
+- **A2:** totals.
+- **A3:** pending_review items by custody. Warehouse ones can no longer be approved into "vaulted".
+- **A4:** redemptions by status and holder.
+- **A5:** `defaults_count` vs defaulted redemptions (double defaults), and defaulted items with NULL notes (erased by a NULL note).
+
+Validated on staging: empty → 0 suspects. With synthetic legacy rows (rolled back), it flagged the seller review stamp and the
+warehouse review stamp, and not a 079 approval or a legitimate warehouse authentication.
+
+**Founder decision needed** for the A1 rows: leave them, or a separate migration that moves seller-review stamps into
+`review_approved_*`. 079 relabels nothing.
+
+### Production runbook addendum (not run)
+
+The runbook is `C:\Users\Family\flexsoar-reviews\prod-runbook-079.md`, with files in `prod-runbook-079\`. It reuses the founder's
+`prod-runbook-059-078\prod.py` and guards, whose write guard pins `system_identifier` **7666007964130682852**; it does not copy
+them. Step 0 checks their hashes.
+
+### Found, outside this lane (not changed)
+
+- **track/data:**
+  - `lib/db/types.ts` `Item` has no `review_approved_at/by` (additive).
+  - `contract.ts` `markDefault` does not pre-validate the note; the database now refuses a blank one.
+  - `scripts/smoke_settlement.sql:703-713` authenticates a seller-custody item. 079 refuses that, and the script was already
+    unrunnable after 063.
+- **track/admin:** "Authenticated at" on the card and consignment pages shows the legacy review time for old seller items.
+  Consider showing `review_approved_at` as "Review approved".
+- **track/market:** `app/(market)/vault-status.ts`'s comment says custody defaults to `'warehouse'` (013:54). 019b changed the
+  default to `'seller'`. The comment is stale; the logic is right.
+- **payment-security follow-up (proposed, not in 079):** `fn_confirm_shipment` (077 body) refuses only `shipped`. After an
+  admin default, the fulfiller can still confirm shipment, flipping a `defaulted` redemption to `shipped` and incrementing
+  `fulfilments_completed`. A forward fix would refuse unless `status = 'awaiting_seller'` (seller-held) or `'requested'`
+  (warehouse). This was read from 077's body (077:187 checks only `'shipped'`) and **not executed**.
+- **Open (founder rule):** `fn_authenticate_item` now requires warehouse custody, but a warehouse item in `pending_intake` may not
+  have physically arrived yet (consignment status is not checked).
+
+### Not verified
+
+- **Production:** no access. Whether production's three CRLF bodies (approve/mint/authenticate) CR-strip to the staging md5s is
+  checked by the runbook's P3, not by me. The `fn_mark_default` pin comes from the founder export.
+- **The full payment-db suite** (see above).
+- **`f_stamped_in_mint_txn` can false-positive:** a warehouse item authenticated and minted in one admin SQL transaction. None of
+  the app's paths do that; read it together with the other flags.
+- **`graphify update .`:** not run. This worktree has no `graphify-out/`.

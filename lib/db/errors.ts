@@ -132,6 +132,27 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   // 013_seller_custody.sql — fn_submit_listing. Fires when the session has no
   // users row at all (unprovisioned sign-in) — same recovery as UNAUTHENTICATED.
   { pattern: /sign in to list an item/i, code: 'UNAUTHENTICATED' },
+
+  // 077_drift_repair_and_null_identity_guards.sql — the null-identity
+  // refusals: a session whose auth sub has no users row. Each is raised with
+  // SQLSTATE 42501, which the CODE_MAP fallback below would read as
+  // FORBIDDEN; matched by message first so the caller is told to sign in,
+  // not that they lack a privilege.
+  // fn_confirm_shipment (non-admin caller)
+  { pattern: /sign in to confirm a shipment/i, code: 'UNAUTHENTICATED' },
+  // fn_record_proof
+  { pattern: /sign in to record proof/i, code: 'UNAUTHENTICATED' },
+  // fn_require_actor (session branch; guards the ownership-checked RPCs)
+  { pattern: /sign in to act on this account/i, code: 'UNAUTHENTICATED' },
+  // fn_require_self_or_admin (session branch; guards balance reads)
+  { pattern: /sign in to read a balance/i, code: 'UNAUTHENTICATED' },
+  // fn_resolve_trade_offer
+  { pattern: /sign in to resolve a trade offer/i, code: 'UNAUTHENTICATED' },
+  // 060_payment_v2_contracts.sql payment_v2.actor(), resolving through
+  // fn_current_user_id() since 069c — every caller-resolving payment v2 RPC
+  // raises exactly 'PAYMENT_V2_SIGN_IN' (42501) for a session with no users
+  // row or no claims.
+  { pattern: /^PAYMENT_V2_SIGN_IN$/, code: 'UNAUTHENTICATED' },
   // fn_submit_listing — 'this account cannot list items' (is_restricted)
   { pattern: /this account cannot list items/i, code: 'RESTRICTED' },
   // fn_submit_listing — cash / either settlement gated behind a completed-
@@ -178,6 +199,11 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   { pattern: /has no human-assigned float/i, code: 'NOT_GRADED' },
   // fn_mint_card — 'item % is not authenticated'
   { pattern: /is not authenticated/i, code: 'NOT_AUTHENTICATED' },
+  // fn_mint_card (079) — 'item % is seller-held and has not been approved in
+  // review'. A seller-held item is minted on review approval, never on
+  // authentication (fn_authenticate_item refuses it), so NOT_AUTHENTICATED's
+  // recovery would be wrong: the item is not in a mintable state.
+  { pattern: /is seller-held and has not been approved in review/i, code: 'WRONG_STATUS' },
   // fn_mint_card — 'sku % has no oracle price; cannot assign tier'
   { pattern: /has no oracle price/i, code: 'NO_ORACLE_PRICE' },
 

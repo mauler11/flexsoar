@@ -3333,3 +3333,71 @@ describe('track/market: seller payout copy matches the USDC model (founder decis
     expect(PAYMENTS_NOT_LIVE).toContain("aren't live yet");
   });
 });
+
+// ------------------------------------------------------------
+// track/payment-security: sign-in refusals and 079 raises -> codes
+// ------------------------------------------------------------
+
+describe('lib/db/errors.ts — 077/069c sign-in refusals and 079 raises', () => {
+  // Raised with SQLSTATE 42501 (077, 060/069c), which the code map alone
+  // reads as FORBIDDEN. The message rule has to win.
+  it.each([
+    ['fn_confirm_shipment', 'sign in to confirm a shipment'],
+    ['fn_record_proof', 'sign in to record proof'],
+    ['fn_require_actor', 'sign in to act on this account'],
+    ['fn_require_self_or_admin', 'sign in to read a balance'],
+    ['fn_resolve_trade_offer', 'sign in to resolve a trade offer'],
+    ['payment_v2.actor() via any v2 RPC', 'PAYMENT_V2_SIGN_IN'],
+  ])('%s — "%s" (42501) is UNAUTHENTICATED, not FORBIDDEN', (_fn, message) => {
+    expect(contractErrorCode({ message, code: '42501' })).toBe('UNAUTHENTICATED');
+  });
+
+  it('other 42501 refusals stay FORBIDDEN', () => {
+    expect(
+      contractErrorCode({ message: 'permission denied for function fn_mint_card', code: '42501' }),
+    ).toBe('FORBIDDEN');
+    expect(
+      contractErrorCode({
+        message: 'PAYMENT_V2_LEGACY_PATH_RETIRED: coordinated v2 cutover required',
+        code: '42501',
+      }),
+    ).toBe('FORBIDDEN');
+    expect(
+      contractErrorCode({ message: 'PAYMENT_V2_DEDICATED_CONNECTION_REQUIRED', code: '42501' }),
+    ).toBe('FORBIDDEN');
+  });
+
+  it('fn_mint_card (079) — seller-held item without review approval is WRONG_STATUS, not NOT_AUTHENTICATED', () => {
+    expect(
+      contractErrorCode({
+        message:
+          'item 83aaf43c-1124-4b78-a1a9-86a32beff159 is seller-held and has not been approved in review',
+      }),
+    ).toBe('WRONG_STATUS');
+    // the warehouse gate keeps its own code
+    expect(
+      contractErrorCode({ message: 'item f2b3f283-bb78-4be8-8c65-d9be23b38aa5 is not authenticated' }),
+    ).toBe('NOT_AUTHENTICATED');
+  });
+
+  it('fn_authenticate_item (079) — seller-held item rides the existing "cannot be authenticated" rule', () => {
+    expect(
+      contractErrorCode({
+        message: 'item f1da1a33-5cea-41ec-871f-c50793b4b756 is seller-held, cannot be authenticated',
+      }),
+    ).toBe('WRONG_STATUS');
+  });
+
+  it('fn_mark_default (079) — already shipped or defaulted rides the existing ", expected" rule', () => {
+    expect(
+      contractErrorCode({
+        message: 'redemption 55aa8048-4790-47d6-83ff-9da4cbf7f1cc is defaulted, expected awaiting_seller',
+      }),
+    ).toBe('WRONG_STATUS');
+    expect(
+      contractErrorCode({
+        message: 'redemption 4d43d64c-3092-4586-8b34-e50be6cd0ecc is shipped, expected awaiting_seller',
+      }),
+    ).toBe('WRONG_STATUS');
+  });
+});

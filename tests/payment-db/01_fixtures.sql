@@ -25,7 +25,8 @@ BEGIN
  SELECT id INTO enroller FROM payment_v2.staff WHERE role='inventory';SELECT id INTO reviewer FROM payment_v2.staff WHERE role='reviewer';
  INSERT INTO public.sku_models(id,brand,model,colorway,base_price_cents) VALUES(model,'Synthetic','Payment-'||model,'Test',2000);
  INSERT INTO public.skus(id,model_id,brand,model,colorway,size_us) VALUES(sku,model,'Synthetic','Derived','Test',10);
- INSERT INTO public.items(id,sku_id,consignor_id,status,float_value,custody,custody_holder_id) VALUES(item,sku,seller,'minted',0.1,CASE mode WHEN 0 THEN 'seller'::public.custody_model ELSE 'warehouse'::public.custody_model END,CASE mode WHEN 0 THEN seller END);
+ -- Mode 1 (direct) is warehouse custody AND authenticated_at (078), stamped by the authenticator; seller-held escrow items carry no stamp (079).
+ INSERT INTO public.items(id,sku_id,consignor_id,status,float_value,custody,custody_holder_id,authenticated_at,authenticated_by) VALUES(item,sku,seller,'minted',0.1,CASE mode WHEN 0 THEN 'seller'::public.custody_model ELSE 'warehouse'::public.custody_model END,CASE mode WHEN 0 THEN seller END,CASE mode WHEN 0 THEN NULL ELSE clock_timestamp() END,CASE mode WHEN 0 THEN NULL ELSE (SELECT st.user_id FROM payment_v2.staff st WHERE st.role='authenticator') END);
  INSERT INTO public.cards(id,item_id,sku_id,owner_id,float_value,tier,mint_number) VALUES(card,item,sku,seller,0.1,1,1);
  INSERT INTO public.ledger_entries(txn_id,entry_type,asset,account_id,card_id,direction) VALUES(gen_random_uuid(),'mint','card',seller,card,1);
  INSERT INTO public.listings(id,card_id,seller_id,price_cents,status,payout_method) VALUES(listing,card,seller,2000,'public','cash');
