@@ -34,6 +34,7 @@ import { submitListingIntakeAction } from "@/app/(market)/list/actions";
 import type { GradeComponents } from "@/lib/db/grading";
 import { gradeFloatFromComponents } from "@/lib/db/grading";
 import { formatMyr } from "@/components/card/format";
+import { PAYMENTS_NOT_LIVE, SELLER_PAYOUT_METHOD_LABEL } from "@/app/(market)/payout-copy";
 
 export interface IntakeWizardProps {
   skus: readonly Sku[];
@@ -331,7 +332,7 @@ export function IntakeWizard({
   }
 }
 
-function ReviewPane({
+export function ReviewPane({
   sku,
   photos,
   declaredFloat,
@@ -366,9 +367,13 @@ function ReviewPane({
         />
         <Detail label="Self-declared float" value={declaredFloat.toFixed(3)} />
         <Detail label="Reserve price" value={formatMyr(priceCents)} />
-        <Detail label="Payout" value={payout === "cash" ? "cash" : "credit"} />
+        {/* 'cash' is the enum value for the USDC payout; any other value
+            can't reach Review (canNext) and has no rail to name. */}
+        <Detail label="Payout" value={payout === "cash" ? SELLER_PAYOUT_METHOD_LABEL : "Unavailable"} />
         <Detail label="Country" value={countryCode} />
       </div>
+
+      <p className="text-[10px] tracking-tight text-muted">{PAYMENTS_NOT_LIVE}</p>
 
       {(isNewModel || isUnpricedModel) && (
         <div className="rounded-xl border border-dashed border-[#E8B33A]/60 bg-[#E8B33A]/5 px-3 py-2 text-[10px] tracking-tight text-[#E8B33A]">

@@ -103,7 +103,7 @@ export function buildSubmissionApprovedEmail(input: SubmissionApprovedEmailInput
         <td style="padding: 8px 0;"><a href="${listingUrl}" style="color: #0066cc;">${listingUrl}</a></td>
       </tr>
     </table>
-    <p>The listing is public and can be purchased immediately.</p>
+    <p>The listing is public now. Purchases open once payments go live on FlexSoar.</p>
     <p>— FlexSoar</p>
     <hr style="border: none; border-top: 1px solid #e5e5e5; margin: 24px 0;" />
     <p style="font-size: 12px; color: #666;">Questions? Contact ${SUPPORT_EMAIL}</p>
@@ -120,7 +120,7 @@ Shoe: ${shoeBrand} ${shoeModel} ${shoeColorway}
 Size: US ${shoeSizeUs}
 Listing: ${listingUrl}
 
-The listing is public and can be purchased immediately.
+The listing is public now. Purchases open once payments go live on FlexSoar.
 
 — FlexSoar
 Questions? Contact ${SUPPORT_EMAIL}

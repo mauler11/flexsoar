@@ -8,6 +8,11 @@
  * flow. No QR code (no QR dep installed; the address + copy covers it),
  * no exchange/cash-app rows (region-specific), no promo rows. Every
  * number shown is REAL (GET /api/solana/balances); nothing here is mocked.
+ *
+ * While `fundingAvailable()` is false (payments not live, or no Privy
+ * provider) the Deposit and Withdraw tabs render FundingPausedNotice and
+ * never mount the funding rail or SendDialog — no Privy hook runs, so the
+ * menu renders with or without the provider.
  */
 "use client";
 
@@ -17,12 +22,16 @@ import Link from "next/link";
 import { Banner } from "@/components/market/Banner";
 import { FIAT_CURRENCIES, formatFiatFromUsd, formatSol, formatUsdc } from "@/lib/solana/balances";
 import { EmbeddedLinkButton } from "@/components/market/EmbeddedWalletSection";
-import { useFundRail } from "@/components/market/FundingOptions";
+import {
+  FundingPausedNotice,
+  fundingAvailable,
+  useFundRail,
+} from "@/components/market/FundingOptions";
 import { SendDialog } from "@/components/market/SendDialog";
 import { Modal } from "@/components/market/Modal";
 import { useFiat } from "@/components/market/Fiat";
 
-interface BalancesResponse {
+export interface BalancesResponse {
   wallet: string;
   solLamports: number;
   usdcUnits: number;
@@ -306,48 +315,13 @@ export function WalletMenu() {
               ))}
             </div>
 
-            {tab === "deposit" && (
-              balance ? (
-                <DepositTab
-                  wallet={balance.wallet}
-                  usdcUnits={balance.usdcUnits}
-                  solLamports={balance.solLamports}
-                  fx={balance.fx}
-                />
-              ) : (
-                <div className="flex flex-col gap-3">
-                  <p className="text-[11px] leading-snug text-muted">
-                    Link your FlexSoar wallet to deposit, see your balance,
-                    and buy with USDC.
-                  </p>
-                  <EmbeddedLinkButton cta="Link wallet" />
-                </div>
-              )
-            )}
+            {tab === "deposit" && <WalletDepositPanel balance={balance} />}
 
             {tab === "withdraw" && (
-              balance?.usdcMint ? (
-                <>
-                  <Banner tone="success" title="Withdrawals settle in seconds">
-                    Wallet-to-wallet USDC — no fees beyond the network&apos;s
-                    fraction of a cent.
-                  </Banner>
-                  <SendDialog
-                    walletAddress={balance.wallet}
-                    usdcMint={balance.usdcMint}
-                    usdcUnits={balance.usdcUnits}
-                    onClose={() => setTab("deposit")}
-                  />
-                </>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  <p className="text-[11px] leading-snug text-muted">
-                    Link your FlexSoar wallet first — withdrawals send from
-                    the linked address.
-                  </p>
-                  <EmbeddedLinkButton cta="Link wallet" />
-                </div>
-              )
+              <WalletWithdrawPanel
+                balance={balance}
+                onDone={() => setTab("deposit")}
+              />
             )}
 
             {tab === "settings" && (
@@ -360,6 +334,89 @@ export function WalletMenu() {
         </Modal>
       )}
     </>
+  );
+}
+
+/**
+ * Deposit tab body. Paused: the balance (when linked) and the paused
+ * notice, with no funding rail mounted. Live: the Privy rails.
+ */
+export function WalletDepositPanel({
+  balance,
+}: {
+  balance: BalancesResponse | null;
+}) {
+  if (!fundingAvailable()) {
+    return (
+      <div className="flex flex-col gap-3">
+        {balance && (
+          <FiatBalance
+            usdcUnits={balance.usdcUnits}
+            solLamports={balance.solLamports}
+            fx={balance.fx}
+            controls={false}
+          />
+        )}
+        <FundingPausedNotice />
+        {!balance && (
+          <>
+            <p className="text-[11px] leading-snug text-muted">
+              Link your FlexSoar wallet to see your balance.
+            </p>
+            <EmbeddedLinkButton cta="Link wallet" />
+          </>
+        )}
+      </div>
+    );
+  }
+  return balance ? (
+    <DepositTab
+      wallet={balance.wallet}
+      usdcUnits={balance.usdcUnits}
+      solLamports={balance.solLamports}
+      fx={balance.fx}
+    />
+  ) : (
+    <div className="flex flex-col gap-3">
+      <p className="text-[11px] leading-snug text-muted">
+        Link your FlexSoar wallet to deposit, see your balance,
+        and buy with USDC.
+      </p>
+      <EmbeddedLinkButton cta="Link wallet" />
+    </div>
+  );
+}
+
+/** Withdraw tab body. Paused: the notice only — SendDialog never mounts. */
+export function WalletWithdrawPanel({
+  balance,
+  onDone,
+}: {
+  balance: BalancesResponse | null;
+  onDone: () => void;
+}) {
+  if (!fundingAvailable()) return <FundingPausedNotice />;
+  return balance?.usdcMint ? (
+    <>
+      <Banner tone="success" title="Withdrawals settle in seconds">
+        Wallet-to-wallet USDC — no fees beyond the network&apos;s
+        fraction of a cent.
+      </Banner>
+      <SendDialog
+        walletAddress={balance.wallet}
+        usdcMint={balance.usdcMint}
+        usdcUnits={balance.usdcUnits}
+        onClose={onDone}
+      />
+    </>
+  ) : (
+    <div className="flex flex-col gap-3">
+      <p className="text-[11px] leading-snug text-muted">
+        Link your FlexSoar wallet first — withdrawals send from
+        the linked address.
+      </p>
+      <EmbeddedLinkButton cta="Link wallet" />
+    </div>
   );
 }
 

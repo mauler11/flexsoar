@@ -52,6 +52,21 @@ describe('email templates', () => {
       expect(html).toContain('info@flexsoar.net');
       expect(text).toContain('info@flexsoar.net');
     });
+
+    it('says purchases open when payments go live, not that it can be bought now', () => {
+      const { html, text } = buildSubmissionApprovedEmail(baseInput);
+      for (const body of [html, text]) {
+        expect(body).toContain('Purchases open once payments go live on FlexSoar.');
+        expect(body).not.toContain('can be purchased immediately');
+      }
+    });
+
+    it('mentions no cash, credit, bank or buy now', () => {
+      const { subject, html, text } = buildSubmissionApprovedEmail(baseInput);
+      for (const body of [subject, html, text]) {
+        expect(body).not.toMatch(/\bcash\b|\bcredit\b|\bbank\b|buy now/i);
+      }
+    });
   });
 
   describe('buildCardSoldEmail', () => {
