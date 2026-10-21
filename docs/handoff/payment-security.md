@@ -5847,3 +5847,99 @@ pin = staging cluster, pin ≠ actual cluster.
 - **Indexes** are outside the inventory, so production's indexes on the four `sku_models` columns are still unknown.
 - **`graphify update .`** was not run. It would rewrite tracked graph files outside this task's allowed commit set.
 - **Staging state at hand-off:** 001-078 plus 067b/069b/069c applied, no data, `staging_marker` intact.
+
+## 2026-10-21 - Production apply of 059-078 (+067b/069b/069c), founder-run
+
+Recorded from the founder's report. **No agent had database access for this section**, and nothing below was re-checked by an agent.
+
+### What was run
+
+- **Who, when:** the founder, against production, 2026-10-21 06:38-06:42 UTC, using `C:\Users\Family\flexsoar-reviews\prod-runbook-059-078.md`
+  (sha256 `1bd198e2…05d4b22`). Migration files were exported as LF from commit `ff3e422` and verified against `manifest-lf.sha256`.
+- **Backup first:** the public schema was dumped before any write (511,926 bytes). The founder keeps it privately; it is not in
+  the repo.
+- **Guards:** every session went through the runbook's wrapper and guards. The production project ref is recorded only in the
+  runbook's `prod.py`, outside the repo.
+  - **Production cluster pin (for future production guards):** `pg_control_system().system_identifier` = **7666007964130682852**.
+  - Staging is `7692131729119822239`.
+- **Order:** 059 (with `SET createrole_self_grant = 'set, inherit';` in the same session), 060-067, 067b, 068, 069, 069b, 069c,
+  070-074, 078.
+  - Every file reported `rc=0 guard_ok=1 error_lines=0` and ended with `COMMIT`.
+  - The only warning was the expected 059:37 `no privileges were granted for "auth"`.
+  - After 069b: `owner CREATE on public: false`.
+
+### Preflight (step 0)
+
+Every P-line matched the runbook's expected values, with two exceptions:
+
+- **P4 `pg_default_acl`:** production has **rows=27, md5=a40277f9cab4d54f9ceeea2baac0316c**; staging has 24 (md5 `79ee8190…`).
+  - The 3 extra rows are the **cron** schema, per the founder's earlier full `pg_default_acl` export: for_role `supabase_admin`,
+    in_schema `cron`, types S/f/r, grants to `postgres` only.
+  - The `public`, `auth` and `extensions` rows matched staging.
+  - The architect accepted it. Nothing in 059-078 touches the cron schema.
+  - The runbook's "24 rows" expectation was staging's and was wrong for production; correct it in any future runbook.
+- **P2 / P7 (informational, noted):** `auth.users=6` vs `public.users=4`. The 2 extra are unfinished sign-ups with no users row.
+  The 069c precondition `id_ne_auth_id=0` held.
+
+### Post-apply verification (step 7, `verify-post.sql`, read-only)
+
+**Every V1-V9 line was identical to the runbook's expected output**, which is the staging output:
+
+- V1: anon/authenticated reach only 063's 13 explicit grants (11 authenticated-only, plus `fn_payment_v2_managed` and
+  `fn_payment_v2_legacy_guard` via PUBLIC).
+- V2: no networks, funding off.
+- V3: 27 payment_v2 tables, 3 sequences, 25 payment_v2 functions, 37 public `fn_payment_v2_*`, RLS on for all.
+- V4: `payment_v2_owner` has no CREATE on public and no USAGE on auth; it can execute `fn_current_user_id()`; `actor()` has no
+  `auth.` reference.
+- V5: `postgres` holds `[A] by supabase_admin` + `[IS] by postgres` on all six payment_v2 roles; worker membership is kept on
+  purpose (no 079).
+- V6: CR-stripped body md5s equal staging's.
+- V7: `trg_vaulted_instant_release` and `fn_purchase_credit` are gone; 0 legacy functions executable by authenticated.
+- V8: `id_ne_auth_id=0`, trigger enabled.
+- V9: a session with no users row gets `42501 PAYMENT_V2_SIGN_IN`.
+
+### Production migration ledger (applied order; it is NOT the filename order)
+
+1. **001-058**, applied earlier through the dashboard SQL editor, in filename order:
+   001, 002, 003, 004, 005, 006, 007, 008, 009, 010, 011, 012, 013, 014, 015, 016, 017, 018, 019a, 019b, 019c, 020, 021, 022,
+   022b, 022c, 023a, 023b, 023c, 024a, 024b, 024c, 024d, 024e, 024f, 025, 026, 026b, 027, 028, 029, 030, 031, 032, 033, 034, 035,
+   036, 037, 038, 039, 040, 041, 042, 043, 044, 045, 046, 047, 048, 049, 050, 051, 052, 053, 054, 055, 056, 057, 058.
+
+   **Production's 001-058 state is drifted from the repo**, per "2026-10-21 - Cloud schema drift audit" above:
+   - Five function bodies ran as older or edited versions:
+     - `fn_mark_shipped` was 009's;
+     - `fn_confirm_shipment`, `fn_mark_default` and `fn_record_proof` were uncommitted 013-era bodies;
+     - `fn_purchase_credit` was an unknown 011 body.
+
+     077 later replaced or dropped all of these except `fn_mark_default`, which remains the production 013-era body.
+   - `sku_models.external_id/gender/source/style_code` exist with no migration creating them, and the duplicate
+     `skus_art_url_check` existed (077 dropped it).
+   - The 4-arg `fn_list_card(uuid,uuid,integer,payout_method)` was already gone before 022b.
+   - 052's `supabase_realtime` publication is platform-provided.
+   - Every app function body is stored with CRLF (the SQL-editor paste path).
+   - 034's search_path loop skipped the citext functions, because it ran as `postgres`.
+2. **075** `revoke_legacy_purchase_redeem`
+3. **076** `revoke_view_writes`
+4. **077** `drift_repair_and_null_identity_guards` (075-077 founder-applied and verified before this session)
+5. **059** `payment_v2_records` (session `createrole_self_grant = 'set, inherit'`)
+6. **060** `contracts`, **061** `settlement`, **062** `recovery`, **063** `permissions_fences`, **064** `exact_integer_encoding`,
+   **065** `table_specific_terms`, **066** `exact_usdc_fee`, **067** `decision_column_alias`
+7. **067b** `owner_create_on_public` (bracket open)
+8. **068** `contexts_evidence`, **069** `attempt_context_parsed_evidence`
+9. **069b** `owner_revoke_create_on_public` (bracket closed)
+10. **069c** `actor_current_user_id`
+11. **070** `context_governance_order`, **071** `rpc_metadata_encoding`, **072** `ack_context_revision`, **073** `evidence_decision_column`,
+    **074** `verifier_context_attempt_alias`
+12. **078** `vaulted_requires_authentication`
+
+059-078 were applied as LF via psql, so their bodies are LF, unlike 001-058. Every file in `supabase/migrations/` (93) is now
+applied in production. A numeric 001→078 replay on an empty database stops at 077 by design (its preguard pins the drifted
+production bodies), so replays must reproduce the drift first, as the staging rehearsal did.
+
+### Open (unchanged by this apply)
+
+- **Funding is off** and no network exists. Worker logins and an end-to-end worker RPC run on Supabase are still unproven.
+- **track/data:** UNAUTHENTICATED error mapping for the `sign in to …` strings (077) and for `PAYMENT_V2_SIGN_IN`.
+- **tests/payment-db/01_fixtures.sql** builds mode-1 fixtures with a NULL `authenticated_at`, which 078 refuses (outside this lane).
+- **`fn_mark_default`** still carries the production 013-era body (not repaired by 077; behaviour unaudited).
+- **Indexes** on the four `sku_models` columns are still unknown.
