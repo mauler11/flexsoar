@@ -16,6 +16,7 @@ import {
   type VaultIntakeStatus,
 } from "@/app/(market)/queries";
 import { cancelListingAction } from "@/app/(market)/actions";
+import { VAULT_STATE_LABEL, vaultState } from "@/app/(market)/vault-status";
 import { toCardWithReason, toListing, toSku } from "@/components/market/bridge";
 import { CardDetail } from "@/components/card/CardDetail";
 import { Banner } from "@/components/market/Banner";
@@ -151,6 +152,9 @@ export default async function CardPage({
   const oracleCents = detail.oracle_value_cents;
   const item = detail.item;
   const photos = parsePhotos(item.photos);
+  // Custody alone never means vaulted — items.custody defaults to
+  // 'warehouse'. See vault-status.ts.
+  const custodyState = vaultState(item);
 
   // Model tape for the chart: the card carries a variant (no model_id on the
   // SkuRef), so resolve the model by exact identity match. Brand+model filter
@@ -200,7 +204,7 @@ export default async function CardPage({
         priceCents={listing?.price_cents}
         listing={listingForCard}
         photos={photos}
-        vaulted={item.custody === "warehouse"}
+        vaulted={custodyState === "vaulted"}
       />
 
       <div className="grid gap-8 lg:grid-cols-2">
@@ -219,6 +223,10 @@ export default async function CardPage({
                   }
                   label={conditionLabel}
                 />
+              </div>
+              <div className="flex items-baseline justify-between text-sm text-muted">
+                <span>Custody</span>
+                <span className="text-foreground font-medium">{VAULT_STATE_LABEL[custodyState]}</span>
               </div>
               {fairMarket != null && (
                 <div className="flex items-baseline justify-between text-sm text-muted">

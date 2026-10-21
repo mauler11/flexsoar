@@ -22,6 +22,7 @@ import {
   isValidCountryCode,
 } from "@/components/market/intake/intake-config";
 import { saveSignupRegionAction } from "@/app/(auth)/welcome/actions";
+import { NO_BANK_PAYOUT, SELLING_MALAYSIA_ONLY } from "@/app/(market)/payout-copy";
 
 export function WelcomeForm({
   currentHandle,
@@ -160,13 +161,12 @@ export function WelcomeForm({
         </select>
         {region === "MY" ? (
           <p className="text-[11px] text-muted">
-            Malaysian accounts can list, cash out via Stripe, and redeem.
+            Malaysian accounts can list and redeem. Sellers are paid in USDC
+            to a linked wallet.
           </p>
         ) : region ? (
           <p className="text-[11px] text-muted">
-            Only Malaysian accounts receive Stripe cash payouts — other
-            regions are paid in FlexSoar credit. Prices are identical either
-            way.
+            {SELLING_MALAYSIA_ONLY} {NO_BANK_PAYOUT}
           </p>
         ) : (
           <p className="text-[11px] text-muted">

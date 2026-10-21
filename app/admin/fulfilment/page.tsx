@@ -24,6 +24,7 @@
 
 import type { Metadata } from "next";
 import { requireAdminPage } from "@/components/admin/auth";
+import { VAULT_STATE_LABEL, vaultState } from "@/app/(market)/vault-status";
 import {
   getPlatformConfig,
   getProofOverdue,
@@ -289,9 +290,9 @@ function SellerHeldTable({
                   {row.card.float_value.toFixed(3)}
                 </span>
                 <div className="text-muted">
-                  {row.item.custody === "seller"
-                    ? "held by the seller"
-                    : `held at ${row.item.custody_location ?? "(no location on record)"}`}
+                  {vaultState(row.item) === "vaulted"
+                    ? `held at ${row.item.custody_location ?? "(no location on record)"}`
+                    : VAULT_STATE_LABEL[vaultState(row.item)].toLowerCase()}
                 </div>
               </Td>
               <Td>

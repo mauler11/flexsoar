@@ -11,9 +11,9 @@
  */
 
 import { useState } from "react";
-import Link from "next/link";
 
 import { Button } from "@/components/ui/Button";
+import { NO_BANK_PAYOUT } from "@/app/(market)/payout-copy";
 
 export interface PayoutSetupProps {
   accountId: string | null;
@@ -76,7 +76,7 @@ export function PayoutSetup({
             </span>
           </div>
           <div className="flex items-center gap-2 text-[10px] text-muted">
-            <span>Payouts: enabled</span>
+            <span>Not used for payouts</span>
           </div>
         </div>
       </div>
@@ -130,12 +130,7 @@ export function PayoutSetup({
         </p>
       )}
       <p className="mt-2 text-[9px] text-muted">
-        Cash payouts go to your bank via Stripe — a one-time verification,
-        only needed before your first withdrawal. See{" "}
-        <Link href="/terms" className="text-accent hover:underline">
-          Getting paid
-        </Link>
-        .
+        {NO_BANK_PAYOUT} Sellers are paid in USDC to a linked wallet.
       </p>
       {error && (
         <p role="alert" className="mt-2 text-[10px] text-[#FF4444]">

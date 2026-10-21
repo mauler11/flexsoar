@@ -12,6 +12,7 @@
 import { useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
+import { NO_BANK_PAYOUT, PAYMENTS_NOT_LIVE, SELLER_PAYOUT_SUMMARY } from "@/app/(market)/payout-copy";
 
 const STEPS: ReadonlyArray<{ title: string; body: string }> = [
   {
@@ -27,8 +28,8 @@ const STEPS: ReadonlyArray<{ title: string; body: string }> = [
     body: "A sale locks the card and starts your clock. Arrange tracked courier at your own cost — miss the window and the sale is cancelled, the buyer refunded, and your account restricted.",
   },
   {
-    title: "4. Get paid after the hold clears",
-    body: "Payout is your price minus the flat 5% platform fee, released after the 7-day clearing hold once the vault confirms receipt. Selling is Malaysia-only at launch — Malaysian sellers are paid cash to bank.",
+    title: "4. Get paid in USDC",
+    body: `${SELLER_PAYOUT_SUMMARY} ${NO_BANK_PAYOUT} ${PAYMENTS_NOT_LIVE}`,
   },
   {
     title: "5. One fee for everyone",

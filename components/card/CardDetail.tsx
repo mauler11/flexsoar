@@ -36,7 +36,11 @@ export interface CardDetailProps {
   showNumericFloat?: boolean;
   /** Photos from the item for the carousel */
   photos?: string[];
-  /** True when the physical pair sits in the warehouse — badged Vaulted. */
+  /**
+   * Badged Vaulted. Callers must derive this from `vaultState()` in
+   * app/(market)/vault-status.ts (warehouse custody AND authenticated_at),
+   * never from custody alone.
+   */
   vaulted?: boolean;
 }
 

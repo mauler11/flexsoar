@@ -41,6 +41,14 @@ import { formatMyr } from "@/components/card/format";
 import { Input } from "@/components/ui/Input";
 import { Banner } from "@/components/market/Banner";
 import {
+  NO_BANK_PAYOUT,
+  PAYMENTS_NOT_LIVE,
+  SELLER_PAYOUT_METHOD_LABEL,
+  SELLER_PAYOUT_SUMMARY,
+  SELLER_PAYOUT_TITLE,
+  SELLING_MALAYSIA_ONLY,
+} from "@/app/(market)/payout-copy";
+import {
   COUNTRIES,
   derivePayoutPreview,
 } from "@/components/market/intake/intake-config";
@@ -171,23 +179,19 @@ export function PricePayout({
           ))}
         </select>
         <span className="text-[10px] tracking-tight text-muted">
-          Malaysia sellers are paid cash to bank. Selling is Malaysia-only
-          at launch — other countries can&apos;t be paid out yet. Required
-          to submit.
+          {SELLING_MALAYSIA_ONLY} Required to submit.
         </span>
       </div>
 
       {previewedPayoutMethod === "credit" && (
         <Banner tone="error" title="Selling isn't available in your country yet">
-          FlexSoar pays sellers in cash to bank, Malaysia-only at launch.
-          There is no store credit and no other payout route, so a listing
-          from outside Malaysia could never pay you. Pick Malaysia above to
+          {SELLING_MALAYSIA_ONLY} {NO_BANK_PAYOUT} Pick Malaysia above to
           continue, if that&apos;s where you live.
         </Banner>
       )}
       {previewedPayoutMethod === "cash" && (
-        <Banner tone="info" title="You'll be paid in cash">
-          Your country routes to a cash bank payout.
+        <Banner tone="info" title={SELLER_PAYOUT_TITLE}>
+          {SELLER_PAYOUT_SUMMARY} {PAYMENTS_NOT_LIVE}
         </Banner>
       )}
 
@@ -229,7 +233,9 @@ export function PricePayout({
             aria-label="Payout method (determined by your country, not a choice)"
             className="rounded-xl border border-line-strong bg-overlay px-2 py-1.5 text-[12px] font-bold uppercase tracking-tight text-foreground"
           >
-            {previewedPayoutMethod ?? "select your country above"}
+            {previewedPayoutMethod === "cash"
+              ? SELLER_PAYOUT_METHOD_LABEL
+              : (previewedPayoutMethod ?? "select your country above")}
           </div>
         </div>
       </div>
@@ -239,8 +245,8 @@ export function PricePayout({
         {previewedPayoutMethod === "credit"
           ? "Blocked above: pick a supported country to continue."
           : previewedPayoutMethod === "cash"
-            ? "Cash is a bank payout after the sale clears, released after the platform's hold window. Proof of possession protects against an unproven seller, not a fulfilment count."
-            : "Select your country above to see how you'll be paid — Malaysia routes to a cash bank payout."}
+            ? `${PAYMENTS_NOT_LIVE} Proof of possession protects against an unproven seller, not a fulfilment count.`
+            : `Select your country above to see how you'll be paid. ${SELLING_MALAYSIA_ONLY}`}
       </div>
     </div>
   );
