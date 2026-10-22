@@ -6442,3 +6442,44 @@ missing evidence:
 
 Pinned files: 079 `558ab750…` and 080 `87e7386b…` unchanged; `pins80` → `PINS_OK`. Cleanup: the 080c survey had left five
 `payment_db_test_*` logins on the container. They were dropped together with the survey DB before this run (`pg_shdepend` 0).
+
+### 080c part B, round 3: 64-byte signature literals; FULL payment-db suite PASSES on 078+079+080 (2026-10-22)
+
+**Signature literals changed** (founder-approved test inputs; no assertion compares against them):
+
+| Location | Old | New | Decoded |
+|---|---|---|---|
+| `20_outcomes_recovery.sql:13` | `repeat('8',87)\|\|i` (65 bytes) | `repeat('5',87)\|\|i` | 64 bytes |
+| `50_races_setup.sql:33` (terminal) | `repeat('D',88)` (65 bytes) | `repeat('4',87)\|\|'D'` | 64 bytes |
+| `50_races_setup.sql:38` (revocation) | `repeat('E',88)` (65 bytes) | `repeat('4',87)\|\|'E'` | 64 bytes |
+
+Each new value is distinct from every other signature literal in the suite (`'2'`, `'3'`, `'4'`, `'5'`, `'6'`, `'9'`, `'A'`, `'B'`,
+`'C'`, `'F'`, `'G'` × 88). As before, the 50 terminal value is shared by the two terminal cases and the revocation value by all
+12 cases, each on its own synthetic network.
+
+**Run** (container `6ef7375a8c4e`, fresh `flexsoar_payment_v2_test` = 078 replay + 079 + 080 as postgres, `moved 0`; driver as in
+080b; test files docker-cp'd from the worktree):
+
+| Files | Result |
+|---|---|
+| 03, 05, 06 | PASS |
+| 07 | PASS. The SQL permit equals the production `encodePermit` (1380 hex chars), checked offline |
+| 08, 09 | PASS (`terms_guard`, `exact_fee` repairs) |
+| 10, 20, 30 | PASS (`core:10`, `core:20`, `core:30`) |
+| 35 | PASS |
+| 36-40 | PASS, each over its own real login (`worker:issuer` … `worker:notifier`) |
+| 46 | PASS (`worker_results`) |
+| 45 | PASS |
+| 47 | PASS (`signed_storage`; synthetic envelope from `make-signed-fixture.mjs`, offline, never broadcast) |
+| 40_concurrency_setup + 41/42 | PASS for modes 0 and 1, with real blocking observed (`duplicate:{0,1}:{a,b}`) |
+| 50, 70 | PASS (setup) |
+| 51/52 financial races (8 cases) + 53 after each | PASS, each with real blocking. Includes 58/59 terminal consumers for release_refund and refund_release, and 60 rollback_ack |
+| 57 + 51/52 queue races (4 cases) | PASS, with real row-lock probes, over the `payment_db_race_*` logins. The takeover cases also ran 54 and 55. 53 passed after each |
+| 71 | PASS (`expiry`, after a ≥45 s wall-clock wait) |
+| **90** | **PASS:** 34 original + 1 encoding + 2 repairs, then the final record `payment-db-completeness-3`, `requiredCheckpoints` 37, committed 2026-10-22 03:29:58Z, printed `PAYMENT_DB_FINAL_ACCEPTANCE_COMPLETE` |
+| 80/81/82 (`run_080_container.sh`) | PASS, exit 0 |
+
+**Cleanup:** the suite DB and its nine cluster-level test logins were dropped afterwards (`pg_shdepend` 0). Left in place:
+`flexsoar_080_base` (078+079) and the untouched `flexsoar_mig_test_20261021`. The container is stopped.
+
+**Pinned files:** 079 `558ab750…` and 080 `87e7386b…` unchanged; `pins80` → `PINS_OK`. `npm test` 585/585, tsc and build pass.

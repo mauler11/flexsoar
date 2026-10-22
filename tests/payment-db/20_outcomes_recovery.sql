@@ -10,7 +10,7 @@ BEGIN
   i:=i+1;f:=pg_temp.fixture(0::smallint);PERFORM public.fn_payment_v2_reconcile_event((f->>'event')::uuid);
   IF kind='released' THEN PERFORM pg_temp.attest(f,'receipt',i*4);PERFORM pg_temp.attest(f,'authentication_pass',i*4+1);decision:=pg_temp.attest(f,'release',i*4+2);
   ELSE decision:=pg_temp.attest(f,'refund',i*4+2);END IF;
-  f:=f||jsonb_build_object('terminalProof',(f->'proof')||jsonb_build_object('kind',kind,'signature',repeat('8',87)||i::text,'slot',30+i,'decisionRevision','1'));
+  f:=f||jsonb_build_object('terminalProof',(f->'proof')||jsonb_build_object('kind',kind,'signature',repeat('5',87)||i::text,'slot',30+i,'decisionRevision','1'));
   -- 068: the terminal observation's own retained evidence (subject attempt, action = kind), not the funded row.
   f:=f||jsonb_build_object('terminalProof',pg_temp.retained(f->'terminalProof','payment_event',(f->>'attempt')::uuid,kind,(f->>'network')::uuid));
   e:=public.fn_payment_v2_record_verified_event(f->'terminalProof');
