@@ -11,6 +11,8 @@ BEGIN
   IF kind='released' THEN PERFORM pg_temp.attest(f,'receipt',i*4);PERFORM pg_temp.attest(f,'authentication_pass',i*4+1);decision:=pg_temp.attest(f,'release',i*4+2);
   ELSE decision:=pg_temp.attest(f,'refund',i*4+2);END IF;
   f:=f||jsonb_build_object('terminalProof',(f->'proof')||jsonb_build_object('kind',kind,'signature',repeat('8',87)||i::text,'slot',30+i,'decisionRevision','1'));
+  -- 068: the terminal observation's own retained evidence (subject attempt, action = kind), not the funded row.
+  f:=f||jsonb_build_object('terminalProof',pg_temp.retained(f->'terminalProof','payment_event',(f->>'attempt')::uuid,kind,(f->>'network')::uuid));
   e:=public.fn_payment_v2_record_verified_event(f->'terminalProof');
   r:=public.fn_payment_v2_reconcile_event(e);r2:=public.fn_payment_v2_reconcile_event(e);PERFORM pg_temp.assert_true(r=r2,'terminal exact retry');
   PERFORM pg_temp.assert_true((SELECT state=kind FROM payment_v2.escrows WHERE attempt_id=(f->>'attempt')::uuid),'terminal state');

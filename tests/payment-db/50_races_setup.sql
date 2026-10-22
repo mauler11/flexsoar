@@ -32,9 +32,11 @@ DO $prepare$ DECLARE c record;d jsonb;p jsonb;cmd jsonb;buyer uuid;status jsonb;
    ELSE cmd:=pg_temp.attest(c.f,'refund',4);END IF;
    p:=(c.f->'proof')||jsonb_build_object('kind',CASE c.name WHEN 'release_refund' THEN 'released' ELSE 'refunded' END,'signature',repeat('D',88),'slot',60,'decisionRevision','1');
    -- Only this one terminal observation is the canonical fixture outcome. Its opposite is adversarial, NOT a second chain result.
+   p:=pg_temp.retained(p,'payment_event',(c.f->>'attempt')::uuid,p->>'kind',(c.f->>'network')::uuid); -- 068 retained evidence
    UPDATE payment_db_races.cases SET f=f||jsonb_build_object('terminal',p) WHERE name=c.name;
   END IF;
   d:=jsonb_build_object('saleId',c.f->>'sale','kind','revoked','finality','finalized','sale',c.f->'proof'->>'sale','genesis',c.f->'proof'->>'genesis','program',c.f->'proof'->>'program','generation','1','revision','1','signature',repeat('E',88),'slot',70);
+  d:=pg_temp.retained(d,'lifecycle',(c.f->>'sale')::uuid,'revoked',(c.f->>'network')::uuid); -- 068 retained evidence
   UPDATE payment_db_races.cases SET f=f||jsonb_build_object('revocation',d) WHERE name=c.name;
  END LOOP;
 END $prepare$;

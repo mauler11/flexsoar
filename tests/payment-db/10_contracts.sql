@@ -38,12 +38,15 @@ BEGIN
    cmd:=jsonb_build_object('escrowId',x,'commandId',gen_random_uuid(),'expectedRevision','0','action','receipt','evidenceDigest',repeat('ab',32),'pairCommitment',encode(sha256(uuid_send((f->>'item')::uuid)),'hex'));
    op:=public.fn_payment_v2_record_decision(cmd);
    proof:=jsonb_build_object('commandId',cmd->>'commandId','finality','finalized','sale',f->'proof'->>'sale','genesis',f->'proof'->>'genesis','program',f->'proof'->>'program','action','receipt','evidenceDigest',cmd->>'evidenceDigest','pairCommitment',cmd->>'pairCommitment','signature',repeat('5',88),'slot',3,'executedAtSeconds',extract(epoch FROM now())::bigint,'resultingRevision','0','actor',payment_v2.b58(st.public_key));
+   proof:=pg_temp.retained(proof,'attestation',(cmd->>'commandId')::uuid,'receipt',(f->>'network')::uuid); -- 068 retained evidence
    PERFORM public.fn_payment_v2_record_attestation(proof);PERFORM public.fn_payment_v2_record_attestation(proof);
    PERFORM pg_temp.assert_true((SELECT authentication='pending' FROM payment_v2.escrows WHERE id=x),'receipt is not authentication');
    PERFORM pg_temp.assert_true((SELECT status='pending_vault' FROM public.cards WHERE id=(f->>'card')::uuid),'receipt cannot unlock');
    SELECT id,user_id,person_id,role,public_key,active INTO st.id,st.user_id,st.person_id,st.role,st.public_key,st.active FROM payment_v2.staff WHERE role='authenticator';PERFORM set_config('request.jwt.claim.sub',st.user_id::text,true);
    cmd:=cmd||jsonb_build_object('commandId',gen_random_uuid(),'action','authentication_fail');op:=public.fn_payment_v2_record_decision(cmd);
-   proof:=proof||jsonb_build_object('commandId',cmd->>'commandId','action','authentication_fail','signature',repeat('6',88),'slot',4,'actor',payment_v2.b58(st.public_key));PERFORM public.fn_payment_v2_record_attestation(proof);
+   proof:=proof||jsonb_build_object('commandId',cmd->>'commandId','action','authentication_fail','signature',repeat('6',88),'slot',4,'actor',payment_v2.b58(st.public_key));
+   proof:=pg_temp.retained(proof,'attestation',(cmd->>'commandId')::uuid,'authentication_fail',(f->>'network')::uuid); -- 068: own row, replaces the receipt's evidenceId
+   PERFORM public.fn_payment_v2_record_attestation(proof);
    SELECT id,user_id,person_id,role,public_key,active INTO st.id,st.user_id,st.person_id,st.role,st.public_key,st.active FROM payment_v2.staff WHERE role='release';PERFORM set_config('request.jwt.claim.sub',st.user_id::text,true);
    cmd:=cmd||jsonb_build_object('commandId',gen_random_uuid(),'action','release');
    PERFORM pg_temp.expect_error(format('SELECT public.fn_payment_v2_record_decision(%L::jsonb)',cmd),'AUTHENTICATION_REQUIRED');

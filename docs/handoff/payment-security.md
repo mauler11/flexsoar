@@ -6408,3 +6408,37 @@ fn_confirm_shipment md5 `4f1b8f83…`):
 proofs inline, and will need the same wrap.
 
 **Verified unchanged:** 079 sha `558ab750…`, 080 sha `87e7386b…`, and `pins80` → `PINS_OK` (every runbook-pinned file).
+
+### 080c part B, round 2: test-body wraps (founder-approved). 10 passes; STOPPED at 20 on 65-byte signature literals
+
+**Wrapped** (each adds `pg_temp.retained(...)` and nothing else; no assertion, expected value or error code changed):
+
+| Location | Proof | Evidence row |
+|---|---|---|
+| `10_contracts.sql:41` | receipt attestation | attestation / decision (commandId) / `receipt` |
+| `10_contracts.sql:48` | authentication_fail attestation | its own row; replaces the evidenceId inherited from the receipt proof |
+| `20_outcomes_recovery.sql:15` | terminalProof | payment_event / attempt / its own kind (`released`/`refunded`), not the funded row |
+| `50_races_setup.sql:35` | canonical terminal | payment_event / attempt / `released`/`refunded` |
+| `50_races_setup.sql:39` | revocation | lifecycle / sale / `revoked` |
+
+**Left unwrapped on purpose.** These are negative tests derived from another proof, and their expected refusal is not about
+missing evidence:
+- `10:22` (CONFLICTING_EVIDENCE) and `10:23` (EVIDENCE_CORRESPONDENCE).
+- `20:27` (opposite terminal, CONFLICTING_EVIDENCE).
+- `50:24` (conflict proof, CONFLICTING_EVIDENCE).
+- `50:68` and `50:71` (CONFLICTING_EVIDENCE).
+- `50:27`: the revoked_funding proof, FUNDING_CONTRADICTS_SALE_STATE. It already carries the fixture's own evidence.
+
+**Run** (fresh 078+079+080 copy, isolated container):
+- PASS: 03, 05, 06, 07 (SQL permit = production `encodePermit`), 08, 09, **10 (`core:10`)**.
+- **FAIL: 20.** The cause is not missing evidence. 20's terminal signature literal `repeat('8',87)||i` decodes to **65 bytes**.
+  A retained transaction holds 64-byte signatures, and 068 requires `b58(tx[1..64]) = proof.signature`. No real evidence can
+  match that value. The helper fails closed (`fixture signature is not 64 base58 bytes`); `store_chain_evidence` would raise
+  `PAYMENT_V2_VERIFIED_TRANSACTION_IDENTITY`.
+- **Same defect in 50:** the terminal `repeat('D',88)` and revocation `repeat('E',88)` are 65 bytes.
+- The fixture's and 10's literals ('2', '3', '5', '6' × 88) are 64 bytes.
+- **Finding:** these literals were accepted before 068 because `proof_shape` checks only the base58 alphabet and length 80-96, not
+  the byte width. Choosing a fix means changing test signature values, which needs a founder decision.
+
+Pinned files: 079 `558ab750…` and 080 `87e7386b…` unchanged; `pins80` → `PINS_OK`. Cleanup: the 080c survey had left five
+`payment_db_test_*` logins on the container. They were dropped together with the survey DB before this run (`pg_shdepend` 0).
