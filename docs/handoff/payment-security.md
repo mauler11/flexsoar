@@ -6802,3 +6802,20 @@ Full report, runbook and unverified list: **`docs/handoff/solana-p1-upgrade.md`*
 - **Not done / unverified:** the real Squads program; Privy `signMessage` over the 61 bytes; `tests/payment-integration/integrated.mjs`
   (stale: it will fail at `open_sale`); nothing cross-checks the on-chain delay with the DB mode; no worker calls the 083 RPCs.
 - **Do not switch production to `solo` before the devnet rehearsal in the runbook passes.**
+
+## 2026-10-22 - P1b: R1 review fixes and devnet prerequisites (local only; NOT deployed)
+
+Full report, runbook and unverified list: **`docs/handoff/solana-p1b.md`** (supersedes parts of `solana-p1-upgrade.md`). Commits `ec0e56c`
+(program, init script), `7c56f73` (app, gate), plus this documentation.
+
+- **R1-01:** `ConfigV2` 819 / `SaleV2` 1090 bytes with `layout_version` and reserved padding; fresh deploy only; the init script stops if
+  the program id owns any account; the LAYOUT RULE (new fields from `reserved`; a change that cannot needs a migration instruction and
+  tests first) is in `lib.rs` and the doc.
+- **R1-02:** `install_governance_vault` removed; `propose_governance_vault` then `accept_governance_vault` (the proposed vault must sign via
+  CPI from the named controller program). A typo/unsignable address never activates and native governance is untouched until accept.
+- **R1-03:** `solana/scripts/init-v2.mjs` (pinned manifest, genesis check, mainnet refused, `--dry-run`, read-back of every field).
+- **Execution recheck** of `authenticated_at + release_delay` in `execute_outcome`; **pre-funding gate** `lib/solana/v2-funding-gate.ts`;
+  **R1-04** requirements in `worker-setup-plan.md` section 6b; `integrated.mjs` adapted (unrun); Privy proof plan.
+- **Results (committed tree `7c56f73`):** Rust 16; on-chain 165 groups (clean exit, peak 1.63 GB); `npm test` 677; `.so`
+  `0e4c710c221b4f1599a3af6303d18fb9f32c0f6e2910480f0b0bde122f4902dd`. `authorize_release` +1,210 CU; open/buy changes are inside run-to-run noise.
+- **Do not deploy anywhere before the devnet runbook in `solana-p1b.md` is run and its STOP points pass.**

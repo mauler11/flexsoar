@@ -1,5 +1,8 @@
 # P1: single program upgrade (seller-signed floor, release delay, vault governance)
 
+> **Superseded in part by `docs/handoff/solana-p1b.md` (R1 review fixes).** Where they differ, P1b wins: account sizes (now 819 / 1090), vault enrollment
+> (`install_governance_vault` is removed in favour of propose/accept), and the devnet runbook. Everything else here stands.
+
 Branch `track/payment-security`, 2026-10-22, built on `9cf20e2`. Implements the approved S1 design
 (`docs/handoff/solo-operator-design.md` sections 3.3 and 5). **Local only. Nothing was deployed, no network was touched, no real
 key was used or created.** Throwaway keypairs exist only in memory in the test harness; the SBF build wrote a throwaway

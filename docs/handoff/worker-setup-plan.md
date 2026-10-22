@@ -282,6 +282,42 @@ ALTER ROLE flexsoar_worker_<r> SET statement_timeout = '30s';
 
 ---
 
+## 6b. Seller-signed listing: UI and issuer requirements (R1-04; added with P1b)
+
+The program (P1) refuses any sale whose total is below a floor the card owner signed, but nothing in the app yet connects a seller's
+wallet to that signature. The builders exist (`lib/solana/listing-v2.ts`); the trust boundary below is what the worker and UI
+milestone (M3, rehearsed at M5) must implement and an independent reviewer must sign off before anyone claims "an issuer leak cannot
+under-price". A correct builder alone does not establish it.
+
+**Seller UI (the signing flow)**
+1. **Derive, never accept.** The UI computes the floor and expiry itself from data it can check: the listing price in MYR, the FX quote
+   it shows the seller, and the fixed 2% tolerance (`listingFloor`, rounded up). It must NOT sign bytes handed to it by the issuer or
+   by any API response. The 61 message bytes are built in the browser from (domain, program, card, sale id, generation, floor,
+   expiry) with `encodeListing`.
+2. **Display independently.** Before the wallet prompt the seller sees, in plain text derived from those same values: the price they
+   asked for, the minimum they will accept in USDC (and its MYR equivalent at the displayed rate), and the date the listing lapses. The
+   display and the signed bytes come from one object, so they cannot diverge. The sale id, card and network are shown as identifiers.
+3. **Verify what comes back.** The signature returned by the wallet is checked with `verifyListingSignature` against the exact bytes
+   the UI built and the seller's registered wallet, before it leaves the browser. A wallet that wraps or prefixes the message fails
+   this check; that is the stop condition in the Privy proof plan (`docs/handoff/solana-p1b.md`).
+4. **Persist immutably.** The signed message and signature go to the database through `fn_payment_v2_record_listing` (083), which
+   recomputes the binding from the sale row and bounds the floor to the quote. The row is immutable. A changed price is a new sale id
+   and a new signature, never an edit.
+
+**Issuer submission**
+5. **Pair or nothing.** The issuer submits only `openSaleWithListing(open, listing, signature)`: the Ed25519 instruction and
+   `open_sale`, in that order, fee-paid by the issuer. The bare `openSaleInstructionFromContext` output is never submitted alone (the
+   program would refuse it with error 6007). The worker reads the stored listing with `fn_payment_v2_listing_for_open` and refuses to
+   build an open transaction when none is stored.
+6. **No substitution.** The worker must re-derive the binding from its own sale row and compare it to the stored message before
+   submitting, so a corrupted store cannot open a sale on a card the seller did not sign for.
+7. **Gate before funding.** `checkFundingGate` (`lib/solana/v2-funding-gate.ts`) runs before any funding-enable approval and must
+   report no failures: on-chain delay and vault state at least as strict as the database's `governance_mode`.
+
+**Review checklist for this milestone:** the UI test shows the signed bytes equal the displayed numbers for a table of prices and
+rates; an issuer-supplied message is refused by the UI; a wallet that changes the bytes is detected; the worker has no code path that
+submits `open_sale` without the pair.
+
 ## 7. Milestones to first real purchase
 
 | # | Milestone | Exit test | Who |
@@ -297,6 +333,8 @@ ALTER ROLE flexsoar_worker_<r> SET statement_timeout = '30s';
 | M8 | **Prod DB + host:** worker logins (§4), `networks` row with `funding_enabled=false`, staff rows, workers running with funding off | §4 grant matrix; `worker_identity` per login; G2 check passes; 7 days of clean heartbeats; a guardian pause drill while already paused | founder (SQL, host) + agent (runbook) |
 | M9 | **Canary:** a tiny `max_trade`; founder-controlled buyer and seller accounts; full lifecycle with real USDC | DB and chain invariants hold; refund path tested; kill switch tested | founder |
 | M10 | **First real purchase:** raise caps modestly, flip per G4, deploy `FUNDING_AVAILABLE=true` | The first external purchase reconciles end to end | founder |
+
+M3 builds, and M5 rehearses on devnet, the seller-listing flow and issuer submission rules in section 6b (R1-04); M6's reviewer signs off section 6b explicitly. M5 also runs `init-v2.mjs` (dry run, then real) and the pre-funding gate, per `docs/handoff/solana-p1b.md`.
 
 ---
 
