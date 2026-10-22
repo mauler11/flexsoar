@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { createHash } from 'node:crypto';
-import { CONFIG_SIZE, MAINNET_GENESIS, ROLE_NAMES, buildInitInstruction, initializeV2, parseManifest, preflight, verifyConfig, type InitConnection } from '@/solana/scripts/init-v2.mjs';
+import { CONFIG_DISCRIMINATOR, CONFIG_SIZE, MAINNET_GENESIS, ROLE_NAMES, buildInitInstruction, initializeV2, parseManifest, preflight, verifyConfig, type InitConnection } from '@/solana/scripts/init-v2.mjs';
 
 const k = (n: number) => new PublicKey(new Uint8Array(32).fill(n));
 const LOADER = new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111'), TOKEN = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
@@ -17,10 +17,11 @@ function expectedConfig(m: ReturnType<typeof parseManifest>): Buffer {
   const b = Buffer.alloc(CONFIG_SIZE);
   m.domain.toBuffer().copy(b, 8); m.policyDigest.copy(b, 40); m.treasury.toBuffer().copy(b, 72); m.mint.toBuffer().copy(b, 104);
   ROLE_NAMES.forEach((n, i) => m.roles[n].toBuffer().copy(b, 136 + 32 * i)); m.governance.forEach((g, i) => g.toBuffer().copy(b, 392 + 32 * i));
+  CONFIG_DISCRIMINATOR.copy(b, 0); // the real SHA-256("account:ConfigV2")[0..8], not zeros (R2-06)
   b.writeBigUInt64LE(BigInt(1), 552); b[560] = 1; b[690] = 1; return b;
 }
 
-interface World { genesis?: string; programExecutable?: boolean; authority?: PublicKey | null; decimals?: number; owned?: number; configExists?: boolean; chainConfig?: Buffer | null; simErr?: unknown }
+interface World { genesis?: string; programExecutable?: boolean; authority?: PublicKey | null; decimals?: number; owned?: number; configExists?: boolean; chainConfig?: Buffer | null; simErr?: unknown; configExecutable?: boolean }
 function fakeConnection(w: World = {}) {
   const m = parseManifest(manifestRaw()), { config, programData } = buildInitInstruction(m);
   const calls = { sent: 0, simulated: 0 };
@@ -33,7 +34,7 @@ function fakeConnection(w: World = {}) {
       if (key.equals(m.programId)) return { executable: w.programExecutable ?? true, owner: LOADER, data: Buffer.alloc(36) };
       if (key.equals(programData)) return { owner: LOADER, data: pd };
       if (key.equals(m.mint)) return { owner: TOKEN, data: mint };
-      if (key.equals(config)) return sent ? { owner: m.programId, data: w.chainConfig ?? expectedConfig(m) } : (w.configExists ? { owner: m.programId, data: Buffer.alloc(CONFIG_SIZE) } : null);
+      if (key.equals(config)) return sent ? { executable: w.configExecutable ?? false, owner: m.programId, data: w.chainConfig ?? expectedConfig(m) } : (w.configExists ? { owner: m.programId, data: Buffer.alloc(CONFIG_SIZE) } : null);
       return null;
     },
     getProgramAccounts: async () => Array.from({ length: w.owned ?? 0 }, () => ({ pubkey: k(99) })),
@@ -103,11 +104,25 @@ describe('init-v2 run', () => {
     expect(() => verifyConfig(good, m)).not.toThrow();
     const flips: [string, number][] = [['domain', 8], ['policy', 40], ['treasury', 72], ['mint', 104], ['issuer', 136], ['guardian', 136 + 32 * 7], ['governance[0]', 392], ['governance[2]', 392 + 64],
       ['governance_vault', 488], ['governance_policy', 520], ['epoch', 552], ['funding_paused', 560], ['outflow_paused', 561], ['max_trade', 562], ['max_escrow', 570], ['outstanding', 578],
-      ['release_delay', 586], ['pending_vault', 594], ['pending_controller', 626], ['pending_policy', 658], ['layout_version', 690], ['reserved first byte', 691], ['reserved last byte', 818]];
+      ['release_delay', 586], ['pending_vault', 594], ['pending_controller', 626], ['pending_policy', 658], ['layout_version', 690], ['proposal_revision', 691], ['proposal_revision last byte', 698], ['reserved first byte', 699], ['reserved last byte', 818]];
     for (const [name, offset] of flips) { const bad = Buffer.from(good); bad[offset] ^= 1; expect(() => verifyConfig(bad, m), name).toThrow(/differs from the manifest|zero|layout_version|reserved/); }
     expect(() => verifyConfig(good.subarray(0, 594), m)).toThrow(/594 bytes, expected 819/);
     const { connection, calls } = fakeConnection({ chainConfig: (() => { const b = Buffer.from(good); b[560] = 0; return b; })() });
     await refuses(initializeV2({ connection, manifest: manifestRaw(), dryRun: false, bootstrap }), /funding_paused: on chain 0, manifest 1/);
     expect(calls.sent).toBe(1); // it was sent; the refusal is the read-back, and it is loud
+  });
+  it('R2-06: the account header must be the ConfigV2 discriminator; mutating ANY of its 8 bytes is refused', async () => {
+    const m = parseManifest(manifestRaw()), good = expectedConfig(m);
+    expect(Buffer.from(good.subarray(0, 8)).equals(createHash('sha256').update('account:ConfigV2').digest().subarray(0, 8))).toBe(true); // the fixture is the real header
+    for (let i = 0; i < 8; i++) { const bad = Buffer.from(good); bad[i] ^= 1; expect(() => verifyConfig(bad, m), `header byte ${i}`).toThrow(/account discriminator is ConfigV2: on chain false, manifest true/); }
+    const zeroed = Buffer.from(good); zeroed.fill(0, 0, 8);
+    expect(() => verifyConfig(zeroed, m)).toThrow(/account discriminator is ConfigV2/); // what the P1b fixture used to accept
+    const { connection, calls } = fakeConnection({ chainConfig: zeroed });
+    await refuses(initializeV2({ connection, manifest: manifestRaw(), dryRun: false, bootstrap }), /account discriminator is ConfigV2/);
+    expect(calls.sent).toBe(1);
+  });
+  it('R2-06: the read-back config must be plain data (executable=false)', async () => {
+    const { connection } = fakeConnection({ configExecutable: true });
+    await refuses(initializeV2({ connection, manifest: manifestRaw(), dryRun: false, bootstrap }), /config account is executable/);
   });
 });
