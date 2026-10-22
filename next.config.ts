@@ -6,15 +6,50 @@ import type { NextConfig } from "next";
  * own CSP guidance (auth.privy.io iframe + WalletConnect + Turnstile),
  * adapted for Next.js (inline runtime scripts/styles) and our runtime:
  *
- * Deliberate pragmatic spots (tighten post-launch, not pre-launch):
- * - frame-src ends with `https:` — the card on-ramp loads provider
- *   iframes (MoonPay/Stripe/Meld vary by region) whose hosts we cannot
- *   enumerate without breaking funding. http:/data: frames stay blocked.
- * - connect-src ends with `https: wss:` — same reason for provider APIs
- *   and wallet RPCs. `frame-ancestors 'none'` + XFO DENY still kill
- *   clickjacking outright, which is what the checklist is really after.
+ * connect-src/frame-src enumerate the browser and installed SDK origins.
+ * Environment URLs contribute only their origin; paths and API keys never
+ * become CSP sources. Other directives intentionally retain their policy.
  */
 const isDev = process.env.NODE_ENV !== "production";
+
+/** Optional deployment origins; malformed configured values fail at build time. */
+function configuredOrigin(name: string): string[] {
+  const value = process.env[name]?.trim();
+  if (!value) return [];
+  const url = new URL(value);
+  if (url.protocol !== "https:" || url.hostname.includes("*") || url.username || url.password) {
+    throw new Error(`${name} must be an HTTPS URL with an explicit host`);
+  }
+  return [url.origin];
+}
+
+const supabaseOrigins = configuredOrigin("NEXT_PUBLIC_SUPABASE_URL");
+const r2AccountId = process.env.R2_ACCOUNT_ID?.trim();
+if (r2AccountId && !/^[a-f0-9]{32}$/i.test(r2AccountId)) {
+  throw new Error("R2_ACCOUNT_ID must be a 32-character account ID");
+}
+const connectSources = [
+  "'self'",
+  ...supabaseOrigins,
+  ...supabaseOrigins.map((origin) => origin.replace(/^https:/, "wss:")),
+  "https://auth.privy.io",
+  "https://verify.walletconnect.com",
+  "https://verify.walletconnect.org",
+  "https://explorer-api.walletconnect.com",
+  "wss://relay.walletconnect.com",
+  "wss://relay.walletconnect.org",
+  "https://challenges.cloudflare.com",
+  "https://api.devnet.solana.com",
+  "https://api.mainnet-beta.solana.com",
+  "https://solana-devnet.rpc.privy.systems",
+  "https://solana-mainnet.rpc.privy.systems",
+  "wss://solana-devnet.rpc.privy.systems",
+  "wss://solana-mainnet.rpc.privy.systems",
+  "https://api.moonpay.com",
+  "https://api.relay.link",
+  "https://api.testnets.relay.link",
+  ...(r2AccountId ? [`https://${r2AccountId}.r2.cloudflarestorage.com`] : []),
+];
 
 const contentSecurityPolicy = [
   "default-src 'self'",
@@ -29,8 +64,8 @@ const contentSecurityPolicy = [
   "form-action 'self'",
   "frame-ancestors 'none'",
   "child-src https://auth.privy.io https://verify.walletconnect.com https://verify.walletconnect.org",
-  "frame-src https://auth.privy.io https://verify.walletconnect.com https://verify.walletconnect.org https://challenges.cloudflare.com https:",
-  "connect-src 'self' https://auth.privy.io https://*.supabase.co wss://*.supabase.co https://challenges.cloudflare.com https: wss:",
+  "frame-src https://auth.privy.io https://verify.walletconnect.com https://verify.walletconnect.org https://challenges.cloudflare.com",
+  `connect-src ${connectSources.join(" ")}`,
   "worker-src 'self' blob:",
 ].join("; ");
 
