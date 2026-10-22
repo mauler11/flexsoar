@@ -6367,3 +6367,44 @@ replacement; the signed-out page loads remain the anon check.
 - `scripts/smoke_catalog.sql:810` points to it for settlement, vault custody and trades.
 - Comments in applied migrations `022b:248`, `024c:4`, `026:294`, `026b:20` and `026b:159`, and `027:868`, mention it.
   Applied migrations are never edited; this is historical text only.
+
+### 080c part B: payment-db fixtures on 068's retained-evidence model (STOPPED at 10/20; test-body proofs)
+
+**Fixture change (`950db0e`, additions only, 0 lines removed, no assertion touched):**
+- `01_fixtures.sql` adds two helpers:
+  - `pg_temp.b58_bytes` (base58 → bytes). `payment_v2.unb58` only decodes 32-byte keys, and signatures are 64 bytes.
+  - `pg_temp.retained(proof, kind, subject, action, network)`. It stores a synthetic `verified_chain_evidence` envelope through
+    the real `fn_payment_v2_store_chain_evidence`, and returns `proof || {evidenceId}`.
+- **The envelope:**
+  - 1 signature: the proof's own 64 bytes, so `b58(tx[1..64])` equals the proof signature as 068 checks.
+  - A 32-byte synthetic message. It is never a real or broadcastable transaction.
+  - `rpcResult`/`parsedRpcResult` carry the same slot, blockTime, `meta.err=null` and signature, as 068/069 check.
+- **Wired into:**
+  - `fixture()`: the `opened` lifecycle proof (subject = sale) and the funded/direct event proof (subject = attempt).
+  - `02_attestation_fixture.sql` `attest()`: each attestation proof (subject = decision/commandId).
+- Production does the same: `lib/db/payment-reconciliation.ts` and `payment-v2-workers.ts` pass `evidenceId` in the proof.
+
+**Run** (isolated container `6ef7375a8c4e`, fresh `flexsoar_payment_v2_test` = 078 replay + 079 + 080 as postgres, `moved 0`;
+fn_confirm_shipment md5 `4f1b8f83…`):
+
+| File | Result |
+|---|---|
+| 80/81/82 | PASS (080b run, `T080_RUN_PASS`) |
+| 03, 05 | PASS |
+| 06 | **PASS** (failed before this change) |
+| 07 | PASS. Offline comparison: SQL permit = production `protocol-v2.ts encodePermit`, 1380 hex chars, sha256 `06c53426…` |
+| 08, 09 | PASS |
+| **10_contracts** | **FAIL `PAYMENT_V2_RETAINED_EVIDENCE_REQUIRED`** at the receipt attestation proof its **test body** builds inline (≈line 41). |
+| 20_outcomes_recovery | **FAIL, same error**, at the `terminalProof` its test body builds inline (≈line 13). It inherits the fixture's *funded* `evidenceId`, so the subject action mismatches. *(Survey run past the stop.)* |
+| 30, 35, 36-40 (5 real worker logins), 46, 45 | PASS *(survey run past the stop)* |
+| 47, 41/42, 50-60, 70/71, 90 | not run |
+
+**Why this stopped:**
+- 10 and 20 construct attestation and terminal proofs in the test bodies, not in fixture code. The founder's rule allows fixture
+  and setup changes only.
+- No assertion or expected value is wrong. The bodies only need the same `pg_temp.retained(...)` wrap before each inline proof.
+
+**Also needed, but not reached:** `50_races_setup.sql` (setup code) builds terminal (`'D'×88`) and revocation (`'E'×88`)
+proofs inline, and will need the same wrap.
+
+**Verified unchanged:** 079 sha `558ab750…`, 080 sha `87e7386b…`, and `pins80` → `PINS_OK` (every runbook-pinned file).
