@@ -18,8 +18,8 @@
  * The key is built ENTIRELY server-side: `scope`, the caller's id, and a
  * randomUUID — the client's filename is never consulted (the client can't
  * choose its namespace). Upload policy (image types, size caps, signing-in)
- * lives in the callers; this module also caps and signs the declared size,
- * maps a known contentType to an extension, and signs.
+ * lives in the callers; this module only maps a known contentType to an
+ * extension and signs.
  *
  * The bucket must allow browser cross-origin PUTs (a bucket-level CORS rule in
  * the R2 dashboard — filed in docs/handoff/admin.md). Missing config fails
@@ -99,9 +99,6 @@ const EXT_BY_MIME: Record<string, string> = {
   "image/webp": "webp",
 };
 
-/** Intake hard cap, in bytes (8 MiB). Enforced before signing. */
-export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
-
 export interface R2Upload {
   /** Short-lived PUT target; the browser uploads the file straight here. */
   uploadUrl: string;
@@ -123,12 +120,8 @@ export async function signUploadUrl(input: {
   scope: R2Scope;
   id: string;
   contentType: string;
-  sizeBytes: number;
   httpsOnly?: boolean;
 }): Promise<R2Upload> {
-  if (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes <= 0 || input.sizeBytes > MAX_UPLOAD_BYTES) {
-    throw new Error("Photos must be a whole number of bytes between 1 byte and 8MB.");
-  }
   const read = readR2Config();
   if (!read.ok) {
     throw new Error(
@@ -158,11 +151,8 @@ export async function signUploadUrl(input: {
       Bucket: bucket,
       Key: key,
       ContentType: input.contentType,
-      // The signature binds the HTTP body framing to the validated declaration.
-      // A larger body requires a different Content-Length and invalidates it.
-      ContentLength: input.sizeBytes,
     }),
-    { expiresIn: 120, signableHeaders: new Set(["content-length"]) },
+    { expiresIn: 120 },
   );
 
   const builtUrl = `${publicUrl.replace(/\/+$/, "")}/${key}`;
