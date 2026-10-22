@@ -18,6 +18,7 @@
 
 import type { Metadata } from "next";
 import Link from "next/link";
+import { SELLER_PAYOUT_METHOD_LABEL } from "@/app/(market)/payout-copy";
 import { notFound } from "next/navigation";
 import { requireAdminPage } from "@/components/admin/auth";
 import { getSellerHistory, getSubmission } from "@/components/admin/db-reads";
@@ -108,7 +109,10 @@ export default async function ReviewSubmissionPage({
               : formatMyr(submission.asking_price_cents)}
           </p>
           <p className="font-mono text-[10px] tracking-tight text-muted">
-            paid as {submission.submitted_payout} · Fair Market Price{" "}
+            paid as{" "}
+            {submission.submitted_payout === "cash"
+              ? SELLER_PAYOUT_METHOD_LABEL
+              : submission.submitted_payout}{" "} · Fair Market Price{" "}
             {submission.sku.market_price_cents == null
               ? "—"
               : formatMyr(submission.sku.market_price_cents)}

@@ -35,7 +35,7 @@ const contentSecurityPolicy = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  poweredByHeader: false,
   experimental: {
     // Client router cache: repeat visits (back button, re-toggled filters)
     // render instantly from cache instead of flashing loading.tsx. Server
@@ -57,6 +57,15 @@ const nextConfig: NextConfig = {
           { key: "X-Frame-Options", value: "DENY" },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // Start HSTS at one day; after HTTPS/redirect monitoring, ramp to
+          // one week, one month, then one year. Audit every subdomain before
+          // considering includeSubDomains; evaluate preload separately later.
+          { key: "Strict-Transport-Security", value: "max-age=86400" },
+          // Listing photos use file inputs, with no capture or getUserMedia.
+          {
+            key: "Permissions-Policy",
+            value: "camera=(), microphone=(), geolocation=()",
+          },
         ],
       },
     ];

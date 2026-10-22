@@ -17,6 +17,7 @@
 
 import type { Metadata } from "next";
 import Link from "next/link";
+import { SELLER_PAYOUT_METHOD_LABEL } from "@/app/(market)/payout-copy";
 import { requireAdminPage } from "@/components/admin/auth";
 import {
   getPendingSubmissions,
@@ -152,7 +153,11 @@ export default async function SubmissionsQueuePage() {
                       ? "—"
                       : formatMyr(submission.asking_price_cents)}
                   </Td>
-                  <Td className="text-muted">{submission.submitted_payout}</Td>
+                  <Td className="text-muted">
+                    {submission.submitted_payout === "cash"
+                      ? SELLER_PAYOUT_METHOD_LABEL
+                      : submission.submitted_payout}
+                  </Td>
                   <Td className="text-muted tabular-nums">
                     {new Date(submission.created_at)
                       .toISOString()
