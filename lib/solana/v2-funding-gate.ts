@@ -60,6 +60,8 @@ export function parseGovernanceModeRows(rows: unknown): GovernanceModeRow {
   return { operational_separation: r.operational_separation, governors_required: r.governors_required, release_delay_seconds: r.release_delay_seconds };
 }
 
+/** Rejections are not always Error objects (null, strings, plain objects); never read .message off an unknown. */
+function errorText(e: unknown): string { return e instanceof Error ? e.message : String(e); }
 function strictBool(b: number, name: string): boolean { if (b !== 0 && b !== 1) throw new Error(`${name} is ${b}, expected 0 or 1`); return b === 1; }
 
 /** Strict decode: every boolean must be 0/1 and the discriminator must be ConfigV2's. Throws on anything else. */
@@ -73,8 +75,8 @@ export function decodeConfigV2(bytes: Uint8Array): ConfigV2View {
     maxTrade: view.getBigUint64(562, true), maxEscrow: view.getBigUint64(570, true), proposalRevision: view.getBigUint64(691, true) };
 }
 
-/** Pure policy over validated inputs. Every failure is reported so an operator sees the whole gap at once. */
-export function evaluateFundingGate(config: ConfigV2View, db: GovernanceModeRow, expectedGenesis: string): { ok: boolean; failures: string[] } {
+/** INTERNAL policy over already-validated inputs; not an approval boundary (no row parsing, no RPC binding). Use checkFundingGate. */
+function evaluatePolicy(config: ConfigV2View, db: GovernanceModeRow, expectedGenesis: string): { ok: boolean; failures: string[] } {
   const failures: string[] = [];
   if (config.layoutVersion !== CONFIG_LAYOUT_VERSION) failures.push(`config layout_version is ${config.layoutVersion}, expected ${CONFIG_LAYOUT_VERSION}`);
   if (config.domain !== expectedGenesis) failures.push('config domain is not the pinned cluster genesis hash');
@@ -98,13 +100,14 @@ function accountReply(raw: unknown): AccountReply {
   return r;
 }
 
-/** Observes the pinned deployment and decides. Never throws: any RPC error or malformed reply is a refusal with the reason. */
+/** Observes the pinned deployment and decides. Every failure it can anticipate (bad row, wrong cluster, RPC rejection of any kind, malformed reply, bad pinned input) comes back as ok:false with a reason; callers must still treat an unexpected exception as a refusal. */
 export async function checkFundingGate(rpc: GateRpc, pinned: PinnedDeployment, dbRows: unknown): Promise<GateDecision> {
-  const target: GateTarget = { genesis: null, program: pinned.programId, config: null, slot: null };
+  const target: GateTarget = { genesis: null, program: typeof pinned?.programId === 'string' ? pinned.programId : '', config: null, slot: null };
   const refuse = (failures: string[], config: ConfigV2View | null = null, mode: GovernanceModeRow | null = null): GateDecision => ({ ok: false, failures, target, config, mode });
   let mode: GovernanceModeRow;
-  try { mode = parseGovernanceModeRows(dbRows); } catch (e) { return refuse([(e as Error).message]); }
+  try { mode = parseGovernanceModeRows(dbRows); } catch (e) { return refuse([errorText(e)]); }
   try {
+    if (!pinned || typeof pinned.programId !== 'string' || typeof pinned.genesisHash !== 'string') return refuse(['the pinned deployment (genesisHash, programId) is missing or malformed'], null, mode);
     const program = new PublicKey(pinned.programId), pinnedGenesis = new PublicKey(pinned.genesisHash).toBase58();
     const config = PublicKey.findProgramAddressSync([Buffer.from('config-v2')], program)[0].toBase58();
     target.config = config;
@@ -125,10 +128,10 @@ export async function checkFundingGate(rpc: GateRpc, pinned: PinnedDeployment, d
     // Invariants a program-written account always satisfies; a violation means the account is not what the program produced.
     if (!allZero(bytes.subarray(626, 690))) failures.push('pending controller or policy is not empty');
     if (!allZero(bytes.subarray(699, 819))) failures.push('reserved bytes are not zero');
-    const policy = evaluateFundingGate(view, mode, pinnedGenesis);
+    const policy = evaluatePolicy(view, mode, pinnedGenesis);
     failures.push(...policy.failures);
     return { ok: failures.length === 0, failures, target, config: view, mode };
   } catch (e) {
-    return refuse([`RPC or decoding error, refusing: ${(e as Error).message}`], null, mode);
+    return refuse([`RPC or decoding error, refusing: ${errorText(e)}`], null, mode);
   }
 }

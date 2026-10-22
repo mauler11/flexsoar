@@ -164,3 +164,19 @@ describe('the policy itself (on-chain config vs database governance_mode)', () =
     expect(ts.proposalRevision).toBe(BigInt(9)); expect(js.proposalRevision).toBe(BigInt(9)); expect(js.discriminatorOk).toBe(true);
   });
 });
+
+describe('R3: the gate returns a refusal for rejections that are not Error objects and for malformed pinned input', () => {
+  it.each([['null', null], ['undefined', undefined], ['a string', 'plain string rejection'], ['a plain object', { code: 429 }]])('an RPC rejection with %s is ok:false', async (_n, reason) => {
+    const rpc: GateRpc = async () => { throw reason; };
+    const d = await checkFundingGate(rpc, PINNED, SOLO);
+    expect(d.ok).toBe(false); expect(d.failures[0]).toMatch(/^RPC or decoding error, refusing: /);
+  });
+  it.each([['null', null], ['undefined', undefined], ['an empty object', {}], ['a numeric program id', { genesisHash: GENESIS, programId: 5 }], ['a missing genesis', { programId: PROGRAM }]])('a pinned deployment that is %s is ok:false', async (_n, pinned) => {
+    const { rpc, calls } = world(), d = await checkFundingGate(rpc, pinned as unknown as PinnedDeployment, SOLO);
+    expect(d.ok).toBe(false); expect(d.failures[0]).toMatch(/pinned deployment .* missing or malformed/); expect(calls).toEqual([]);
+  });
+  it('a pinned program id that is not a public key is refused, not thrown', async () => {
+    const { rpc } = world(), d = await checkFundingGate(rpc, { genesisHash: GENESIS, programId: 'not-a-key' }, SOLO);
+    expect(d.ok).toBe(false); expect(d.failures[0]).toMatch(/RPC or decoding error, refusing/);
+  });
+});

@@ -142,3 +142,21 @@ TypeScript test file was edited.
 6. **CU:** the cause of the uniform +45 is a hypothesis; the `accept` figure includes the mock program's cost.
 7. **Process note:** to get matched numbers I built the P1b sources from git and ran a temporary copy of the P1b harness with CU logging
    added. That copy was deleted and is not committed; the P1b binary reproduced its recorded hash.
+
+## 8. R3 review (2026-10-23): dispositions
+
+Review: `flexsoar-reviews\proposals-20261023\r3\p1c-security-review.md`, target `f85aa95`. All six R2 findings are RESOLVED in the intended
+entry paths; two LOW residuals. **Neither changes the binary** (`.so` stays `ec55c456...fab8fba`); both are resolved as the reviewer's documented
+alternative and recorded here.
+
+| Ref | Finding | Disposition |
+|---|---|---|
+| R3-01 LOW | `rotate_governance` excludes the **pending** vault from the native member list but not the **active** vault, so an active vault V can be rotated into the (dormant) native list by the vault itself. | **Documented, not changed.** Native members are ignored while a vault is active, so the overlap restores no native authority, lowers no threshold and gives an outsider nothing; it needs current governance to do it. The invariant "a vault shares no key with any role or native member" therefore holds **at proposal, at acceptance and against a pending vault**, **not** for an already-active vault versus the native list. The only effect is that re-proposing that same V later is refused until the native list is corrected. **Recommend fixing in the program before mainnet** (reject a nonzero `governance_vault` in `rotate_governance`'s check); that is a binary change and needs its own review cycle, so it is not made inside the devnet rehearsal. Sections 1 (R2-04 row) and 3 are read with this qualification. |
+| R3-02 LOW | `layout_version` stays 1 although `proposal_revision` now occupies bytes that P1b called reserved. | **Documented, not changed.** P1, P1b and P1c layouts are **provisional and were never deployed anywhere** (that "never deployed" claim is still unverified by inventory; the devnet inventory in the rehearsal is the first check). The layout the devnet rehearsal deploys (`ConfigV2` 819 bytes with `layout_version` 1, `proposal_revision` @691, `reserved` @699; `SaleV2` 1090) is declared the **one immutable version-1 baseline**. The LAYOUT RULE's "bump `LAYOUT_VERSION` when the meaning of reserved bytes changes" applies from that first deployment on; changes made before it, as in P1c, are folded into the baseline. A config's version byte is not an attestation of program code (the funding gate deliberately does not claim it); the deployed binary hash is verified separately (rehearsal step 4). |
+
+Also from R3, applied in TypeScript (no program change): `evaluateFundingGate` is no longer exported (it was a documented pure helper that could be
+mistaken for the approval boundary; it is now `evaluatePolicy`, internal), and `checkFundingGate` now turns rejections that are not `Error`
+objects (null, undefined, strings, plain objects) and a missing or malformed pinned deployment into `ok:false` instead of a secondary exception.
+It is still not a promise that nothing can throw; the runbook treats any exception as a refusal. Tests added for each shape (60 in that file).
+Noted, no change: `Buffer.from(..., 'base64')` is permissive but the decoded bytes are fully checked; and the funding test's RPC failure
+injection fails the first account read rather than separately injecting at the config read (the same `catch` encloses both).
