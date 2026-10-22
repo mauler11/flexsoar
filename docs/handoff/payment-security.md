@@ -6565,9 +6565,10 @@ Totals: `npm test` **590/590** (was 586; âˆ’13 mirrors, +17 new, settle block 5â
   - Consequences: user A cannot link with a signature made for B's message, and cannot claim an address whose key A does not
     hold. Both are tested.
   - A replay inside the window re-links the same address to the same user, which is harmless.
-- **Rate limit:** **none.** `lib/api/rate-limit.ts` exists but is not used here.
-  - Abuse requires a session plus a valid signature, and each call only rewrites the caller's own column. Low risk.
-  - Recommend adding `checkRateLimit` per user (track/data).
+- **Rate limit:** *corrected after H1.* H1 said "none", which was wrong.
+  - `proxy.ts:65-71` already throttled every `/api/solana/*` path per IP (`SOLANA_API_RULE`, 30/min), with link-wallet sharing
+    that bucket.
+  - What was missing was a per-user limit. That was added afterwards (see "H1 follow-up" below).
 - **Pending or settled payouts:** an overwrite cannot redirect them.
   - The v2 seller destination is copied into `payment_v2.sales.seller_wallet` when the sale is prepared
     (`060_payment_v2_contracts.sql:113-117`). On chain, `open_sale` binds seller = card owner and seller token = its ATA
@@ -6593,3 +6594,22 @@ Totals: `npm test` **590/590** (was 586; âˆ’13 mirrors, +17 new, settle block 5â
 - `lib/db/purchase-payment.ts` `recoverOrSettlePayment`, and `lib/solana/quotes.ts` `issueQuote`/`verifyQuote`/
   `verifyQuoteSignature`: no app caller any more; tests only.
 - The `stripe` dependency: now used only by `createConnectAccount` and the app's Stripe checkout actions (`app/(market)/actions.ts`).
+
+### H1 follow-up (Part 0): per-session-user rate limit on /api/solana/link-wallet
+
+- **`app/api/solana/link-wallet/route.ts`:** after the 401 check and before any parsing, verification or write, both GET and
+  POST call the repo's existing `checkRateLimit` with `SOLANA_API_RULE` (30/min).
+  - Key: `link-wallet:<METHOD>:<session user id>`, held in a module-level store.
+  - When blocked, the response is the same 429 `{error:'rate_limited'}` with `Retry-After` that `proxy.ts:72-81` returns.
+  - It adds to the proxy's per-IP throttle and does not replace it.
+  - Same caveat as the proxy: the store is per instance (`lib/api/rate-limit.ts:15-19`).
+  - Unauthenticated calls return 401 first and consume no bucket.
+- **Tests (`tests/legacy-removal.test.ts`, +5):**
+  - POST allows 30, then the 31st gets 429 + `Retry-After` with no write;
+  - one user's block does not affect another user;
+  - GET and POST have separate buckets, and GET is limited too;
+  - the window resets;
+  - unauthenticated calls return 401 and consume nothing.
+
+  Before this change, the first test fails, because nothing in the route returns 429.
+- `npm test` 615/615 (610 on main at `1fdaa5b` + 5). tsc passes, build passes.

@@ -13,10 +13,34 @@
 
 import { NextResponse } from 'next/server';
 
+import {
+  SOLANA_API_RULE,
+  checkRateLimit,
+  createRateLimitStore,
+  retryAfterSeconds,
+  type RateLimitStore,
+} from '@/lib/api/rate-limit';
 import { createServerSupabase, createServiceSupabase } from '@/lib/supabase/server';
 import { linkMessage, verifyWalletLink } from '@/lib/solana/wallet';
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * Per-session-user throttle, on top of proxy.ts's per-IP one for /api/solana/*.
+ * Same limiter, rule and 429 shape as proxy.ts; same per-instance caveat
+ * (lib/api/rate-limit.ts). Keyed by method so minting a message cannot starve
+ * the link itself.
+ */
+const linkWalletStore: RateLimitStore = createRateLimitStore();
+
+function throttled(method: 'GET' | 'POST', userId: string): NextResponse | null {
+  const verdict = checkRateLimit(linkWalletStore, `link-wallet:${method}:${userId}`, SOLANA_API_RULE);
+  if (verdict.allowed) return null;
+  return NextResponse.json(
+    { error: 'rate_limited' },
+    { status: 429, headers: { 'Retry-After': String(retryAfterSeconds(verdict.resetAt)) } },
+  );
+}
 
 /**
  * GET returns the fresh message the caller must sign: the wallet proves
@@ -31,6 +55,8 @@ export async function GET(): Promise<NextResponse> {
   if (!userId) {
     return NextResponse.json({ error: 'sign in to link a wallet' }, { status: 401 });
   }
+  const limited = throttled('GET', userId);
+  if (limited) return limited;
   const issuedAt = new Date().toISOString();
   return NextResponse.json(
     { userId, issuedAt, message: linkMessage(userId, issuedAt) },
@@ -45,6 +71,8 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (!userId) {
     return NextResponse.json({ error: 'sign in to link a wallet' }, { status: 401 });
   }
+  const limited = throttled('POST', userId);
+  if (limited) return limited;
 
   let body: { address?: string; signature?: string; issuedAt?: string };
   try {

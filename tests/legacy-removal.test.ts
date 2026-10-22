@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { webcrypto } from 'node:crypto';
 import { base58Encode } from '../lib/solana/base58';
 import { linkMessage, LINK_MESSAGE_TTL_MS } from '../lib/solana/wallet';
+import { SOLANA_API_RULE } from '../lib/api/rate-limit';
 
 // ------------------------------------------------------------
 // Removed routes
@@ -182,5 +183,61 @@ describe('/api/solana/link-wallet: the session user links only a wallet it prove
     expect((await post({ address: 'x' })).status).toBe(400);
     expect((await POST(new Request('https://offline.invalid', { method: 'POST', body: '{' }))).status).toBe(400);
     expect(mocks.serviceFrom).not.toHaveBeenCalled();
+  });
+});
+
+describe('/api/solana/link-wallet: per-session-user rate limit (same rule and 429 shape as proxy.ts)', () => {
+  // Fresh user ids per test: the route's throttle store is module-level.
+  let n = 0;
+  const freshUser = () => `33333333-3333-4333-8333-${String(++n).padStart(12, '0')}`;
+  const bad = () => post({ address: 'x' }); // fails validation after the throttle, so it still counts
+  beforeEach(() => {
+    mocks.serviceFrom.mockReset();
+  });
+
+  it(`POST: ${SOLANA_API_RULE.limit} per window per user, then 429 with Retry-After and no write`, async () => {
+    mocks.user = { id: freshUser() };
+    for (let i = 0; i < SOLANA_API_RULE.limit; i++) expect((await bad()).status).toBe(400);
+    const blocked = await bad();
+    expect(blocked.status).toBe(429);
+    expect(await blocked.json()).toEqual({ error: 'rate_limited' });
+    expect(Number(blocked.headers.get('Retry-After'))).toBeGreaterThanOrEqual(1);
+    expect(mocks.serviceFrom).not.toHaveBeenCalled();
+  });
+
+  it('a blocked user does not block another user (keyed by session user, not shared)', async () => {
+    const a = freshUser(), b = freshUser();
+    mocks.user = { id: a };
+    for (let i = 0; i <= SOLANA_API_RULE.limit; i++) await bad();
+    expect((await bad()).status).toBe(429);
+    mocks.user = { id: b };
+    expect((await bad()).status).toBe(400);
+  });
+
+  it('GET and POST have separate buckets; GET is limited too', async () => {
+    mocks.user = { id: freshUser() };
+    for (let i = 0; i <= SOLANA_API_RULE.limit; i++) await bad();
+    expect((await bad()).status).toBe(429);
+    for (let i = 0; i < SOLANA_API_RULE.limit; i++) expect((await GET()).status).toBe(200);
+    expect((await GET()).status).toBe(429);
+  });
+
+  it('the window resets', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-10-22T00:00:00Z'));
+      mocks.user = { id: freshUser() };
+      for (let i = 0; i < SOLANA_API_RULE.limit; i++) await bad();
+      expect((await bad()).status).toBe(429);
+      vi.setSystemTime(new Date(Date.now() + SOLANA_API_RULE.windowMs));
+      expect((await bad()).status).toBe(400);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('an unauthenticated call is refused before the throttle and consumes nothing', async () => {
+    mocks.user = null;
+    for (let i = 0; i <= SOLANA_API_RULE.limit; i++) expect((await bad()).status).toBe(401);
   });
 });
