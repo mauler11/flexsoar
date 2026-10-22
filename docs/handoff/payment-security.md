@@ -6744,4 +6744,4 @@ in `tests/payment-db/README.md`.
 - **After:** audit, 081, 080 and 059-078 verifies, and the 1298-object catalog all unchanged.
 
 **Tests:** `tests/migration-081.test.ts` +4 (the five ids only; the three allowed updates; guards present). `npm test`
-623/623, tsc passes, build passes.
+631/631 (619 + 8 from the C14 merge `bcd4d6c` + 4), tsc passes, build passes.
