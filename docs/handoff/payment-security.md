@@ -6613,3 +6613,49 @@ Totals: `npm test` **590/590** (was 586; −13 mirrors, +17 new, settle block 5�
 
   Before this change, the first test fails, because nothing in the route returns 429.
 - `npm test` 615/615 (610 on main at `1fdaa5b` + 5). tsc passes, build passes.
+
+## 2026-10-22 - Migration 081: revoke PUBLIC/anon EXECUTE on fn_set_card_visibility (container + staging; production NOT touched)
+
+**Founder decision (080c follow-up):**
+- Option (c): 081 is the ACL change only.
+- Retiring the test item (`89887db1…`) becomes **081b**. It waits until the founder runs
+  `C:\Users\Family\flexsoar-reviews\prod-runbook-081\inventory-081-test-item.sql`. Its card is `pending_vault`, which means a
+  first sale already happened (023c header).
+- **Not started.**
+
+**`081_revoke_public_set_card_visibility.sql`:** `REVOKE EXECUTE … FROM PUBLIC, anon` on `fn_set_card_visibility(uuid,boolean)`
+(046).
+
+| Guard | What it checks |
+|---|---|
+| Pre | One overload. 080 applied (`fn_confirm_shipment` md5 `4f1b8f83…`). Body is the 046 body, CR-stripped md5 `48282c38…`. definer, `search_path=public`, not the v2 owner. PUBLIC holds EXECUTE (so a re-run is refused). No unexpected grantee. authenticated and service_role already have EXECUTE. |
+| Post | Every `pg_proc` field except `proacl` unchanged. Body identical. One overload. ACL = before minus PUBLIC/anon, and exactly `{postgres, authenticated, service_role}` EXECUTE without grant option. Effective: anon=f, authenticated=t, service_role=t. |
+
+**Why:**
+- Production's ACL included PUBLIC (080 preflight R1: `{=X/postgres,postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}`).
+- Anon was refused inside the function, but the different messages told an anonymous caller whether a card id exists.
+- The only app caller, `toggleCardVisibilityAction` (`app/(market)/actions.ts:411-424`), refuses without a session first.
+
+**Container run** (`tests/payment-db/run_081_container.sh`, `6ef7375a8c4e`, isolation verified): **PASS**. See
+`tests/payment-db/README.md`.
+
+**Staging** (17.11, sysid 7692131729119822239; every session printed `GUARD_OK staging`):
+
+| Step | Result |
+|---|---|
+| Preflight | P1-P4 as the runbook expects. P3 ACL equals production's R1. |
+| Before-checks (rolled back) | Anon reaches the body for both a missing and an existing card id. |
+| Dry run | Rolled back clean. |
+| **Apply** | **rc=0, COMMIT**, 2026-10-22T07:23:12Z, sha256 `eacbca00…`, CR=0. |
+| Catalog diff | 1298 → 1298 objects; only `fn_set_card_visibility`'s ACL changed; body md5 unchanged. |
+| Verify | `verify-081` Q1-Q3 as expected. `VERIFY_POST_UNCHANGED` and `VERIFY_080_UNCHANGED`. |
+| After-checks | Anon gets `permission denied`; owner and admin still toggle; another user still refused. |
+| Re-apply | Refused. |
+
+**Tests:**
+- `tests/migration-081.test.ts` (+4): ASCII/LF, one transaction, the single REVOKE, no GRANT, no UUID literal, no data or body
+  change, exact-ACL postguard and re-run refusal present.
+- `npm test` 619/619, tsc passes, build passes.
+
+**Design doc:** the separate Squads multisig for program upgrade authority is recorded as agreed
+(`docs/handoff/solo-operator-design.md`).

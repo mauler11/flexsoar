@@ -638,3 +638,21 @@ scenario gets a fresh `flexsoar_payment_v2_test` copied from that. 079/080 run a
 
 Run on container `6ef7375a8c4e` (`flexsoar-schema-replay-20261021-0031`, supabase/postgres 17.11) from
 `flexsoar_mig_test_20261021` (its 4 pre-079 bodies hash to production's preflight values): `T080_RUN_PASS`.
+
+## 081 fn_set_card_visibility EXECUTE: container run PASSED (2026-10-22)
+
+`84_card_visibility_acl.sql` (read-only in effect; `-v phase=before|after`) and the host driver `run_081_container.sh`.
+
+```bash
+bash tests/payment-db/run_081_container.sh <container-id> <db-at-078> <out-dir>
+```
+
+The driver builds `flexsoar_081_pre080` (078+079) and `flexsoar_081_base` (+080) from `<db-at-078>`, which it leaves untouched,
+and gives each phase a fresh `flexsoar_payment_v2_test`.
+- 081 without 080 is refused (`080 is not applied`), and the state is unchanged.
+- Before 081, anon reaches the body and can tell a missing card (`card <id> not found`) from an existing one (`not your card`).
+- After 081, the ACL is exactly {postgres, authenticated, service_role}, and anon gets `42501 permission denied` for any id.
+- In both phases, owner and admin may toggle; another user gets `not your card`.
+- A re-run is refused (`no longer grants EXECUTE to PUBLIC`), and the output is identical afterwards.
+
+Run on `6ef7375a8c4e` from `flexsoar_mig_test_20261021`: `T081_RUN_PASS`.

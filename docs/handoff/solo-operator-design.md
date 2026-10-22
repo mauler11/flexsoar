@@ -226,8 +226,9 @@ caps are the main limit on what one person could do wrong at once, so keep the c
    | **Two keys lost** | Below the threshold: no `authorize_refund`, `resolve_dispute`, `configure`, `set_pause(false)` or `update_future_terms` | Still possible, but the operations it creates cannot reach chain | **Refund-pending escrows freeze.** Release still works: `authorize_release` is a staff key, not governance (`lib.rs:148-155`), so authenticated sales still complete. Pausing still works: `emergency_pause` is the guardian (`:69-72`). Funding cannot be re-enabled, and governance cannot be rotated (`rotate_governance` also needs the vault). This is unrecoverable without a program upgrade by the upgrade authority. |
 
    - **Hence:** the upgrade authority must **not** be the same vault, or must be a separate multisig with its own recovery.
-     That keeps "two vault keys lost" fixable by a reviewed program upgrade. *(This links to W1 decision 4. Recommend: a
-     separate Squads multisig for upgrades, with the same three holders but a separate key set.)*
+     That keeps "two vault keys lost" fixable by a reviewed program upgrade. **Agreed (founder, 2026-10-22):** the
+     program upgrade authority is a **separate Squads multisig** from the governance vault, with the same three holders but a
+     separate key set.
    - *Alternative:* change `governance` to `[Pubkey;2]`. Rejected: same bricking risk as 2-of-2, and it is a program change.
 3. **Seller-signed listing floor:** §5.
 
@@ -327,7 +328,8 @@ The program needs Rust tests for `release_delay` and the seller floor (§5), plu
 2. **`mode_at_decision`:** **a column on `decisions`.**
 3. **Release delay:** **24 h**, enforced in the DB *and* on chain.
 4. **Governance:** **Squads 2-of-3** (founder, friend, sealed recovery key held by a third party), *not* 2-of-2. The ceremony
-   key is still destroyed. See §3.3.2 for the lost-key table.
+   key is still destroyed. See §3.3.2 for the lost-key table. **Program upgrade authority: a separate Squads multisig**
+   (same three holders, a separate key set), agreed.
 5. **Funding on:** **yes**, a 2-governor DB action. Turning it off stays single-person.
 6. **Seller-signed floor:** **yes**, with a **2% FX tolerance**, in the same pre-mainnet build.
 7. **Order of work:**
