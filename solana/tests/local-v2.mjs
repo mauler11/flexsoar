@@ -76,7 +76,7 @@ async function send(instructions,signers=[],tables=[],payer=bootstrap){
   return signature;
 }
 // Compute units are read back from the validator for the whole transaction (incl. precompile + budget ix).
-const cuNames=['open_sale','buy_sale','authorize_release'],cuLog=[];
+const cuNames=['open_sale','buy_sale','authorize_release','propose_governance_vault','cancel_governance_vault_proposal','set_release_delay','set_pause'],cuLog=[];
 async function reportComputeUnits(){
   const byName={};
   for(const {name,signature}of cuLog){
@@ -105,7 +105,7 @@ const listed=(p,{min=LISTING_FLOOR,exp=nowSeconds()+3600,signer=seller,over,mess
 const openSale=(p,card,sale,escrow)=>ix('open_sale',[meta(config),meta(card,false,true),meta(sale,false,true),meta(escrow,false,true),meta(mint.publicKey),meta(roles.issuer.publicKey,true,true),meta(token),meta(SystemProgram.programId),meta(SYSVAR_RENT_PUBKEY),meta(SYSVAR_INSTRUCTIONS_PUBKEY)],encode(p));
 // A refusal must come from the intended check, not from any failure: assert the program's custom error code.
 async function rejectsWith(code,promise){await assert.rejects(promise,e=>isInstructionFailure(e)&&e.chainError.InstructionError[1]?.Custom===code,`expected custom error ${code}`);}
-const FAULT={Authority:6001,Binding:6002,Locked:6003,Paused:6004,Cap:6005,ListingInvalid:6007,ListingSigner:6008,ListingExpired:6009,BelowFloor:6010,ReleaseDelay:6011,DelayRange:6012,NoPendingVault:6013,WrongController:6014};
+const FAULT={Authority:6001,Binding:6002,Locked:6003,Paused:6004,Cap:6005,ListingInvalid:6007,ListingSigner:6008,ListingExpired:6009,BelowFloor:6010,ReleaseDelay:6011,DelayRange:6012,NoPendingVault:6013,WrongController:6014,NotDirectCall:6015,StaleProposal:6016,VaultConflict:6017};
 function buy(p,sale,card,escrow){return ix('buy_sale',[meta(config,false,true),meta(card,false,true),meta(sale,false,true),meta(roles.issuer.publicKey,true),meta(new PublicKey(p.buyer),true),meta(new PublicKey(p.buyerToken),false,true),meta(ata(seller.publicKey),false,true),meta(ata(treasury.publicKey),false,true),meta(escrow,false,true),meta(token),meta(SYSVAR_INSTRUCTIONS_PUBKEY)],encode(p));}
 function staff(name,p,sale,actor,action,revision=0,boolean){return ix(name,[meta(config),meta(sale,false,true),meta(actor.publicKey,true)],attest(p,sale,action,revision),...(boolean===undefined?[]:[Buffer.from([boolean?1:0])]));}
 function governSale(name,p,sale,action,revision=0){return ix(name,[meta(config),meta(sale,false,true),meta(gov[0].publicKey,true),meta(gov[1].publicKey,true)],attest(p,sale,action,revision));}
@@ -368,7 +368,7 @@ try {
   assert.ok(!PublicKey.isOnCurve(unsignable.toBytes()));
   const POLICY=hash('p1-vault-policy'),ZERO=PublicKey.default;
   const propose=(v,controller,pol=POLICY,keys=governKeys())=>ix('propose_governance_vault',keys,v.toBuffer(),controller.toBuffer(),pol);
-  const accept=v=>ix('accept_governance_vault',[meta(config,false,true),meta(v,true),meta(SYSVAR_INSTRUCTIONS_PUBKEY)]);
+  const accept=(v,rev=0)=>ix('accept_governance_vault',[meta(config,false,true),meta(v,true),meta(SYSVAR_INSTRUCTIONS_PUBKEY)],u64(rev));
   const state=async()=>{const d=await readConfig();return {active:new PublicKey(d.subarray(488,520)),activePolicy:Buffer.from(d.subarray(520,552)),pending:new PublicKey(d.subarray(594,626)),controller:new PublicKey(d.subarray(626,658)),pendingPolicy:Buffer.from(d.subarray(658,690))};};
   const rejectsBuiltin=async(name,promise)=>assert.rejects(promise,e=>isInstructionFailure(e)&&e.chainError.InstructionError[1]===name,`expected runtime error ${name}`);
   const nativeStillGoverns=async why=>{await setDelay(86_400);assert.equal((await readConfig()).readBigInt64LE(586),86_400n,why);await gSet(true);}; // 2-of-3 native keys still work
@@ -393,35 +393,97 @@ try {
   await send([propose(unsignable,mockId)],gov.slice(0,2));
   st=await state();assert.ok(st.pending.equals(unsignable)&&st.active.equals(ZERO)&&st.controller.equals(mockId)&&st.pendingPolicy.equals(POLICY));checks++;
   await nativeStillGoverns('native governance is unchanged while a proposal is pending');checks++;
-  await rejectsWith(3010,send([ix('accept_governance_vault',[meta(config,false,true),meta(unsignable,false),meta(SYSVAR_INSTRUCTIONS_PUBKEY)])]));checks++; // AccountNotSigner: nobody can sign for it
+  await rejectsWith(3010,send([ix('accept_governance_vault',[meta(config,false,true),meta(unsignable,false),meta(SYSVAR_INSTRUCTIONS_PUBKEY)],u64(0))]));checks++; // AccountNotSigner: nobody can sign for it
   if(mockSo){
-    // The mock offers the unsignable address as a signer: it did not derive it, so the runtime refuses.
+    // The mock program signs for its OWN PDA through invoke_signed, and marks any account flagged "signer" as a signer in the CPI.
     const viaMock=(id,name,keys,...data)=>{
       const inner=ix(name,keys,...data),flags=inner.keys.map(k=>(k.isSigner?1:0)|(k.isWritable?2:0)),pdas=[V1,V2,unsignable];
       return new TransactionInstruction({programId:id,keys:[meta(program),...inner.keys.map(k=>meta(k.pubkey,k.isSigner&&!pdas.some(p=>p.equals(k.pubkey)),k.isWritable))],data:Buffer.concat([Buffer.from([inner.keys.length]),Buffer.from(flags),inner.data])});
     };
-    const acceptVia=(id,v)=>viaMock(id,'accept_governance_vault',[meta(config,false,true),meta(v,true),meta(SYSVAR_INSTRUCTIONS_PUBKEY)]);
-    await rejectsBuiltin('PrivilegeEscalation',send([acceptVia(mockId,unsignable)]));checks++;
+    const acceptVia=(id,v,rev)=>viaMock(id,'accept_governance_vault',[meta(config,false,true),meta(v,true),meta(SYSVAR_INSTRUCTIONS_PUBKEY)],u64(rev));
+    // C -> D -> settlement: the top-level program (mock `outer`) calls the other mock (`inner`), which calls accept. `forward` makes
+    // the inner mock pass the vault along as a signer (the signer privilege the outer mock created); otherwise the inner mock
+    // signs with its own PDA. Either way settlement runs at stack height 3.
+    const nestedAccept=(outer,inner,v,rev,forward)=>{
+      const acceptData=Buffer.concat([disc('accept_governance_vault'),u64(rev)]);
+      const innerPayload=Buffer.concat([Buffer.from([3]),Buffer.from([2,forward?1:0,0]),acceptData]); // inner mock: config (w), vault, sysvar
+      const accounts=[meta(inner),meta(program),meta(config,false,true),meta(v),meta(SYSVAR_INSTRUCTIONS_PUBKEY)];
+      return new TransactionInstruction({programId:outer,keys:accounts,data:Buffer.concat([Buffer.from([4]),Buffer.from([0,2,0,0]),innerPayload])});
+    };
+    const revision=async()=>(await readConfig()).readBigUInt64LE(691);
+    const rolesWith=(name,key)=>Buffer.concat(roleNames.map(n=>(n===name?key:roles[n].publicKey).toBuffer()));
+    const configureWith=(rolesBytes,signers=gov.slice(0,2))=>send([ix('configure',governKeys(),rolesBytes,u64(2_000_000),u64(10_000_000))],signers);
+    const POLICY2=hash('p1-vault-policy-2');
+    await rejectsBuiltin('PrivilegeEscalation',send([acceptVia(mockId,unsignable,await revision())]));checks++;
     st=await state();assert.ok(st.active.equals(ZERO));checks++; // still not activated
 
     // 6c. WRONG CONTROLLER / WRONG PROGRAM. Pending vault is mock #1's PDA, but the proposal names mock #2 as its controller.
     await send([propose(V1,mockId2)],gov.slice(0,2));
-    await rejectsWith(FAULT.WrongController,send([acceptVia(mockId,V1)]));checks++; // valid vault signature, wrong top-level program
-    await rejectsBuiltin('PrivilegeEscalation',send([acceptVia(mockId2,V1)]));checks++; // the named controller cannot sign for a PDA it does not own
-    await rejectsWith(FAULT.Authority,send([acceptVia(mockId2,V2)]));checks++; // its own PDA, but not the pending vault
+    await rejectsWith(FAULT.WrongController,send([acceptVia(mockId,V1,await revision())]));checks++; // valid vault signature, direct CPI, wrong top-level program
+    await rejectsBuiltin('PrivilegeEscalation',send([acceptVia(mockId2,V1,await revision())]));checks++; // the named controller cannot sign for a PDA it does not own
+    await rejectsWith(FAULT.Authority,send([acceptVia(mockId2,V2,await revision())]));checks++; // its own PDA, but not the pending vault
     st=await state();assert.ok(st.active.equals(ZERO)&&st.pending.equals(V1));checks++;
     await nativeStillGoverns('a vault that never accepts leaves native governance working');checks++;
 
-    // 6d. Correct proposal. Acceptance is refused while funding is live, then succeeds once, and only then do natives lose.
+    // 6c2. R2-01: DIRECT CPI ONLY. In both nested shapes the top-level program IS the named controller and the vault really signs;
+    // only the stack height (3, not 2) distinguishes them from a legitimate accept.
+    await send([propose(V2,mockId)],gov.slice(0,2)); // controller C = mock #1, vault = D's (mock #2) PDA
+    await rejectsWith(FAULT.NotDirectCall,send([nestedAccept(mockId,mockId2,V2,await revision(),false)]));checks++; // C -> D -> settlement, D signs with its own PDA
+    st=await state();assert.ok(st.active.equals(ZERO)&&st.pending.equals(V2));checks++;
+    await send([propose(V1,mockId)],gov.slice(0,2)); // controller C = mock #1, vault = C's own PDA
+    await rejectsWith(FAULT.NotDirectCall,send([nestedAccept(mockId,mockId2,V1,await revision(),true)]));checks++; // C -> D, C's vault signer passed onward to settlement
+    st=await state();assert.ok(st.active.equals(ZERO)&&st.pending.equals(V1));checks++;
+
+    // 6c3. R2-05: proposal identity and cancellation. Revisions only ever increase.
+    const r0=await revision();
+    await send([propose(V1,mockId,POLICY2)],gov.slice(0,2)); // same vault and controller, ONLY the policy digest differs
+    const r1=await revision();assert.ok(r1>r0&&r1===r0+BigInt(1));checks++;
+    await rejectsWith(FAULT.StaleProposal,send([acceptVia(mockId,V1,r0)]));checks++; // an accept approved for the old proposal cannot activate the new one
+    st=await state();assert.ok(st.active.equals(ZERO)&&st.pendingPolicy.equals(POLICY2));checks++;
+    await rejectsWith(FAULT.Authority,send([ix('cancel_governance_vault_proposal',[meta(config,false,true),meta(gov[0].publicKey,true),meta(gov[0].publicKey,true)])],[gov[0]]));checks++; // one governor cannot cancel
+    await send([ix('cancel_governance_vault_proposal',governKeys())],gov.slice(0,2));
+    st=await state();assert.ok(st.pending.equals(ZERO)&&st.controller.equals(ZERO)&&st.pendingPolicy.every(b=>b===0));
+    assert.equal(await revision(),r1,'cancel never decreases or resets the revision');checks++;
+    await rejectsWith(FAULT.Authority,send([acceptVia(mockId,V1,r1)]));checks++; // cancel then accept: nothing pending to accept
+    await rejectsWith(FAULT.NoPendingVault,send([ix('cancel_governance_vault_proposal',governKeys())],gov.slice(0,2)));checks++;
     await send([propose(V1,mockId)],gov.slice(0,2));
+    const r2=await revision();assert.ok(r2===r1+BigInt(1)&&r2>r0);checks++;
+    for(const stale of [r0,r1])await rejectsWith(FAULT.StaleProposal,send([acceptVia(mockId,V1,stale)]));
+    checks++;
+    assert.ok((await state()).active.equals(ZERO));
+
+    // 6c4. R2-04: a vault never shares a key with a role or native member, in either order.
+    // Order 1: V1 is pending, then governance tries to give it to a role / native seat.
+    await rejectsWith(FAULT.VaultConflict,configureWith(rolesWith('reconciler',V1)));checks++;
+    await rejectsWith(FAULT.VaultConflict,send([ix('rotate_governance',governKeys(),Buffer.concat([gov[0].publicKey.toBuffer(),gov[1].publicKey.toBuffer(),V1.toBuffer()]))],gov.slice(0,2)));checks++;
+    // Order 2: a role already holds the key, then it is proposed as the vault.
+    await send([ix('cancel_governance_vault_proposal',governKeys())],gov.slice(0,2));
+    const roleKey=PublicKey.findProgramAddressSync([Buffer.from('role-key')],SystemProgram.programId)[0]; // off-curve, so only the role check can refuse it
+    await configureWith(rolesWith('reconciler',roleKey));
+    assert.ok(new PublicKey((await readConfig()).subarray(136+32*6,136+32*7)).equals(roleKey));
+    await rejectsWith(FAULT.VaultConflict,send([propose(roleKey,mockId)],gov.slice(0,2)));checks++;
+    await configureWith(roleBytes()); // restore the original roles
+    assert.ok(new PublicKey((await readConfig()).subarray(136+32*6,136+32*7)).equals(roles.reconciler.publicKey));checks++;
+    // A native member is excluded too.
+    await send([ix('rotate_governance',governKeys(),Buffer.concat([gov[0].publicKey.toBuffer(),gov[1].publicKey.toBuffer(),roleKey.toBuffer()]))],gov.slice(0,2)); // a native seat holds the key
+    await rejectsWith(FAULT.VaultConflict,send([propose(roleKey,mockId)],gov.slice(0,2)));checks++;
+    await send([ix('rotate_governance',governKeys(),Buffer.concat(gov.map(g=>g.publicKey.toBuffer())))],gov.slice(0,2)); // restore native members
+    assert.ok(new PublicKey((await readConfig()).subarray(392+64,392+96)).equals(gov[2].publicKey));checks++;
+    await nativeStillGoverns('role and member conflicts left native governance intact');
+
+    // 6d. Correct proposal. Acceptance is refused while funding is live, then succeeds once, directly, with the current revision.
+    await send([propose(V1,mockId)],gov.slice(0,2));
+    const live=await revision();
     await gSet(false);
-    await rejectsWith(FAULT.Paused,send([acceptVia(mockId,V1)]));checks++;
+    await rejectsWith(FAULT.Paused,send([acceptVia(mockId,V1,live)]));checks++;
     await gSet(true);
-    await send([acceptVia(mockId,V1)]);
-    st=await state();assert.ok(st.active.equals(V1)&&st.activePolicy.equals(POLICY)&&st.pending.equals(ZERO)&&st.controller.equals(ZERO)&&st.pendingPolicy.every(b=>b===0));checks++;
-    await rejectsWith(FAULT.Authority,send([acceptVia(mockId,V1)]));checks++; // replay: nothing pending any more
+    { const signature=await send([acceptVia(mockId,V1,live)]); cuLog.push({name:'accept_governance_vault (whole tx, via mock CPI)',signature}); } // the DIRECT-CPI positive
+    st=await state();assert.ok(st.active.equals(V1)&&st.activePolicy.equals(POLICY)&&st.pending.equals(ZERO)&&st.controller.equals(ZERO)&&st.pendingPolicy.every(b=>b===0));
+    assert.equal(await revision(),live,'accepting does not change the revision');checks++;
+    await rejectsWith(FAULT.Authority,send([acceptVia(mockId,V1,live)]));checks++; // replay: nothing pending any more
     for(const [name,keys,...data]of nativeGovernedCalls){await rejectsWith(FAULT.Authority,send([ix(name,keys,...data)],gov.slice(0,2)));checks++;} // natives are shut out
     await rejectsWith(FAULT.Authority,send([propose(V2,mockId2)],gov.slice(0,2)));checks++; // and cannot re-propose either
+    await rejectsWith(FAULT.Authority,send([ix('cancel_governance_vault_proposal',governKeys())],gov.slice(0,2)));checks++; // nor cancel
     await rejectsOnChain(send([ix('set_pause',[meta(config,false,true),meta(V1),meta(V1)],Buffer.from([0,0]))]));checks++; // the vault cannot be impersonated without a CPI signature
 
     // 6e. Vault-governed operation, guardian alone.

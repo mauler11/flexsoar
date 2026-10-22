@@ -4,13 +4,15 @@
  *   node solana/scripts/init-v2.mjs --manifest <manifest.json> --rpc <url> --keypair <bootstrap.json> [--commitment finalized]
  *
  * Nothing is signed or sent until EVERY check below passes, in this order:
- *   1. the manifest is complete, every key is a distinct non-default 32-byte key, and `domain` equals the pinned genesis hash;
+ *   1. the manifest is complete; the eight role keys and three native governance keys are distinct, non-default 32-byte keys (treasury,
+ *      mint, program and bootstrap are only checked as valid keys: review them by hand); and `domain` equals the pinned genesis hash;
  *   2. the RPC's genesis hash equals the manifest's pinned one (a mismatch means this is not the cluster you reviewed), and
  *      mainnet-beta is refused outright (mainnet needs its own reviewed run);
  *   3. the program id is an upgradeable program whose upgrade authority is the manifest's bootstrap key (initialize_v2 requires it);
  *   4. the mint is the pinned token mint with 6 decimals;
  *   5. INVENTORY: the program id owns no accounts at all. Any V2 config, card or sale means a different (or fresh) program id is
  *      required, because account layouts are typed and there is no migration path (see LAYOUT RULE in lib.rs);
+ *      (the read-back checks owner, executable=false, the ConfigV2 discriminator, then every body field);
  *   6. dry run: simulate the transaction and print the exact instruction; real run: sign, send, then READ THE CONFIG BACK and
  *      refuse on any single field that differs from the manifest.
  * No default RPC, no default keypair, no environment lookups, and the key file is read only for a real run. */
@@ -25,6 +27,8 @@ const TOKEN = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 export const ROLE_NAMES = ['issuer', 'inventory', 'receiver', 'authenticator', 'reviewer', 'release', 'reconciler', 'guardian'];
 export const CONFIG_SIZE = 819, LAYOUT_VERSION = 1;
 const disc = name => createHash('sha256').update(`global:${name}`).digest().subarray(0, 8);
+/** Anchor's 8-byte account header: SHA-256("account:ConfigV2")[0..8]. */
+export const CONFIG_DISCRIMINATOR = createHash('sha256').update('account:ConfigV2').digest().subarray(0, 8);
 
 const fail = message => { throw new Error(`init-v2 refused: ${message}`); };
 const key = (value, label) => { try { const k = new PublicKey(String(value)); if (k.toBytes().length !== 32) throw 0; return k; } catch { return fail(`${label} is not a valid public key`); } };
@@ -91,7 +95,8 @@ export function decodeConfig(input) {
   return { domain: pk(8), policy: bytes.subarray(40, 72), treasury: pk(72), mint: pk(104), roles: ROLE_NAMES.map((n, i) => pk(136 + 32 * i)),
     governance: [0, 1, 2].map(i => pk(392 + 32 * i)), governanceVault: pk(488), governancePolicyZero: zero(520, 552), epoch: bytes.readBigUInt64LE(552),
     fundingPaused: bytes[560], outflowPaused: bytes[561], maxTrade: bytes.readBigUInt64LE(562), maxEscrow: bytes.readBigUInt64LE(570), outstanding: bytes.readBigUInt64LE(578),
-    releaseDelay: bytes.readBigInt64LE(586), pendingVault: pk(594), pendingController: pk(626), pendingPolicyZero: zero(658, 690), layoutVersion: bytes[690], reservedZero: zero(691, 819) };
+    releaseDelay: bytes.readBigInt64LE(586), pendingVault: pk(594), pendingController: pk(626), pendingPolicyZero: zero(658, 690), layoutVersion: bytes[690], proposalRevision: bytes.readBigUInt64LE(691), reservedZero: zero(699, 819),
+    discriminatorOk: bytes.subarray(0, 8).equals(CONFIG_DISCRIMINATOR) };
 }
 export function verifyConfig(bytes, m) {
   const c = decodeConfig(bytes), diffs = [];
@@ -104,7 +109,8 @@ export function verifyConfig(bytes, m) {
   eq('epoch', c.epoch, 1n); eq('funding_paused', c.fundingPaused, 1); eq('outflow_paused', c.outflowPaused, 0);
   eq('max_trade', c.maxTrade, 0n); eq('max_escrow', c.maxEscrow, 0n); eq('outstanding', c.outstanding, 0n); eq('release_delay', c.releaseDelay, 0n);
   eq('pending_vault', c.pendingVault.toBase58(), PublicKey.default.toBase58()); eq('pending_controller', c.pendingController.toBase58(), PublicKey.default.toBase58());
-  eq('pending_policy zero', c.pendingPolicyZero, true); eq('layout_version', c.layoutVersion, LAYOUT_VERSION); eq('reserved zero', c.reservedZero, true);
+  eq('pending_policy zero', c.pendingPolicyZero, true); eq('layout_version', c.layoutVersion, LAYOUT_VERSION); eq('proposal_revision', c.proposalRevision, 0n); eq('reserved zero', c.reservedZero, true);
+  eq('account discriminator is ConfigV2', c.discriminatorOk, true);
   if (diffs.length) fail(`config read back from chain differs from the manifest:\n  ${diffs.join('\n  ')}`);
   return c;
 }
@@ -128,6 +134,7 @@ export async function initializeV2({ connection, manifest, bootstrap = null, dry
   if (result.value.err) fail(`transaction failed: ${JSON.stringify(result.value.err)}`);
   const account = await connection.getAccountInfo(config, commitment);
   if (!account || !account.owner.equals(m.programId)) fail('config account missing or not owned by the program after init');
+  if (account.executable !== false) fail('config account is executable (or the flag is missing); it must be plain data');
   verifyConfig(account.data, m);
   return { dryRun: false, plan, signature, verified: true };
 }

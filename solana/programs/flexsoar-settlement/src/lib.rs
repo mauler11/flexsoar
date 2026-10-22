@@ -1,7 +1,7 @@
 //! V2: conditional first-sale escrow, direct warehouse resale, shared consumption.
 //! Upgrade authority remains trusted. No close, sweep or generic withdrawal.
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{bpf_loader_upgradeable, hash::hash};
+use anchor_lang::solana_program::{bpf_loader_upgradeable, hash::hash, instruction::{get_stack_height, TRANSACTION_LEVEL_STACK_HEIGHT}};
 use anchor_lang::solana_program::sysvar::instructions::{load_current_index_checked,load_instruction_at_checked};
 use anchor_spl::{token::{self, Mint, Token, TokenAccount, Transfer}, associated_token::get_associated_token_address};
 pub mod protocol;
@@ -36,6 +36,8 @@ pub mod flexsoar_settlement {
         require!(ctx.accounts.config.funding_paused, Fault::Paused);
         roles.validate(&ctx.accounts.config.governance)?;
         require!(![roles.issuer,roles.inventory,roles.receiver,roles.authenticator,roles.reviewer,roles.release,roles.reconciler,roles.guardian].contains(&ctx.accounts.config.governance_vault), Fault::Authority);
+        // R2-04: a role may never be assigned the vault that is waiting to become governance (accept re-checks it too).
+        require!(ctx.accounts.config.pending_vault == Pubkey::default() || !vault_conflicts(&roles, &ctx.accounts.config.governance, &ctx.accounts.config.pending_vault), Fault::VaultConflict);
         let c = &mut ctx.accounts.config;
         require!(max_escrow >= c.outstanding && (max_trade == 0 || max_escrow >= max_trade), Fault::Cap);
         c.roles = roles; c.max_trade = max_trade; c.max_escrow = max_escrow;
@@ -59,30 +61,46 @@ pub mod flexsoar_settlement {
         govern(&ctx.accounts.config, &ctx.accounts.first, &ctx.accounts.second)?;
         require!(ctx.accounts.config.funding_paused, Fault::Paused);
         ctx.accounts.config.roles.validate(&governance)?;
+        require!(ctx.accounts.config.pending_vault == Pubkey::default() || !vault_conflicts(&ctx.accounts.config.roles, &governance, &ctx.accounts.config.pending_vault), Fault::VaultConflict);
         ctx.accounts.config.governance = governance; Ok(())
     }
     /// Phase 1 of vault enrollment (R1-02). Current governance PROPOSES an off-curve vault, the program that controls it
     /// (e.g. Squads) and a policy digest. NOTHING changes governance: until the vault accepts, `govern()` still uses the
-    /// current authority, so a mistyped or unsignable address can never lock governance out. Re-proposing replaces the proposal.
-    /// The policy digest is an audit reference (the reviewed multisig description), not something the program can validate.
+    /// current authority, so a mistyped or unsignable address can never lock governance out. Re-proposing replaces the proposal
+    /// and bumps `proposal_revision` (R2-05), which `accept` must quote, so an accept approved for an earlier proposal can never
+    /// activate a later one, even when only the policy digest changed. The digest is an audit reference, not validated here.
     pub fn propose_governance_vault(ctx: Context<Govern>, vault: Pubkey, controller: Pubkey, policy: [u8;32]) -> Result<()> {
         govern(&ctx.accounts.config, &ctx.accounts.first, &ctx.accounts.second)?;
         require!(ctx.accounts.config.funding_paused && vault != Pubkey::default() && is_off_curve(&vault) && controller != Pubkey::default() && controller != vault && policy != [0;32], Fault::Authority);
-        let r=&ctx.accounts.config.roles;
-        require!(![r.issuer,r.inventory,r.receiver,r.authenticator,r.reviewer,r.release,r.reconciler,r.guardian].contains(&vault), Fault::Authority);
+        require!(!vault_conflicts(&ctx.accounts.config.roles, &ctx.accounts.config.governance, &vault), Fault::VaultConflict);
         let c = &mut ctx.accounts.config;
+        c.proposal_revision = c.proposal_revision.checked_add(1).ok_or(Fault::Arithmetic)?; // never decreases, not even on cancel
         c.pending_vault=vault; c.pending_controller=controller; c.pending_policy=policy; Ok(())
     }
-    /// Phase 2: the proposed vault itself must sign, through a CPI made by the proposed controller as the TOP-LEVEL instruction.
-    /// Only the program that owns the vault's derivation can make the PDA sign, so this proves the address is usable;
-    /// the controller check proves it is the reviewed program and not some other program that happens to own the address.
-    pub fn accept_governance_vault(ctx: Context<AcceptVault>) -> Result<()> {
+    /// Abandon a pending proposal and return to a clean no-pending state (R2-05). Current governance only. The revision is NOT
+    /// reset: it only ever increases, so an accept prepared for a cancelled proposal stays dead after any later re-proposal.
+    pub fn cancel_governance_vault_proposal(ctx: Context<Govern>) -> Result<()> {
+        govern(&ctx.accounts.config, &ctx.accounts.first, &ctx.accounts.second)?;
         let c = &mut ctx.accounts.config;
         require!(c.pending_vault != Pubkey::default(), Fault::NoPendingVault);
+        c.pending_vault=Pubkey::default(); c.pending_controller=Pubkey::default(); c.pending_policy=[0;32]; Ok(())
+    }
+    /// Phase 2: the proposed vault must sign, through a DIRECT CPI (R2-01) made by the proposed controller as the top-level
+    /// instruction. Both are required. Top-level program == controller says who started the transaction; stack height == top
+    /// level + 1 says the controller itself called us, not some program it called. Without the height check a controller that
+    /// can invoke program D lets D accept with D's own PDA while the top-level id still reads as the reviewed controller.
+    /// `expected_revision` binds the call to one specific proposal.
+    pub fn accept_governance_vault(ctx: Context<AcceptVault>, expected_revision: u64) -> Result<()> {
+        let c = &mut ctx.accounts.config;
+        require!(c.pending_vault != Pubkey::default(), Fault::NoPendingVault);
+        require!(c.proposal_revision == expected_revision, Fault::StaleProposal);
         require!(c.funding_paused, Fault::Paused);
+        require!(get_stack_height() == TRANSACTION_LEVEL_STACK_HEIGHT + 1, Fault::NotDirectCall);
         let info = ctx.accounts.instructions.to_account_info();
         let top = load_instruction_at_checked(load_current_index_checked(&info)? as usize, &info)?;
         require_keys_eq!(top.program_id, c.pending_controller, Fault::WrongController);
+        // Roles or native members may have changed since the proposal; the exclusion is re-applied at activation.
+        require!(!vault_conflicts(&c.roles, &c.governance, &c.pending_vault), Fault::VaultConflict);
         c.governance_vault=c.pending_vault; c.governance_policy=c.pending_policy;
         c.pending_vault=Pubkey::default(); c.pending_controller=Pubkey::default(); c.pending_policy=[0;32]; Ok(())
     }
@@ -263,6 +281,11 @@ fn govern(c: &ConfigV2, first: &Signer, second: &Signer) -> Result<()> {
     } else {require!(governance_valid(&c.governance, first.key(), second.key()), Fault::Authority);}
     Ok(())
 }
+/// True when `vault` is already used as an operational role key or a native governance member. A vault shares no key with any
+/// role (R2-04): checked at proposal, again at acceptance, and by `configure` / `rotate_governance` while a proposal is pending.
+fn vault_conflicts(roles: &Roles, governance: &[Pubkey;3], vault: &Pubkey) -> bool {
+    [roles.issuer,roles.inventory,roles.receiver,roles.authenticator,roles.reviewer,roles.release,roles.reconciler,roles.guardian].contains(vault) || governance.contains(vault)
+}
 /// True when `key` is not a valid ed25519 point, i.e. it can only ever sign through a program's CPI (a PDA).
 /// `Pubkey::is_on_curve()` is `unimplemented!()` on the SBF target and PANICS on chain, which made
 /// `propose_governance_vault` unusable; on chain this asks the runtime's curve25519 syscall instead (0 = valid point).
@@ -341,7 +364,9 @@ pub struct ConfigV2 { pub domain:[u8;32], pub policy:[u8;32], pub treasury:Pubke
     // Two-phase vault enrollment (R1-02): nothing here governs until `accept_governance_vault` moves it into governance_vault.
     pub pending_vault:Pubkey, pub pending_controller:Pubkey, pub pending_policy:[u8;32],
     // R1-01: layout version plus 128 reserved zero bytes for future fields (see LAYOUT RULE).
-    pub layout_version:u8, pub reserved:[u8;128] }
+    pub layout_version:u8,
+    // R2-05: monotonic id of the pending vault proposal, taken out of the old 128-byte reserved block (size stays 819).
+    pub proposal_revision:u64, pub reserved:[u8;120] }
 /// LAYOUT RULE: accounts are typed, so ANY change to ConfigV2 or SaleV2 breaks deserialization of every account written by an
 /// earlier layout, and this program has no close or realloc instruction. New fields must come out of `reserved` (never change
 /// the size), and a change that cannot must ship a migration instruction AND tests that run it on old-layout accounts before the
@@ -378,7 +403,7 @@ pub struct PaymentState { pub sale:Pubkey, pub attempt:[u8;32], pub state:u8, pu
 pub const MAX_RELEASE_DELAY: i64 = 30 * 24 * 60 * 60;
 #[error_code]
 // Append-only: Anchor codes are 6000 + index and off-chain clients match on them.
-pub enum Fault { LegacyDisabled, Authority, Binding, Locked, Paused, Cap, Arithmetic, ListingInvalid, ListingSigner, ListingExpired, BelowFloor, ReleaseDelay, DelayRange, NoPendingVault, WrongController }
+pub enum Fault { LegacyDisabled, Authority, Binding, Locked, Paused, Cap, Arithmetic, ListingInvalid, ListingSigner, ListingExpired, BelowFloor, ReleaseDelay, DelayRange, NoPendingVault, WrongController, NotDirectCall, StaleProposal, VaultConflict }
 
 #[cfg(test)]
 mod tests {
@@ -409,7 +434,7 @@ mod tests {
     fn fault_codes_are_append_only() {
         // Existing codes must not shift; new ones extend the enum.
         for (fault, code) in [(Fault::LegacyDisabled, 6000), (Fault::Authority, 6001), (Fault::Binding, 6002), (Fault::Locked, 6003), (Fault::Paused, 6004), (Fault::Cap, 6005), (Fault::Arithmetic, 6006),
-            (Fault::ListingInvalid, 6007), (Fault::ListingSigner, 6008), (Fault::ListingExpired, 6009), (Fault::BelowFloor, 6010), (Fault::ReleaseDelay, 6011), (Fault::DelayRange, 6012), (Fault::NoPendingVault, 6013), (Fault::WrongController, 6014)] {
+            (Fault::ListingInvalid, 6007), (Fault::ListingSigner, 6008), (Fault::ListingExpired, 6009), (Fault::BelowFloor, 6010), (Fault::ReleaseDelay, 6011), (Fault::DelayRange, 6012), (Fault::NoPendingVault, 6013), (Fault::WrongController, 6014), (Fault::NotDirectCall, 6015), (Fault::StaleProposal, 6016), (Fault::VaultConflict, 6017)] {
             assert_eq!(u32::from(fault), code);
         }
     }
@@ -421,7 +446,7 @@ mod tests {
         let mut s = SaleV2::default(); let mut c = ConfigV2 { domain:[0;32], policy:[0;32], treasury:Pubkey::default(), mint:Pubkey::default(),
             roles: Roles { issuer:Pubkey::default(), inventory:Pubkey::default(), receiver:Pubkey::default(), authenticator:Pubkey::default(), reviewer:Pubkey::default(), release:Pubkey::default(), reconciler:Pubkey::default(), guardian:Pubkey::default() },
             governance:[Pubkey::default();3], governance_vault:Pubkey::default(), governance_policy:[0;32], epoch:0, funding_paused:true, outflow_paused:false, max_trade:0, max_escrow:0, outstanding:0, release_delay:86_400,
-            pending_vault:Pubkey::default(), pending_controller:Pubkey::default(), pending_policy:[0;32], layout_version:LAYOUT_VERSION, reserved:[0;128] };
+            pending_vault:Pubkey::default(), pending_controller:Pubkey::default(), pending_policy:[0;32], layout_version:LAYOUT_VERSION, proposal_revision:0, reserved:[0;120] };
         s.release_delay = c.release_delay; c.release_delay = 0;
         assert_eq!(s.release_delay, 86_400);
         assert_eq!(s.authenticated_at.checked_add(s.release_delay), Some(86_400));
@@ -443,6 +468,24 @@ mod tests {
         let s = SaleV2::default(); assert_eq!(s.layout_version, 0); assert!(s.reserved.iter().all(|b| b.iter().all(|x| *x == 0)));
         // Growing a struct is the thing the LAYOUT RULE forbids: pin the sizes so any change fails loudly here first.
         assert_eq!(8 + ConfigV2::INIT_SPACE, 819); assert_eq!(8 + SaleV2::INIT_SPACE, 1090);
+    }
+    #[test]
+    fn a_vault_may_not_share_a_key_with_any_role_or_native_member() {
+        let p=|n|Pubkey::new_from_array([n;32]);
+        let r=Roles {issuer:p(1),inventory:p(2),receiver:p(3),authenticator:p(4),reviewer:p(5),release:p(6),reconciler:p(7),guardian:p(8)};
+        let g=[p(9),p(10),p(11)];
+        for n in 1..=11 { assert!(vault_conflicts(&r,&g,&p(n)), "key {n} is a role or native member"); }
+        assert!(!vault_conflicts(&r,&g,&p(12)));
+        // The same predicate guards every order: a role changed to the pending vault, or a vault proposed that is already a role.
+        let mut moved=Roles {guardian:p(12),..r.clone()}; assert!(vault_conflicts(&moved,&g,&p(12)));
+        moved.guardian=p(8); assert!(!vault_conflicts(&moved,&g,&p(12)));
+        assert!(vault_conflicts(&r,&[p(9),p(10),p(12)],&p(12)), "rotating a native member to the pending vault");
+    }
+    #[test]
+    fn proposal_revision_is_checked_arithmetic_and_pins_both_layout_sizes() {
+        assert_eq!(1u64.checked_add(1), Some(2)); assert_eq!(u64::MAX.checked_add(1), None); // overflow errors out instead of wrapping to an old id
+        // revision (8) + reserved (120) is exactly the 128 bytes the P1b layout reserved: the account did not grow.
+        assert_eq!(8 + ConfigV2::INIT_SPACE, 819);
     }
     #[test]
     fn vault_must_be_an_off_curve_address() {

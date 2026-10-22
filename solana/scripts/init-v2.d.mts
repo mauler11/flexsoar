@@ -4,6 +4,7 @@ export const MAINNET_GENESIS: string;
 export const ROLE_NAMES: readonly string[];
 export const CONFIG_SIZE: number;
 export const LAYOUT_VERSION: number;
+export const CONFIG_DISCRIMINATOR: Buffer;
 
 export interface ParsedManifest {
   cluster: 'devnet' | 'localnet'; genesisHash: PublicKey; programId: PublicKey; mint: PublicKey; domain: PublicKey; policyDigest: Buffer;
@@ -12,7 +13,7 @@ export interface ParsedManifest {
 export interface DecodedConfig {
   domain: PublicKey; policy: Uint8Array; treasury: PublicKey; mint: PublicKey; roles: PublicKey[]; governance: PublicKey[]; governanceVault: PublicKey;
   governancePolicyZero: boolean; epoch: bigint; fundingPaused: number; outflowPaused: number; maxTrade: bigint; maxEscrow: bigint; outstanding: bigint;
-  releaseDelay: bigint; pendingVault: PublicKey; pendingController: PublicKey; pendingPolicyZero: boolean; layoutVersion: number; reservedZero: boolean;
+  releaseDelay: bigint; pendingVault: PublicKey; pendingController: PublicKey; pendingPolicyZero: boolean; layoutVersion: number; proposalRevision: bigint; reservedZero: boolean; discriminatorOk: boolean;
 }
 export interface InitConnection {
   getGenesisHash(): Promise<string>;
