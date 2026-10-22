@@ -6659,3 +6659,32 @@ Totals: `npm test` **590/590** (was 586; −13 mirrors, +17 new, settle block 5�
 
 **Design doc:** the separate Squads multisig for program upgrade authority is recorded as agreed
 (`docs/handoff/solo-operator-design.md`).
+
+### 080 on production (founder-run 2026-10-22, logs checked locally by the agent; no agent connection)
+
+The founder ran `prod-runbook-080.md` between 10:58 and 11:11 (logs in `C:\Users\Family\flexsoar-reviews\prod-runbook-080\logs\`).
+The agent checked them against the runbook **from the files only**:
+- **Preflight:** P1 sysid 7666007964130682852, 17.6. P3 `cr`: approve 56, confirm_shipment **39**. P5 `candidates=1`, every
+  refusal count 0. P6 anon/authenticated/service_role all true.
+- **Apply:** rc=0, COMMIT, `moved 1`, `…left as is: 0`.
+- **Verify:** `verify-080` Q1-Q4 exactly as expected (approve ACL without PUBLIC; anon `permission denied`).
+  `audit-diff-080.sh`: `AUDIT_DIFF_OK moved=1` (A2 `authenticated` 1→0, `review_approved` 0→1).
+  `VERIFY_POST_AS_EXPECTED` and `VERIFY_079_AS_EXPECTED`; both baselines were unchanged before 080. The 079 audit after 080:
+  **0** A1 rows.
+- **R1 (PUBLIC/anon fn_* in production):** identical to the staging list in the 080 report. That includes
+  `fn_set_card_visibility` with PUBLIC, which is why 081 exists.
+
+### 081b input: production inventory of the test item (founder-run 15:16; facts only, nothing started)
+
+| Line | Production value |
+|---|---|
+| I1 | custody seller, status minted, seller_declared, `authenticated_at` NULL, `review_approved_at` set: **all five expected values hold** |
+| I2 | One card, `pending_vault`, owned by **someone other than the consignor** |
+| I3 | Listing `sold`, RM20 |
+| I4 | One order: **settled**, RM20, `sol` reference, seller payout `cash`, not paid out, **buyer is an admin**, seller is not |
+| I5 | Ledger: mint to the consignor; transfer to the buyer. 3 currency entries in those transactions |
+| I6 | Vault intake `awaiting_shipment`, **due 2026-09-27** (overdue), never shipped, received or defaulted |
+| I7 | Nothing else: 0 redemptions, trades, credit holds or v2 rows; 1 notification; 2 provenance rows |
+| I8 | `visible_on_market_candidates=0`: **already not on /market** (listing sold) |
+
+So this is option (b): a first sale exists, with an admin buyer. 081b design waits for the founder's decision.
