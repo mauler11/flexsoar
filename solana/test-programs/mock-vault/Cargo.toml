@@ -1,0 +1,18 @@
+# TEST-ONLY. Emulates how a Squads-style vault executes a governance transaction: the vault is an off-curve PDA of
+# THIS program and signs through CPI (invoke_signed). It exists so the local suite can prove that the settlement
+# program's `govern()` accepts a CPI-signed vault passed twice. It is never deployed to devnet or mainnet.
+[package]
+name = "mock-vault"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.79"
+publish = false
+
+# Own workspace: keeps this crate and its lockfile out of the production program's build graph.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+solana-program = "=2.3.0"

@@ -29,7 +29,11 @@ if(!Array.isArray(links)||links.length!==1||links[0].ifname!=='lo'||!links[0].fl
 const URL_RPC='http://127.0.0.1:18899';
 assert.equal(new URL(URL_RPC).hostname,'127.0.0.1');
 for(const port of [18899,18900,18901])await new Promise((ok,bad)=>{const s=net.createServer();s.once('error',()=>bad(new Error('Local test port occupied; refusing to reuse existing validator.')));s.listen(port,'127.0.0.1',()=>s.close(ok));});
-const {Connection,Keypair,PublicKey,TransactionInstruction,TransactionMessage,VersionedTransaction,SystemProgram,ComputeBudgetProgram,AddressLookupTableProgram,SYSVAR_RENT_PUBKEY,SYSVAR_INSTRUCTIONS_PUBKEY}=await import('@solana/web3.js');
+const {Connection,Keypair,PublicKey,TransactionInstruction,TransactionMessage,VersionedTransaction,SystemProgram,ComputeBudgetProgram,AddressLookupTableProgram,Ed25519Program,SYSVAR_RENT_PUBKEY,SYSVAR_INSTRUCTIONS_PUBKEY}=await import('@solana/web3.js');
+// Optional TEST-ONLY vault emulator (solana/test-programs/mock-vault): a PDA that signs through CPI like a Squads vault.
+const mockSo=process.env.FLEXSOAR_MOCK_VAULT_SO;
+if(mockSo&&!existsSync(mockSo))throw new Error('FLEXSOAR_MOCK_VAULT_SO set but the file does not exist.');
+const mockId=Keypair.generate().publicKey;
 // Generation happens only after all safety checks. Secrets remain in memory.
 const bootstrap=Keypair.generate(),gov=[Keypair.generate(),Keypair.generate(),Keypair.generate()];
 const roleNames=['issuer','inventory','receiver','authenticator','reviewer','release','reconciler','guardian'];
@@ -58,15 +62,27 @@ const isInstructionFailure=e=>e instanceof LocalInstructionFailure && Array.isAr
 // a test that claims the actual program rejected a command.
 async function rejectsOnChain(promise){await assert.rejects(promise,isInstructionFailure);}
 function checkRaceLoser(results){for(const r of results)if(r.status==='rejected')assert.ok(isInstructionFailure(r.reason),String(r.reason));}
-async function send(instructions,signers=[],tables=[]){
+async function send(instructions,signers=[],tables=[],payer=bootstrap){
   const block=await connection.getLatestBlockhash('confirmed');
-  const message=new TransactionMessage({payerKey:bootstrap.publicKey,recentBlockhash:block.blockhash,instructions:[ComputeBudgetProgram.setComputeUnitLimit({units:500000+(nonce++%10000)}),...instructions]}).compileToV0Message(tables);
-  const tx=new VersionedTransaction(message);tx.sign([...new Map([bootstrap,...signers].map(k=>[k.publicKey.toBase58(),k])).values()]);
+  const message=new TransactionMessage({payerKey:payer.publicKey,recentBlockhash:block.blockhash,instructions:[ComputeBudgetProgram.setComputeUnitLimit({units:500000+(nonce++%10000)}),...instructions]}).compileToV0Message(tables);
+  const tx=new VersionedTransaction(message);tx.sign([...new Map([payer,...signers].map(k=>[k.publicKey.toBase58(),k])).values()]);
   assert.ok(tx.serialize().length<=1232,'reviewed lookup table must fit packet');
   // Failed commands must execute on our owned validator, not merely preflight.
   const signature=await connection.sendRawTransaction(tx.serialize(),{skipPreflight:true});
   const confirmation=await connection.confirmTransaction({signature,...block},'confirmed');
-  if(confirmation.value.err)throw new LocalInstructionFailure(signature,confirmation.value.err);return signature;
+  if(confirmation.value.err)throw new LocalInstructionFailure(signature,confirmation.value.err);
+  for(const name of cuNames)if(instructions.some(i=>i.programId.equals(program)&&i.data.subarray(0,8).equals(disc(name))))cuLog.push({name,signature});
+  return signature;
+}
+// Compute units are read back from the validator for the whole transaction (incl. precompile + budget ix).
+const cuNames=['open_sale','buy_sale','authorize_release'],cuLog=[];
+async function reportComputeUnits(){
+  const byName={};
+  for(const {name,signature}of cuLog){
+    const tx=await connection.getTransaction(signature,{commitment:'confirmed',maxSupportedTransactionVersion:0});
+    (byName[name]??=[]).push(tx.meta.computeUnitsConsumed);
+  }
+  for(const [name,values]of Object.entries(byName))console.log(`CU ${name}: n=${values.length} min=${Math.min(...values)} max=${Math.max(...values)} all=${values.join(',')}`);
 }
 const balance=async address=>BigInt((await connection.getTokenAccountBalance(address,'confirmed')).value.amount);
 async function mintTo(owner,amount){await send([new TransactionInstruction({programId:token,keys:[meta(mint.publicKey,false,true),meta(ata(owner),false,true),meta(bootstrap.publicKey,true)],data:Buffer.concat([Buffer.from([7]),u64(amount)])})]);}
@@ -78,6 +94,17 @@ async function table(addresses){
   const extended=await connection.getSlot('confirmed');for(let i=0;await connection.getSlot('confirmed')<=extended;i++){if(i>100)throw new Error('Lookup table activation timed out');await pause(100);}
   const value=(await connection.getAddressLookupTable(address)).value;assert.ok(value);return [value];
 }
+// Seller-signed listing (design section 5). Byte-for-byte twin of protocol.rs::listing_message and lib/solana/listing-v2.ts.
+const i64=n=>{const b=Buffer.alloc(8);b.writeBigInt64LE(BigInt(n));return b;};
+const LISTING_FLOOR=980_000; // 2% FX tolerance under the 1_000_000 sale price
+const nowSeconds=()=>Math.floor(Date.now()/1000);
+const listingBinding=(p,o={})=>createHash('sha256').update(Buffer.concat([o.domain??p.domain,o.program??p.program,o.card??p.card,o.saleId??p.saleId,u64(o.generation??p.generation)])).digest();
+const listingMessage=(p,min,exp,o={})=>Buffer.concat([Buffer.from('FSOARV2-LIST\0','latin1'),listingBinding(p,o),u64(min),i64(exp)]);
+const listed=(p,{min=LISTING_FLOOR,exp=nowSeconds()+3600,signer=seller,over,message}={})=>Ed25519Program.createInstructionWithPrivateKey({privateKey:signer.secretKey,message:message??listingMessage(p,min,exp,over)});
+const openSale=(p,card,sale,escrow)=>ix('open_sale',[meta(config),meta(card,false,true),meta(sale,false,true),meta(escrow,false,true),meta(mint.publicKey),meta(roles.issuer.publicKey,true,true),meta(token),meta(SystemProgram.programId),meta(SYSVAR_RENT_PUBKEY),meta(SYSVAR_INSTRUCTIONS_PUBKEY)],encode(p));
+// A refusal must come from the intended check, not from any failure: assert the program's custom error code.
+async function rejectsWith(code,promise){await assert.rejects(promise,e=>isInstructionFailure(e)&&e.chainError.InstructionError[1]?.Custom===code,`expected custom error ${code}`);}
+const FAULT={Authority:6001,Binding:6002,Locked:6003,Paused:6004,Cap:6005,ListingInvalid:6007,ListingSigner:6008,ListingExpired:6009,BelowFloor:6010,ReleaseDelay:6011,DelayRange:6012};
 function buy(p,sale,card,escrow){return ix('buy_sale',[meta(config,false,true),meta(card,false,true),meta(sale,false,true),meta(roles.issuer.publicKey,true),meta(new PublicKey(p.buyer),true),meta(new PublicKey(p.buyerToken),false,true),meta(ata(seller.publicKey),false,true),meta(ata(treasury.publicKey),false,true),meta(escrow,false,true),meta(token),meta(SYSVAR_INSTRUCTIONS_PUBKEY)],encode(p));}
 function staff(name,p,sale,actor,action,revision=0,boolean){return ix(name,[meta(config),meta(sale,false,true),meta(actor.publicKey,true)],attest(p,sale,action,revision),...(boolean===undefined?[]:[Buffer.from([boolean?1:0])]));}
 function governSale(name,p,sale,action,revision=0){return ix(name,[meta(config),meta(sale,false,true),meta(gov[0].publicKey,true),meta(gov[1].publicKey,true)],attest(p,sale,action,revision));}
@@ -89,7 +116,7 @@ try {
   // local config contains PUBLIC test context only; its wallet path is absent.
   const localConfig=join(root,'validator-config.json');
   writeFileSync(localConfig,JSON.stringify({json_rpc_url:URL_RPC,websocket_url:'ws://127.0.0.1:18900',keypair_path:join(root,'unused-wallet.json'),commitment:'confirmed'}),{flag:'wx',mode:0o600});
-  child=spawn(validator,['--config',localConfig,'--url',URL_RPC,'--mint',bootstrap.publicKey.toBase58(),'--bind-address','127.0.0.1','--rpc-port','18899','--faucet-port','18901','--gossip-port','18902','--dynamic-port-range','19000-19020','--ledger',join(root,'ledger'),'--upgradeable-program',program.toBase58(),resolve(so),bootstrap.publicKey.toBase58()],{stdio:['ignore','ignore','pipe'],windowsHide:true});
+  child=spawn(validator,['--config',localConfig,'--url',URL_RPC,'--mint',bootstrap.publicKey.toBase58(),'--bind-address','127.0.0.1','--rpc-port','18899','--faucet-port','18901','--gossip-port','18902','--dynamic-port-range','19000-19020','--ledger',join(root,'ledger'),'--upgradeable-program',program.toBase58(),resolve(so),bootstrap.publicKey.toBase58(),...(mockSo?['--upgradeable-program',mockId.toBase58(),resolve(mockSo),bootstrap.publicKey.toBase58()]:[])],{stdio:['ignore','ignore','pipe'],windowsHide:true});
   child.stderr.setEncoding('utf8');child.stderr.on('data',data=>{validatorErrors=(validatorErrors+data).slice(-8000);});
   let spawnError;child.on('error',e=>{spawnError=e;});
   connection=new Connection(URL_RPC,'confirmed');
@@ -115,7 +142,7 @@ try {
     const p={mode,domain,program:program.toBuffer(),config:config.toBuffer(),saleId,card:cardId,pair,attempt:hash(`local-attempt-${caseIndex}-0`),beneficiary:hash('local-user-0'),policy,buyer:buyers[0].publicKey.toBuffer(),seller:seller.publicKey.toBuffer(),treasury:treasury.publicKey.toBuffer(),mint:mint.publicKey.toBuffer(),tokenProgram:token.toBuffer(),buyerToken:ata(buyers[0].publicKey).toBuffer(),sellerToken:ata(seller.publicKey).toBuffer(),treasuryToken:ata(treasury.publicKey).toBuffer(),refundToken:ata(buyers[0].publicKey).toBuffer(),issuer:roles.issuer.publicKey.toBuffer(),generation:1,revision:1,custodyVersion:1,authorityEpoch:2,total:1_000_000,net:950_000,fee:50_000,validFrom:0,expiresAt:Math.floor(Date.now()/1000)+3600};
     await send([ix('register_card',[meta(config),meta(card,false,true),meta(roles.inventory.publicKey,true,true),meta(roles.authenticator.publicKey,true),meta(SystemProgram.programId)],cardId,pair,seller.publicKey.toBuffer(),Buffer.from([mode]))],[roles.inventory,roles.authenticator]);
     const tables=await table([config,card,sale,escrow,mint.publicKey,ata(seller.publicKey),ata(treasury.publicKey),...buyers.map(b=>ata(b.publicKey)),token,SystemProgram.programId,SYSVAR_RENT_PUBKEY,SYSVAR_INSTRUCTIONS_PUBKEY]);
-    await send([ix('open_sale',[meta(config),meta(card,false,true),meta(sale,false,true),meta(escrow,false,true),meta(mint.publicKey),meta(roles.issuer.publicKey,true,true),meta(token),meta(SystemProgram.programId),meta(SYSVAR_RENT_PUBKEY)],encode(p))],[roles.issuer],tables);
+    await send([listed(p),openSale(p,card,sale,escrow)],[roles.issuer],tables,roles.issuer); // issuer pays: another payer overruns the 1232-byte packet
     for(const [field,value] of Object.entries({domain:hash('wrong-domain'),program:SystemProgram.programId.toBuffer(),config:SystemProgram.programId.toBuffer(),card:hash('wrong-card'),pair:hash('wrong-pair'),mode:1-mode,generation:2,custodyVersion:2,authorityEpoch:3,mint:bootstrap.publicKey.toBuffer(),tokenProgram:SystemProgram.programId.toBuffer(),treasuryToken:ata(seller.publicKey).toBuffer(),total:1_000_001,refundToken:ata(buyers[1].publicKey).toBuffer()})){
       await rejectsOnChain(send([buy({...p,[field]:value},sale,card,escrow)],[roles.issuer,buyers[0]],tables));checks++;
     }
@@ -193,12 +220,163 @@ try {
   }
   for(const {sale,permit,state}of retained){
     const data=(await connection.getAccountInfo(sale,'finalized')).data;
-    assert.equal(data.length,961);assert.equal(data[698],state);
+    assert.equal(data.length,993);assert.equal(data[698],state); // 961 before the P1 upgrade; 32 bytes appended (auth time, delay, floor, listing expiry)
+    assert.equal(data.readBigUInt64LE(977),BigInt(LISTING_FLOOR));assert.ok(data.readBigInt64LE(985)>BigInt(nowSeconds())); // min_total, list_expires_at
     assert.deepEqual(data.subarray(8,698),encode(permit));
     assert.ok(data.readBigUInt64LE(700)>0n);
     assert.ok(data.readBigInt64LE(708)>=BigInt(permit.validFrom)&&data.readBigInt64LE(708)<BigInt(permit.expiresAt));
     if(state!==3)assert.ok(data.readBigUInt64LE(716)>0n);
   }checks++;
+  // ======================= P1 upgrade scenarios =======================
+  // Run AFTER the original groups above, which are unchanged apart from the listing instruction that open_sale now requires.
+  // Each refusal asserts the program's own custom error code, so a refusal cannot pass for an unrelated reason.
+  const p1Start=checks;
+  const readConfig=async()=>(await connection.getAccountInfo(config)).data,readSale=async s=>(await connection.getAccountInfo(s)).data;
+  const gSet=(funding,outflow=false)=>send([ix('set_pause',governKeys(),Buffer.from([funding?1:0,outflow?1:0]))],gov.slice(0,2));
+  const setDelay=(n,keys=governKeys(),signers=gov.slice(0,2))=>send([ix('set_release_delay',keys,i64(n))],signers);
+  const chainNow=async()=>{for(let i=0;i<40;i++){const t=await connection.getBlockTime(await connection.getSlot('confirmed')).catch(()=>null);if(t)return t;await pause(250);}throw new Error('chain time unavailable');};
+  const waitChain=async t=>{while(await chainNow()<=t)await pause(400);};
+  const split=total=>{const fee=Math.floor(total*500/10000);return {total,fee,net:total-fee};};
+  // The main loop's last case rotated treasury/policy to unfunded accounts; restore the originals so fresh sales reuse the ATAs.
+  await gSet(true);
+  await send([ix('update_future_terms',governKeys(),treasury.publicKey.toBuffer(),policy)],gov.slice(0,2));
+  await gSet(false);
+  const epoch=Number((await readConfig()).readBigUInt64LE(552));
+  await mintTo(buyers[0].publicKey,10_000_000);
+  const fresh=async(label,mode=0)=>{
+    const cardId=hash(`p1-card-${label}`),pair=hash(`p1-pair-${label}`),saleId=hash(`p1-sale-${label}`),card=pda(Buffer.from('card-v2'),cardId),sale=pda(Buffer.from('sale-v2'),saleId),escrow=pda(Buffer.from('escrow-v2'),sale.toBuffer());
+    const p={mode,domain,program:program.toBuffer(),config:config.toBuffer(),saleId,card:cardId,pair,attempt:hash(`p1-attempt-${label}`),beneficiary:hash('p1-user'),policy,buyer:buyers[0].publicKey.toBuffer(),seller:seller.publicKey.toBuffer(),treasury:treasury.publicKey.toBuffer(),mint:mint.publicKey.toBuffer(),tokenProgram:token.toBuffer(),buyerToken:ata(buyers[0].publicKey).toBuffer(),sellerToken:ata(seller.publicKey).toBuffer(),treasuryToken:ata(treasury.publicKey).toBuffer(),refundToken:ata(buyers[0].publicKey).toBuffer(),issuer:roles.issuer.publicKey.toBuffer(),generation:1,revision:1,custodyVersion:1,authorityEpoch:epoch,...split(1_000_000),validFrom:0,expiresAt:nowSeconds()+7200};
+    await send([ix('register_card',[meta(config),meta(card,false,true),meta(roles.inventory.publicKey,true,true),meta(roles.authenticator.publicKey,true),meta(SystemProgram.programId)],cardId,pair,seller.publicKey.toBuffer(),Buffer.from([mode]))],[roles.inventory,roles.authenticator]);
+    const tables=await table([config,card,sale,escrow,mint.publicKey,ata(seller.publicKey),ata(treasury.publicKey),...buyers.map(b=>ata(b.publicKey)),token,SystemProgram.programId,SYSVAR_RENT_PUBKEY,SYSVAR_INSTRUCTIONS_PUBKEY]);
+    return {p,card,sale,escrow,tables};
+  };
+  const openTx=(s,pre)=>send([...pre,openSale(s.p,s.card,s.sale,s.escrow)],[roles.issuer],s.tables,roles.issuer);
+  const openFor=(s,opts)=>openTx(s,[listed(s.p,opts)]);
+  const buyFor=(s,total)=>send([buy({...s.p,...split(total)},s.sale,s.card,s.escrow)],[roles.issuer,buyers[0]],s.tables);
+
+  // --- 1. Seller-signed listing: every refusal path on open_sale ---
+  const L=await fresh('listing'),L2=await fresh('listing-replay'),X=await fresh('expiry');
+  const goodMessage=()=>listingMessage(L.p,LISTING_FLOOR,nowSeconds()+3600);
+  for(const [why,code,pre] of [
+    ['no signature instruction',FAULT.ListingInvalid,[]],
+    ['signature not immediately before open_sale',FAULT.ListingInvalid,[listed(L.p),ComputeBudgetProgram.setComputeUnitPrice({microLamports:1})]],
+    ['signed by someone other than the card owner',FAULT.ListingSigner,[listed(L.p,{signer:Keypair.generate()})]],
+    ['signed for a different sale id',FAULT.ListingInvalid,[listed(L.p,{over:{saleId:hash('other-sale')}})]],
+    ['signed for a different card',FAULT.ListingInvalid,[listed(L.p,{over:{card:hash('other-card')}})]],
+    ['signed for a different generation',FAULT.ListingInvalid,[listed(L.p,{over:{generation:2}})]],
+    ['signed for a different network (domain)',FAULT.ListingInvalid,[listed(L.p,{over:{domain:hash('other-domain')}})]],
+    ['signed for a different program',FAULT.ListingInvalid,[listed(L.p,{over:{program:SystemProgram.programId.toBuffer()}})]],
+    ['trailing byte after the message',FAULT.ListingInvalid,[listed(L.p,{message:Buffer.concat([goodMessage(),Buffer.from([0])])})]],
+    ['truncated message',FAULT.ListingInvalid,[listed(L.p,{message:goodMessage().subarray(0,60)})]],
+    ['expired when opened',FAULT.ListingExpired,[listed(L.p,{exp:nowSeconds()-1})]],
+    ['zero price floor',FAULT.ListingExpired,[listed(L.p,{min:0})]],
+    ['signature valid for ANOTHER sale replayed on this one',FAULT.ListingInvalid,[listed(L2.p)]],
+  ]){await rejectsWith(code,openTx(L,pre));checks++;}
+  // A forged signature never reaches the program: the runtime's own Ed25519 precompile (instruction 1) rejects the transaction.
+  const forged=Ed25519Program.createInstructionWithPublicKey({publicKey:seller.publicKey.toBytes(),message:goodMessage(),signature:Buffer.alloc(64,1)});
+  await assert.rejects(openTx(L,[forged]),e=>isInstructionFailure(e)&&e.chainError.InstructionError[0]===1,'forged signature must fail in the precompile');checks++;
+  assert.equal(await connection.getAccountInfo(L.sale),null);checks++; // nothing was created by any refused attempt
+  const listExpiry=nowSeconds()+3600;
+  await openFor(L,{exp:listExpiry});
+  let ld=await readSale(L.sale);
+  assert.equal(ld.length,993);assert.equal(ld.readBigUInt64LE(977),BigInt(LISTING_FLOOR));assert.equal(ld.readBigInt64LE(985),BigInt(listExpiry));assert.equal(ld.readBigInt64LE(961),0n);checks++;
+  await assert.rejects(openFor(L,{exp:listExpiry}),isInstructionFailure);checks++; // the same signed listing cannot open a second sale account
+
+  // --- 2. Floor and listing expiry on buy_sale ---
+  const xExpiry=(await chainNow())+12;
+  await openFor(X,{exp:xExpiry}); // lapses while the scenarios below run
+  for(const total of [979_999,940_000,1]){await rejectsWith(FAULT.BelowFloor,buyFor(L,total));checks++;}
+  assert.equal((await readSale(L.sale))[698],1);
+  await buyFor(L,LISTING_FLOOR); // exactly the floor is allowed
+  assert.equal((await readSale(L.sale))[698],2);assert.equal(await balance(L.escrow),BigInt(LISTING_FLOOR));checks++;
+
+  // --- 3. Release delay: governance-set, snapshotted per sale, measured from the passing authentication ---
+  await rejectsWith(FAULT.Paused,setDelay(5));checks++; // funding is live
+  await gSet(true);
+  await rejectsWith(FAULT.Authority,setDelay(5,[meta(config,false,true),meta(gov[0].publicKey,true),meta(gov[0].publicKey,true)],[gov[0]]));checks++; // one governor is not enough
+  await rejectsWith(FAULT.DelayRange,setDelay(-1));await rejectsWith(FAULT.DelayRange,setDelay(2_592_001));checks++;
+  await setDelay(2_592_000);assert.equal((await readConfig()).readBigInt64LE(586),2_592_000n);await setDelay(0);await setDelay(6);
+  assert.equal((await readConfig()).readBigInt64LE(586),6n);checks++;
+  const w={...L.p,...split(LISTING_FLOOR)}; // the terms stored by the buy at exactly the floor
+  await send([staff('record_receipt',w,L.sale,roles.receiver,0)],[roles.receiver]);
+  await send([staff('record_authentication',w,L.sale,roles.authenticator,1,0,true)],[roles.authenticator]);
+  ld=await readSale(L.sale);const authAt=ld.readBigInt64LE(961);
+  assert.ok(authAt>0n&&ld.readBigInt64LE(969)===6n,'authentication time and delay snapshot are recorded');checks++;
+  await rejectsWith(FAULT.ReleaseDelay,send([staff('authorize_release',w,L.sale,roles.release,3)],[roles.release]));checks++;
+  await setDelay(0); // governance shortens the delay AFTER this sale authenticated: its own snapshot still applies
+  await rejectsWith(FAULT.ReleaseDelay,send([staff('authorize_release',w,L.sale,roles.release,3)],[roles.release]));checks++;
+  await waitChain(Number(authAt)+6);
+  await send([staff('authorize_release',w,L.sale,roles.release,3)],[roles.release]);
+  const sellerBeforeRelease=await balance(ata(seller.publicKey)),treasuryBeforeRelease=await balance(ata(treasury.publicKey));
+  await send([outcome(w,L.sale,L.escrow,1)]);
+  assert.equal(await balance(ata(seller.publicKey))-sellerBeforeRelease,BigInt(split(LISTING_FLOOR).net));assert.equal(await balance(ata(treasury.publicKey))-treasuryBeforeRelease,BigInt(split(LISTING_FLOOR).fee));checks++;
+
+  // --- 4. Release delay after a REVIEWED authentication (auth fail -> hold -> reviewer pass -> governance clears -> release) ---
+  const R=await fresh('review');
+  await setDelay(6);await gSet(false); // open_sale and buy_sale need funding live; the delay was set while paused
+  await openFor(R);
+  await buyFor(R,1_000_000);
+  const rw=R.p;
+  await send([staff('record_receipt',rw,R.sale,roles.receiver,0)],[roles.receiver]);
+  await send([staff('record_authentication',rw,R.sale,roles.authenticator,2,0,false)],[roles.authenticator]);
+  assert.equal((await readSale(R.sale)).readBigInt64LE(961),0n);checks++; // a failed authentication starts no clock
+  await send([staff('dispute_hold',rw,R.sale,roles.guardian,5,0)],[roles.guardian]);
+  await send([staff('review_authentication',rw,R.sale,roles.reviewer,8,1,true)],[roles.reviewer]);
+  const reviewAt=(await readSale(R.sale)).readBigInt64LE(961);
+  assert.ok(reviewAt>0n&&(await readSale(R.sale)).readBigInt64LE(969)===6n);checks++; // the passing review starts the clock
+  await send([ix('resolve_dispute',[meta(config),meta(R.sale,false,true),meta(gov[0].publicKey,true),meta(gov[1].publicKey,true)],attest(rw,R.sale,6,1),Buffer.from([0]))],gov.slice(0,2));
+  await rejectsWith(FAULT.ReleaseDelay,send([staff('authorize_release',rw,R.sale,roles.release,3,2)],[roles.release]));checks++;
+  await waitChain(Number(reviewAt)+6);
+  await send([staff('authorize_release',rw,R.sale,roles.release,3,2)],[roles.release]);checks++;
+
+  // --- 5. The seller's own listing expiry stops a late buy, whatever the issuer signs ---
+  await waitChain(xExpiry+1);
+  await rejectsWith(FAULT.ListingExpired,buyFor(X,1_000_000));checks++;
+  assert.equal((await readSale(X.sale))[698],1);
+
+  // --- 6. Governance: guardian pauses alone; a vault replaces the native governors ---
+  await rejectsOnChain(send([ix('emergency_pause',[meta(config,false,true),meta(roles.issuer.publicKey,true)],Buffer.from([0]))],[roles.issuer]));checks++; // only the guardian key
+  await send([ix('emergency_pause',[meta(config,false,true),meta(roles.guardian.publicKey,true)],Buffer.from([0]))],[roles.guardian]); // alone: no governor involved
+  let cfg=await readConfig();assert.equal(cfg[560],1);assert.equal(cfg[561],0);checks++;
+  const vault=mockSo?PublicKey.findProgramAddressSync([Buffer.from('mock-vault')],mockId)[0]:PublicKey.findProgramAddressSync([Buffer.from('p1-vault')],SystemProgram.programId)[0];
+  assert.ok(!PublicKey.isOnCurve(vault.toBytes()));
+  const install=(v,policyBytes=hash('p1-vault-policy'))=>ix('install_governance_vault',governKeys(),v.toBuffer(),policyBytes);
+  await gSet(false);
+  await rejectsWith(FAULT.Authority,send([install(vault)],gov.slice(0,2)));checks++; // funding must be paused
+  await gSet(true);
+  await rejectsWith(FAULT.Authority,send([install(Keypair.generate().publicKey)],gov.slice(0,2)));checks++; // must be off-curve
+  await rejectsWith(FAULT.Authority,send([install(vault,Buffer.alloc(32))],gov.slice(0,2)));checks++; // needs a policy commitment
+  await rejectsWith(FAULT.Authority,send([ix('install_governance_vault',[meta(config,false,true),meta(gov[0].publicKey,true),meta(gov[0].publicKey,true)],vault.toBuffer(),hash('p1-vault-policy'))],[gov[0]]));checks++;
+  await send([install(vault)],gov.slice(0,2));
+  assert.deepEqual((await readConfig()).subarray(488,520),vault.toBuffer());checks++;
+  // Native governors are now shut out of every governed instruction.
+  for(const [name,keys,...data]of [['set_pause',governKeys(),Buffer.from([0,0])],['set_release_delay',governKeys(),i64(5)],['configure',governKeys(),roleBytes(),u64(2_000_000),u64(10_000_000)],['update_future_terms',governKeys(),treasury.publicKey.toBuffer(),policy],['install_governance_vault',governKeys(),vault.toBuffer(),hash('p1-vault-policy')]]){
+    await rejectsWith(FAULT.Authority,send([ix(name,keys,...data)],gov.slice(0,2)));checks++;
+  }
+  // The vault account cannot be impersonated: passed without a signature, Anchor's Signer check refuses.
+  await rejectsOnChain(send([ix('set_pause',[meta(config,false,true),meta(vault),meta(vault)],Buffer.from([0,0]))]));checks++;
+  let vaultChecks='SKIPPED (no mock vault .so supplied; CPI-signed vault path NOT exercised)';
+  if(mockSo){
+    // Squads-style execution: the vault PDA signs through CPI, appearing twice in the governed instruction's accounts.
+    const viaVault=(name,keys,...data)=>{
+      const inner=ix(name,keys,...data),flags=inner.keys.map(k=>(k.isSigner?1:0)|(k.isWritable?2:0));
+      return new TransactionInstruction({programId:mockId,keys:[meta(program),...inner.keys.map(k=>meta(k.pubkey,k.isSigner&&!k.pubkey.equals(vault),k.isWritable))],data:Buffer.concat([Buffer.from([inner.keys.length]),Buffer.from(flags),inner.data])});
+    };
+    const vaultKeys=[meta(config,false,true),meta(vault,true),meta(vault,true)];
+    await rejectsWith(FAULT.Authority,send([viaVault('set_pause',[meta(config,false,true),meta(vault,true),meta(gov[0].publicKey,true)],Buffer.from([0,0]))],[gov[0]]));checks++; // vault + one native key is not governance
+    await send([viaVault('set_pause',vaultKeys,Buffer.from([0,0]))]);
+    cfg=await readConfig();assert.equal(cfg[560],0,'vault unpaused funding');checks++;
+    await send([ix('emergency_pause',[meta(config,false,true),meta(roles.guardian.publicKey,true)],Buffer.from([0]))],[roles.guardian]);
+    cfg=await readConfig();assert.equal(cfg[560],1,'guardian paused alone while the vault governs');checks++;
+    await rejectsWith(FAULT.Authority,send([ix('set_pause',governKeys(),Buffer.from([0,0]))],gov.slice(0,2)));checks++; // the guardian can pause but nobody native can resume
+    await send([viaVault('set_release_delay',vaultKeys,i64(86_400))]);
+    assert.equal((await readConfig()).readBigInt64LE(586),86_400n);checks++;
+    await send([viaVault('set_pause',vaultKeys,Buffer.from([0,0]))]);
+    assert.equal((await readConfig())[560],0);checks++;
+    vaultChecks='exercised with a CPI-signed PDA vault (mock; NOT the Squads program)';
+  }
+  console.log(`P1 scenarios: ${checks-p1Start} groups passed; vault path: ${vaultChecks}`);
+  await reportComputeUnits();
   console.log(`LOCAL VALIDATOR ONLY: ${checks} on-chain scenario groups passed; no database integration asserted.`);
 } finally {
   if(child&&child.exitCode===null){child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),pause(5000)]);}
