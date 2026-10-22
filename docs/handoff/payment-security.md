@@ -6745,3 +6745,39 @@ in `tests/payment-db/README.md`.
 
 **Tests:** `tests/migration-081.test.ts` +4 (the five ids only; the three allowed updates; guards present). `npm test`
 631/631 (619 + 8 from the C14 merge `bcd4d6c` + 4), tsc passes, build passes.
+
+## 2026-10-22 - Migration 082: solo-operator mode (container + staging; NOT applied to production)
+
+Commit `1d25fe1` (+ this handoff). File `supabase/migrations/082_payment_v2_solo_operator_mode.sql`, sha256
+`fce221890856c6ee42c8f72fea9ffc8b95b0258153a8811fd4c8fee164e40118`. Per the approved S1 design.
+
+- **New:** `payment_v2.governance_mode` (singleton, starts `separated,3,0`; CHECK solo => 2 governors and delay >= 86400; audited via
+  `audit_configuration`), immutable `governance_proposals` / `_approvals` / `_applied`, `decisions.mode_at_decision` (11th column,
+  nullable), helpers `independent_actor(text,uuid,uuid,uuid,uuid)` and `release_delay_met(uuid,bigint,integer)` (owner-only),
+  RPCs `fn_payment_v2_propose_governance(text,jsonb)`, `fn_payment_v2_approve_governance(uuid)`, `fn_payment_v2_disable_funding()`
+  (SECURITY DEFINER, owner `payment_v2_owner`, EXECUTE to `authenticated` only).
+- **Governance rules:** a governor proposes (counts as approval 1); a second governor *person* approves and the proposal applies once.
+  `mode` proposals are refused and applied only while funding is off and only against the base mode proposed on (STALE otherwise).
+  `enable_funding` needs `funding_configuration` true (NOT_CONFIGURED). `disable_funding` is one guardian or governor.
+- **Five bodies repaired** by single-line pinned fragments (pins in the file): `funding_configuration`, `fn_payment_v2_reconcile_event`,
+  `fn_payment_v2_record_decision`, `correspondence`, `fn_payment_v2_approve_refund`. In `separated,3,0` each is equivalent to the old
+  check; the postguard proves `funding_configuration` unchanged for every network. Reconcile judges a release by the mode **stamped on
+  its decision** (NULL history = separated), so a mode switch never strands an in-flight release. `correspondence` UPDATE accepts
+  either mode's independence (the pair is immutable) so quarantine still works across a switch.
+- **Bracket:** OWNER TO needs CREATE on `public` (as 067b/069b): 082 grants and revokes it inside its single transaction and asserts
+  it gone. It also requires the migration role to SET/INHERIT `payment_v2_owner` (checked first, clear message). Staging's `postgres`
+  has that (read-only check `R1`); the container driver mirrors it and says so.
+- **Container (`6ef7375a8c4e`):** `T082_RUN_PASS`: 082 refused without 081 and while funding is enabled (nothing created); re-run refused;
+  suite `83_solo_mode.sql` 18 stages PASS (README). Full payment-db suite on 078+079+080+081+081b+082, 03..90, 72 steps all rc=0,
+  `FINAL ACCEPTANCE COMMITTED`; its 7 decisions are stamped `separated`.
+- **Staging:** dry run (rolled back, all postguards ran), apply `COMMIT`, re-run refused. Post-82 body md5s are byte-identical to the
+  container's (`93bcb87a…` approve_refund, `69926e7b…` reconcile, `20823065…` record_decision, `a4e0001a…` correspondence,
+  `d1620acc…` funding_configuration). verify-post diff is exactly: V1 +3 RPCs, V3 27->31 tables / 25->27 / 37->40, V6 correspondence md5.
+  verify-081 unchanged. Staging has 0 networks/staff/decisions, so behaviour is proven by the container, not staging data.
+- **Kit:** `flexsoar-reviews\prod-runbook-082.md` + `prod-runbook-082\` (pins commit `1d25fe1`; `checks-diff-082.sh` tested pass and two fail
+  cases). Requires 081 and 081b applied first.
+- **Not verified / deferred:** program-side release delay, seller floor and governance (single program upgrade); notifications and the
+  daily report (worker milestone); no `errors.ts` mapping added (no app caller yet; track/data if the UI surfaces these codes:
+  `PAYMENT_V2_INDEPENDENT_KEY_REQUIRED`, `RELEASE_DELAY`, `GOVERNOR_SET_INCOMPLETE`, `FUNDING_ENABLED`, `GOVERNANCE_*`, `GOVERNOR_REQUIRED`).
+- **Do not switch production to `solo` before the program upgrade is devnet-verified.**
+- Tests: `npm test` 637 (631 + 6 in `tests/migration-082.test.ts`), tsc and build clean.
