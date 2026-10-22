@@ -34,7 +34,7 @@ import {
 import { gradeFloatFromComponents } from "@/lib/db/grading";
 import type { GradeComponents } from "@/lib/db/grading";
 import { currentUserId } from "@/app/(market)/queries";
-import { signUploadUrl } from "@/lib/r2/sign";
+import { MAX_UPLOAD_BYTES, signUploadUrl } from "@/lib/r2/sign";
 import {
   REQUIRED_PHOTO_COUNT,
   isValidCountryCode,
@@ -63,9 +63,6 @@ const ALLOWED_CONTENT_TYPES = new Set([
   "image/webp",
 ]);
 
-/** Hard cap: 8MB. Server-side, so it cannot be bypassed with a client spoof. */
-const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
-
 export async function getUploadTargetAction(input: {
   contentType: string;
   sizeBytes: number;
@@ -83,7 +80,7 @@ export async function getUploadTargetAction(input: {
     };
   }
   if (
-    !Number.isFinite(input.sizeBytes) ||
+    !Number.isSafeInteger(input.sizeBytes) ||
     input.sizeBytes <= 0 ||
     input.sizeBytes > MAX_UPLOAD_BYTES
   ) {
@@ -102,6 +99,7 @@ export async function getUploadTargetAction(input: {
       scope: "intake",
       id: me,
       contentType: input.contentType,
+      sizeBytes: input.sizeBytes,
       httpsOnly: true,
     });
     return {
