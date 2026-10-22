@@ -27,7 +27,8 @@ pub mod flexsoar_settlement {
         c.funding_paused = true; c.outflow_paused = false;
         c.max_trade = 0; c.max_escrow = 0; c.outstanding = 0;
         c.governance_vault = Pubkey::default(); c.governance_policy = [0;32];
-        c.release_delay = 0;
+        c.release_delay = 0; c.layout_version = LAYOUT_VERSION;
+        c.pending_vault = Pubkey::default(); c.pending_controller = Pubkey::default(); c.pending_policy = [0;32];
         Ok(())
     }
     pub fn configure(ctx: Context<Govern>, roles: Roles, max_trade: u64, max_escrow: u64) -> Result<()> {
@@ -60,14 +61,30 @@ pub mod flexsoar_settlement {
         ctx.accounts.config.roles.validate(&governance)?;
         ctx.accounts.config.governance = governance; Ok(())
     }
-    /// Native 2/3 must explicitly enroll a reviewed off-curve governance vault.
-    /// Its threshold/program policy is externally audited, not guessed here.
-    pub fn install_governance_vault(ctx: Context<Govern>, vault: Pubkey, policy: [u8;32]) -> Result<()> {
+    /// Phase 1 of vault enrollment (R1-02). Current governance PROPOSES an off-curve vault, the program that controls it
+    /// (e.g. Squads) and a policy digest. NOTHING changes governance: until the vault accepts, `govern()` still uses the
+    /// current authority, so a mistyped or unsignable address can never lock governance out. Re-proposing replaces the proposal.
+    /// The policy digest is an audit reference (the reviewed multisig description), not something the program can validate.
+    pub fn propose_governance_vault(ctx: Context<Govern>, vault: Pubkey, controller: Pubkey, policy: [u8;32]) -> Result<()> {
         govern(&ctx.accounts.config, &ctx.accounts.first, &ctx.accounts.second)?;
-        require!(ctx.accounts.config.funding_paused && vault != Pubkey::default() && is_off_curve(&vault) && policy != [0;32], Fault::Authority);
+        require!(ctx.accounts.config.funding_paused && vault != Pubkey::default() && is_off_curve(&vault) && controller != Pubkey::default() && controller != vault && policy != [0;32], Fault::Authority);
         let r=&ctx.accounts.config.roles;
         require!(![r.issuer,r.inventory,r.receiver,r.authenticator,r.reviewer,r.release,r.reconciler,r.guardian].contains(&vault), Fault::Authority);
-        ctx.accounts.config.governance_vault=vault; ctx.accounts.config.governance_policy=policy; Ok(())
+        let c = &mut ctx.accounts.config;
+        c.pending_vault=vault; c.pending_controller=controller; c.pending_policy=policy; Ok(())
+    }
+    /// Phase 2: the proposed vault itself must sign, through a CPI made by the proposed controller as the TOP-LEVEL instruction.
+    /// Only the program that owns the vault's derivation can make the PDA sign, so this proves the address is usable;
+    /// the controller check proves it is the reviewed program and not some other program that happens to own the address.
+    pub fn accept_governance_vault(ctx: Context<AcceptVault>) -> Result<()> {
+        let c = &mut ctx.accounts.config;
+        require!(c.pending_vault != Pubkey::default(), Fault::NoPendingVault);
+        require!(c.funding_paused, Fault::Paused);
+        let info = ctx.accounts.instructions.to_account_info();
+        let top = load_instruction_at_checked(load_current_index_checked(&info)? as usize, &info)?;
+        require_keys_eq!(top.program_id, c.pending_controller, Fault::WrongController);
+        c.governance_vault=c.pending_vault; c.governance_policy=c.pending_policy;
+        c.pending_vault=Pubkey::default(); c.pending_controller=Pubkey::default(); c.pending_policy=[0;32]; Ok(())
     }
     pub fn update_future_terms(ctx: Context<Govern>, treasury: Pubkey, policy: [u8;32]) -> Result<()> {
         govern(&ctx.accounts.config, &ctx.accounts.first, &ctx.accounts.second)?;
@@ -106,7 +123,8 @@ pub mod flexsoar_settlement {
         card.generation = next; card.resolved = false; card.sale = ctx.accounts.sale.key();
         ctx.accounts.sale.terms = template; ctx.accounts.sale.state = 1;
         ctx.accounts.sale.bump = ctx.bumps.sale; ctx.accounts.sale.decision_revision = 0;
-        ctx.accounts.sale.min_total = min_total; ctx.accounts.sale.list_expires_at = list_expires_at; Ok(())
+        ctx.accounts.sale.min_total = min_total; ctx.accounts.sale.list_expires_at = list_expires_at;
+        ctx.accounts.sale.layout_version = LAYOUT_VERSION; Ok(())
     }
     pub fn revoke_sale(ctx: Context<Lifecycle>) -> Result<()> {
         require!(ctx.accounts.sale.state == 1 && ctx.accounts.card.sale == ctx.accounts.sale.key(), Fault::Locked);
@@ -215,6 +233,8 @@ pub mod flexsoar_settlement {
         let bump = [s.bump]; let seeds: &[&[u8]] = &[b"sale-v2", &p.sale_id, &bump];
         if s.decision == 1 {
             require!(s.received && s.authentication == 1, Fault::Authority);
+            // Re-checked here, not only at authorization: the delay is measured against the Clock at the moment money moves.
+            require!(s.release_due(Clock::get()?.unix_timestamp), Fault::ReleaseDelay);
             transfer(&ctx.accounts.token_program, &ctx.accounts.escrow, &ctx.accounts.seller_token, &s.to_account_info(), p.net, &[seeds])?;
             transfer(&ctx.accounts.token_program, &ctx.accounts.escrow, &ctx.accounts.treasury_token, &s.to_account_info(), p.fee, &[seeds])?;
             s.state = 4;
@@ -245,7 +265,7 @@ fn govern(c: &ConfigV2, first: &Signer, second: &Signer) -> Result<()> {
 }
 /// True when `key` is not a valid ed25519 point, i.e. it can only ever sign through a program's CPI (a PDA).
 /// `Pubkey::is_on_curve()` is `unimplemented!()` on the SBF target and PANICS on chain, which made
-/// `install_governance_vault` unusable; on chain this asks the runtime's curve25519 syscall instead (0 = valid point).
+/// `propose_governance_vault` unusable; on chain this asks the runtime's curve25519 syscall instead (0 = valid point).
 fn is_off_curve(key: &Pubkey) -> bool {
     #[cfg(target_os = "solana")]
     {
@@ -317,7 +337,16 @@ impl Roles {
 }
 #[account]
 #[derive(InitSpace)]
-pub struct ConfigV2 { pub domain:[u8;32], pub policy:[u8;32], pub treasury:Pubkey, pub mint:Pubkey, pub roles:Roles, pub governance:[Pubkey;3], pub governance_vault:Pubkey, pub governance_policy:[u8;32], pub epoch:u64, pub funding_paused:bool, pub outflow_paused:bool, pub max_trade:u64, pub max_escrow:u64, pub outstanding:u64, pub release_delay:i64 }
+pub struct ConfigV2 { pub domain:[u8;32], pub policy:[u8;32], pub treasury:Pubkey, pub mint:Pubkey, pub roles:Roles, pub governance:[Pubkey;3], pub governance_vault:Pubkey, pub governance_policy:[u8;32], pub epoch:u64, pub funding_paused:bool, pub outflow_paused:bool, pub max_trade:u64, pub max_escrow:u64, pub outstanding:u64, pub release_delay:i64,
+    // Two-phase vault enrollment (R1-02): nothing here governs until `accept_governance_vault` moves it into governance_vault.
+    pub pending_vault:Pubkey, pub pending_controller:Pubkey, pub pending_policy:[u8;32],
+    // R1-01: layout version plus 128 reserved zero bytes for future fields (see LAYOUT RULE).
+    pub layout_version:u8, pub reserved:[u8;128] }
+/// LAYOUT RULE: accounts are typed, so ANY change to ConfigV2 or SaleV2 breaks deserialization of every account written by an
+/// earlier layout, and this program has no close or realloc instruction. New fields must come out of `reserved` (never change
+/// the size), and a change that cannot must ship a migration instruction AND tests that run it on old-layout accounts before the
+/// binary is upgraded anywhere. Bump LAYOUT_VERSION whenever the meaning of reserved bytes changes.
+pub const LAYOUT_VERSION: u8 = 1;
 #[account]
 #[derive(InitSpace)]
 pub struct CardControl { pub card:[u8;32], pub pair:[u8;32], pub owner:Pubkey, pub mode:u8, pub custody_version:u64, pub generation:u64, pub sale:Pubkey, pub resolved:bool, pub quarantined:bool }
@@ -331,8 +360,13 @@ pub struct SaleV2 {
     pub held:bool, pub decision:u8, pub decision_revision:u64, pub decision_evidence:[u8;32],
     // Appended by the P1 upgrade; every earlier offset is unchanged.
     pub authenticated_at:i64, pub release_delay:i64, pub min_total:u64, pub list_expires_at:i64,
+    // R1-01: layout version plus 96 reserved zero bytes (3 x 32 because derive(Default) stops at 32-element arrays), so a
+    // future field takes space from here instead of needing a realloc. See LAYOUT RULE below.
+    pub layout_version:u8, pub reserved:[[u8;32];3],
 }
 impl SaleV2 {
+    /// True once `authenticated_at + release_delay` has passed. An overflow is "not due" (fail closed).
+    fn release_due(&self, now: i64) -> bool { self.authenticated_at.checked_add(self.release_delay).map_or(false, |t| now >= t) }
     fn execution_allowed(&self, paused: bool, revision: u64) -> bool {
         self.state == 2 && !self.held && !paused && self.decision_revision == revision
             && (self.decision == 2 || (self.decision == 1 && self.received && self.authentication == 1))
@@ -344,7 +378,7 @@ pub struct PaymentState { pub sale:Pubkey, pub attempt:[u8;32], pub state:u8, pu
 pub const MAX_RELEASE_DELAY: i64 = 30 * 24 * 60 * 60;
 #[error_code]
 // Append-only: Anchor codes are 6000 + index and off-chain clients match on them.
-pub enum Fault { LegacyDisabled, Authority, Binding, Locked, Paused, Cap, Arithmetic, ListingInvalid, ListingSigner, ListingExpired, BelowFloor, ReleaseDelay, DelayRange }
+pub enum Fault { LegacyDisabled, Authority, Binding, Locked, Paused, Cap, Arithmetic, ListingInvalid, ListingSigner, ListingExpired, BelowFloor, ReleaseDelay, DelayRange, NoPendingVault, WrongController }
 
 #[cfg(test)]
 mod tests {
@@ -375,7 +409,7 @@ mod tests {
     fn fault_codes_are_append_only() {
         // Existing codes must not shift; new ones extend the enum.
         for (fault, code) in [(Fault::LegacyDisabled, 6000), (Fault::Authority, 6001), (Fault::Binding, 6002), (Fault::Locked, 6003), (Fault::Paused, 6004), (Fault::Cap, 6005), (Fault::Arithmetic, 6006),
-            (Fault::ListingInvalid, 6007), (Fault::ListingSigner, 6008), (Fault::ListingExpired, 6009), (Fault::BelowFloor, 6010), (Fault::ReleaseDelay, 6011), (Fault::DelayRange, 6012)] {
+            (Fault::ListingInvalid, 6007), (Fault::ListingSigner, 6008), (Fault::ListingExpired, 6009), (Fault::BelowFloor, 6010), (Fault::ReleaseDelay, 6011), (Fault::DelayRange, 6012), (Fault::NoPendingVault, 6013), (Fault::WrongController, 6014)] {
             assert_eq!(u32::from(fault), code);
         }
     }
@@ -386,10 +420,29 @@ mod tests {
         // The sale carries its own copy; the config field is only read when authentication passes.
         let mut s = SaleV2::default(); let mut c = ConfigV2 { domain:[0;32], policy:[0;32], treasury:Pubkey::default(), mint:Pubkey::default(),
             roles: Roles { issuer:Pubkey::default(), inventory:Pubkey::default(), receiver:Pubkey::default(), authenticator:Pubkey::default(), reviewer:Pubkey::default(), release:Pubkey::default(), reconciler:Pubkey::default(), guardian:Pubkey::default() },
-            governance:[Pubkey::default();3], governance_vault:Pubkey::default(), governance_policy:[0;32], epoch:0, funding_paused:true, outflow_paused:false, max_trade:0, max_escrow:0, outstanding:0, release_delay:86_400 };
+            governance:[Pubkey::default();3], governance_vault:Pubkey::default(), governance_policy:[0;32], epoch:0, funding_paused:true, outflow_paused:false, max_trade:0, max_escrow:0, outstanding:0, release_delay:86_400,
+            pending_vault:Pubkey::default(), pending_controller:Pubkey::default(), pending_policy:[0;32], layout_version:LAYOUT_VERSION, reserved:[0;128] };
         s.release_delay = c.release_delay; c.release_delay = 0;
         assert_eq!(s.release_delay, 86_400);
         assert_eq!(s.authenticated_at.checked_add(s.release_delay), Some(86_400));
+    }
+    #[test]
+    fn release_is_rechecked_against_the_clock_at_execution() {
+        let mut s = SaleV2::default(); s.authenticated_at = 1_000; s.release_delay = 86_400;
+        assert!(!s.release_due(1_000) && !s.release_due(87_399)); // inside the delay, including a Clock that moved backwards
+        assert!(s.release_due(87_400) && s.release_due(1_000_000)); // equality is due
+        s.release_delay = 0; assert!(s.release_due(1_000) && !s.release_due(999));
+        s.authenticated_at = i64::MAX; s.release_delay = 1; assert!(!s.release_due(i64::MAX), "overflow fails closed");
+        // A sale that never authenticated (authenticated_at 0, delay 0) is due at any positive time, so the
+        // `authentication == 1` check in execute_outcome, not this one, is what stops it.
+        assert!(SaleV2::default().release_due(1));
+    }
+    #[test]
+    fn layout_is_versioned_and_reserved_space_is_zero_by_default() {
+        assert_eq!(LAYOUT_VERSION, 1);
+        let s = SaleV2::default(); assert_eq!(s.layout_version, 0); assert!(s.reserved.iter().all(|b| b.iter().all(|x| *x == 0)));
+        // Growing a struct is the thing the LAYOUT RULE forbids: pin the sizes so any change fails loudly here first.
+        assert_eq!(8 + ConfigV2::INIT_SPACE, 819); assert_eq!(8 + SaleV2::INIT_SPACE, 1090);
     }
     #[test]
     fn vault_must_be_an_off_curve_address() {
@@ -401,8 +454,8 @@ mod tests {
     }
     #[test]
     fn account_sizes_only_grew_at_the_tail() {
-        assert_eq!(8 + ConfigV2::INIT_SPACE, 586 + 8);
-        assert_eq!(8 + SaleV2::INIT_SPACE, 961 + 32);
+        assert_eq!(8 + ConfigV2::INIT_SPACE, 586 + 8 + 96 + 1 + 128);
+        assert_eq!(8 + SaleV2::INIT_SPACE, 961 + 32 + 1 + 96);
     }
     #[test]
     fn native_two_of_three_requires_independent_members() {
@@ -425,6 +478,14 @@ pub struct Init<'info> {
 #[derive(Accounts)]
 pub struct Govern<'info> {
     #[account(mut,seeds=[b"config-v2"],bump)] pub config:Box<Account<'info,ConfigV2>>, pub first:Signer<'info>, pub second:Signer<'info>,
+}
+#[derive(Accounts)]
+pub struct AcceptVault<'info> {
+    #[account(mut,seeds=[b"config-v2"],bump)] pub config:Box<Account<'info,ConfigV2>>,
+    /// The proposed vault. It can only be a signer if its controlling program made it one through CPI.
+    #[account(address=config.pending_vault @ Fault::Authority)] pub vault:Signer<'info>,
+    /// CHECK: fixed runtime instructions sysvar; used to read the top-level instruction's program id.
+    #[account(address=anchor_lang::solana_program::sysvar::instructions::ID)] pub instructions:UncheckedAccount<'info>,
 }
 #[derive(Accounts)]
 pub struct Guardian<'info> {

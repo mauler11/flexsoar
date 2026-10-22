@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, dirname, basename } from 'node:path';
 import net from 'node:net';
 import { createHash } from 'node:crypto';
+import { initializeV2 } from '../scripts/init-v2.mjs';
 const args=process.argv.slice(2);
 if(!args.includes('--run-local-validator'))throw new Error('Explicit --run-local-validator opt-in required. No network action taken.');
 if(args.some(a=>/rpc|wallet|keypair|devnet|mainnet/i.test(a)))throw new Error('No supplied RPC/wallet/keypair/network arguments accepted.');
@@ -33,7 +34,7 @@ const {Connection,Keypair,PublicKey,TransactionInstruction,TransactionMessage,Ve
 // Optional TEST-ONLY vault emulator (solana/test-programs/mock-vault): a PDA that signs through CPI like a Squads vault.
 const mockSo=process.env.FLEXSOAR_MOCK_VAULT_SO;
 if(mockSo&&!existsSync(mockSo))throw new Error('FLEXSOAR_MOCK_VAULT_SO set but the file does not exist.');
-const mockId=Keypair.generate().publicKey;
+const mockId=Keypair.generate().publicKey,mockId2=Keypair.generate().publicKey; // two copies of the mock: the second is 'the wrong program'
 // Generation happens only after all safety checks. Secrets remain in memory.
 const bootstrap=Keypair.generate(),gov=[Keypair.generate(),Keypair.generate(),Keypair.generate()];
 const roleNames=['issuer','inventory','receiver','authenticator','reviewer','release','reconciler','guardian'];
@@ -104,7 +105,7 @@ const listed=(p,{min=LISTING_FLOOR,exp=nowSeconds()+3600,signer=seller,over,mess
 const openSale=(p,card,sale,escrow)=>ix('open_sale',[meta(config),meta(card,false,true),meta(sale,false,true),meta(escrow,false,true),meta(mint.publicKey),meta(roles.issuer.publicKey,true,true),meta(token),meta(SystemProgram.programId),meta(SYSVAR_RENT_PUBKEY),meta(SYSVAR_INSTRUCTIONS_PUBKEY)],encode(p));
 // A refusal must come from the intended check, not from any failure: assert the program's custom error code.
 async function rejectsWith(code,promise){await assert.rejects(promise,e=>isInstructionFailure(e)&&e.chainError.InstructionError[1]?.Custom===code,`expected custom error ${code}`);}
-const FAULT={Authority:6001,Binding:6002,Locked:6003,Paused:6004,Cap:6005,ListingInvalid:6007,ListingSigner:6008,ListingExpired:6009,BelowFloor:6010,ReleaseDelay:6011,DelayRange:6012};
+const FAULT={Authority:6001,Binding:6002,Locked:6003,Paused:6004,Cap:6005,ListingInvalid:6007,ListingSigner:6008,ListingExpired:6009,BelowFloor:6010,ReleaseDelay:6011,DelayRange:6012,NoPendingVault:6013,WrongController:6014};
 function buy(p,sale,card,escrow){return ix('buy_sale',[meta(config,false,true),meta(card,false,true),meta(sale,false,true),meta(roles.issuer.publicKey,true),meta(new PublicKey(p.buyer),true),meta(new PublicKey(p.buyerToken),false,true),meta(ata(seller.publicKey),false,true),meta(ata(treasury.publicKey),false,true),meta(escrow,false,true),meta(token),meta(SYSVAR_INSTRUCTIONS_PUBKEY)],encode(p));}
 function staff(name,p,sale,actor,action,revision=0,boolean){return ix(name,[meta(config),meta(sale,false,true),meta(actor.publicKey,true)],attest(p,sale,action,revision),...(boolean===undefined?[]:[Buffer.from([boolean?1:0])]));}
 function governSale(name,p,sale,action,revision=0){return ix(name,[meta(config),meta(sale,false,true),meta(gov[0].publicKey,true),meta(gov[1].publicKey,true)],attest(p,sale,action,revision));}
@@ -116,7 +117,7 @@ try {
   // local config contains PUBLIC test context only; its wallet path is absent.
   const localConfig=join(root,'validator-config.json');
   writeFileSync(localConfig,JSON.stringify({json_rpc_url:URL_RPC,websocket_url:'ws://127.0.0.1:18900',keypair_path:join(root,'unused-wallet.json'),commitment:'confirmed'}),{flag:'wx',mode:0o600});
-  child=spawn(validator,['--config',localConfig,'--url',URL_RPC,'--mint',bootstrap.publicKey.toBase58(),'--bind-address','127.0.0.1','--rpc-port','18899','--faucet-port','18901','--gossip-port','18902','--dynamic-port-range','19000-19020','--ledger',join(root,'ledger'),'--upgradeable-program',program.toBase58(),resolve(so),bootstrap.publicKey.toBase58(),...(mockSo?['--upgradeable-program',mockId.toBase58(),resolve(mockSo),bootstrap.publicKey.toBase58()]:[])],{stdio:['ignore','ignore','pipe'],windowsHide:true});
+  child=spawn(validator,['--config',localConfig,'--url',URL_RPC,'--mint',bootstrap.publicKey.toBase58(),'--bind-address','127.0.0.1','--rpc-port','18899','--faucet-port','18901','--gossip-port','18902','--dynamic-port-range','19000-19020','--ledger',join(root,'ledger'),'--upgradeable-program',program.toBase58(),resolve(so),bootstrap.publicKey.toBase58(),...(mockSo?['--upgradeable-program',mockId.toBase58(),resolve(mockSo),bootstrap.publicKey.toBase58(),'--upgradeable-program',mockId2.toBase58(),resolve(mockSo),bootstrap.publicKey.toBase58()]:[])],{stdio:['ignore','ignore','pipe'],windowsHide:true});
   child.stderr.setEncoding('utf8');child.stderr.on('data',data=>{validatorErrors=(validatorErrors+data).slice(-8000);});
   let spawnError;child.on('error',e=>{spawnError=e;});
   connection=new Connection(URL_RPC,'confirmed');
@@ -128,7 +129,30 @@ try {
   const loader=new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111'),programData=PublicKey.findProgramAddressSync([program.toBuffer()],loader)[0];
   await rejectsOnChain(send([ix('initialize_v2',[meta(config,false,true),meta(roles.inventory.publicKey,true,true),meta(programData),meta(mint.publicKey),meta(SystemProgram.programId)],domain,policy,treasury.publicKey.toBuffer(),roleBytes(),Buffer.concat(gov.map(g=>g.publicKey.toBuffer())))],[roles.inventory]));
   assert.equal(await connection.getAccountInfo(config),null);checks++;
-  await send([ix('initialize_v2',[meta(config,false,true),meta(bootstrap.publicKey,true,true),meta(programData),meta(mint.publicKey),meta(SystemProgram.programId)],domain,policy,treasury.publicKey.toBuffer(),roleBytes(),Buffer.concat(gov.map(g=>g.publicKey.toBuffer())))]);
+  // Initialization goes through the reviewed script (solana/scripts/init-v2.mjs): pinned manifest, genesis check, fresh-program
+  // inventory, simulation, and a field-by-field readback. Its refusals are exercised first, against the real program and cluster.
+  const genesisKey=new PublicKey(domain).toBase58();
+  const manifestFor=(over={})=>({cluster:'localnet',genesisHash:genesisKey,programId:program.toBase58(),mint:mint.publicKey.toBase58(),domain:genesisKey,policyDigest:policy.toString('hex'),treasury:treasury.publicKey.toBase58(),bootstrap:bootstrap.publicKey.toBase58(),roles:Object.fromEntries(roleNames.map(n=>[n,roles[n].publicKey.toBase58()])),governance:gov.map(g=>g.publicKey.toBase58()),...over});
+  const refusedInit=async(why,pattern,opts)=>{await assert.rejects(initializeV2({connection,commitment:'confirmed',...opts}),e=>pattern.test(e.message),why);assert.equal(await connection.getAccountInfo(config),null,`${why}: nothing created`);checks++;};
+  const otherCluster=Keypair.generate().publicKey.toBase58();
+  await refusedInit('RPC genesis differs from the pinned manifest',/does not match the pinned/,{manifest:manifestFor({genesisHash:otherCluster,domain:otherCluster})});
+  await refusedInit('domain differs from the pinned genesis',/domain must equal the pinned genesis/,{manifest:manifestFor({domain:otherCluster})});
+  await refusedInit('mainnet-beta genesis is refused',/mainnet-beta is not supported/,{manifest:manifestFor({genesisHash:'5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',domain:'5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d'})});
+  await refusedInit('bootstrap is not the upgrade authority',/upgrade authority is/,{manifest:manifestFor({bootstrap:roles.issuer.publicKey.toBase58()})});
+  await refusedInit('mint is not a 6-decimal token mint',/6 decimals/,{manifest:manifestFor({mint:SystemProgram.programId.toBase58()})});
+  await refusedInit('a role key is reused',/duplicate key/,{manifest:manifestFor({governance:[gov[0].publicKey.toBase58(),gov[1].publicKey.toBase58(),roles.issuer.publicKey.toBase58()]})});
+  await refusedInit('manifest carries an unknown field',/unknown manifest field/,{manifest:{...manifestFor(),extra:1}});
+  await refusedInit('manifest is missing a field',/missing treasury/,{manifest:(({treasury:_t,...rest})=>rest)(manifestFor())});
+  await refusedInit('a real run with a key that is not the bootstrap key',/not the manifest bootstrap key/,{manifest:manifestFor(),bootstrap:roles.issuer,dryRun:false});
+  const rehearsal=await initializeV2({connection,manifest:manifestFor(),dryRun:true,commitment:'confirmed'});
+  assert.equal(rehearsal.dryRun,true);assert.equal(rehearsal.plan.config,config.toBase58());assert.ok(rehearsal.unitsConsumed>0);
+  assert.equal(await connection.getAccountInfo(config),null);checks++; // the dry run simulated and created nothing
+  const initResult=await initializeV2({connection,manifest:manifestFor(),bootstrap,dryRun:false,commitment:'confirmed'});
+  assert.equal(initResult.verified,true);
+  { const d=(await connection.getAccountInfo(config)).data; assert.equal(d.length,819);assert.equal(d[690],1,'layout_version');assert.ok(d.subarray(691,819).every(b=>b===0)&&d.subarray(594,690).every(b=>b===0)); }
+  checks++;
+  await refusedInitExisting();
+  async function refusedInitExisting(){await assert.rejects(initializeV2({connection,commitment:'confirmed',manifest:manifestFor(),dryRun:true}),e=>/already owns \d+ account|already exists/.test(e.message),'a second run finds the program is no longer fresh');checks++;}
   await rejectsOnChain(send([ix('buy',[],u64(1),hash('old-card-ref'))]));checks++;
   await rejectsOnChain(send([ix('initialize',[])]));checks++;
   await rejectsOnChain(send([ix('configure',[meta(config,false,true),meta(gov[0].publicKey,true),meta(gov[0].publicKey,true)],roleBytes(),u64(2_000_000),u64(10_000_000))],[gov[0]]));checks++;
@@ -220,7 +244,8 @@ try {
   }
   for(const {sale,permit,state}of retained){
     const data=(await connection.getAccountInfo(sale,'finalized')).data;
-    assert.equal(data.length,993);assert.equal(data[698],state); // 961 before the P1 upgrade; 32 bytes appended (auth time, delay, floor, listing expiry)
+    assert.equal(data.length,1090);assert.equal(data[698],state); // 961 before P1; +32 (auth time, delay, floor, listing expiry) +1 layout_version +96 reserved
+    assert.equal(data[993],1,"layout_version");assert.ok(data.subarray(994,1090).every(b=>b===0));
     assert.equal(data.readBigUInt64LE(977),BigInt(LISTING_FLOOR));assert.ok(data.readBigInt64LE(985)>BigInt(nowSeconds())); // min_total, list_expires_at
     assert.deepEqual(data.subarray(8,698),encode(permit));
     assert.ok(data.readBigUInt64LE(700)>0n);
@@ -279,7 +304,7 @@ try {
   const listExpiry=nowSeconds()+3600;
   await openFor(L,{exp:listExpiry});
   let ld=await readSale(L.sale);
-  assert.equal(ld.length,993);assert.equal(ld.readBigUInt64LE(977),BigInt(LISTING_FLOOR));assert.equal(ld.readBigInt64LE(985),BigInt(listExpiry));assert.equal(ld.readBigInt64LE(961),0n);checks++;
+  assert.equal(ld.length,1090);assert.equal(ld[993],1);assert.equal(ld.readBigUInt64LE(977),BigInt(LISTING_FLOOR));assert.equal(ld.readBigInt64LE(985),BigInt(listExpiry));assert.equal(ld.readBigInt64LE(961),0n);checks++;
   await assert.rejects(openFor(L,{exp:listExpiry}),isInstructionFailure);checks++; // the same signed listing cannot open a second sale account
 
   // --- 2. Floor and listing expiry on buy_sale ---
@@ -334,46 +359,84 @@ try {
   await rejectsWith(FAULT.ListingExpired,buyFor(X,1_000_000));checks++;
   assert.equal((await readSale(X.sale))[698],1);
 
-  // --- 6. Governance: guardian pauses alone; a vault replaces the native governors ---
+  // --- 6. Governance: guardian pauses alone; two-phase vault enrollment (R1-02) ---
   await rejectsOnChain(send([ix('emergency_pause',[meta(config,false,true),meta(roles.issuer.publicKey,true)],Buffer.from([0]))],[roles.issuer]));checks++; // only the guardian key
   await send([ix('emergency_pause',[meta(config,false,true),meta(roles.guardian.publicKey,true)],Buffer.from([0]))],[roles.guardian]); // alone: no governor involved
   let cfg=await readConfig();assert.equal(cfg[560],1);assert.equal(cfg[561],0);checks++;
-  const vault=mockSo?PublicKey.findProgramAddressSync([Buffer.from('mock-vault')],mockId)[0]:PublicKey.findProgramAddressSync([Buffer.from('p1-vault')],SystemProgram.programId)[0];
-  assert.ok(!PublicKey.isOnCurve(vault.toBytes()));
-  const install=(v,policyBytes=hash('p1-vault-policy'))=>ix('install_governance_vault',governKeys(),v.toBuffer(),policyBytes);
-  await gSet(false);
-  await rejectsWith(FAULT.Authority,send([install(vault)],gov.slice(0,2)));checks++; // funding must be paused
-  await gSet(true);
-  await rejectsWith(FAULT.Authority,send([install(Keypair.generate().publicKey)],gov.slice(0,2)));checks++; // must be off-curve
-  await rejectsWith(FAULT.Authority,send([install(vault,Buffer.alloc(32))],gov.slice(0,2)));checks++; // needs a policy commitment
-  await rejectsWith(FAULT.Authority,send([ix('install_governance_vault',[meta(config,false,true),meta(gov[0].publicKey,true),meta(gov[0].publicKey,true)],vault.toBuffer(),hash('p1-vault-policy'))],[gov[0]]));checks++;
-  await send([install(vault)],gov.slice(0,2));
-  assert.deepEqual((await readConfig()).subarray(488,520),vault.toBuffer());checks++;
-  // Native governors are now shut out of every governed instruction.
-  for(const [name,keys,...data]of [['set_pause',governKeys(),Buffer.from([0,0])],['set_release_delay',governKeys(),i64(5)],['configure',governKeys(),roleBytes(),u64(2_000_000),u64(10_000_000)],['update_future_terms',governKeys(),treasury.publicKey.toBuffer(),policy],['install_governance_vault',governKeys(),vault.toBuffer(),hash('p1-vault-policy')]]){
-    await rejectsWith(FAULT.Authority,send([ix(name,keys,...data)],gov.slice(0,2)));checks++;
-  }
-  // The vault account cannot be impersonated: passed without a signature, Anchor's Signer check refuses.
-  await rejectsOnChain(send([ix('set_pause',[meta(config,false,true),meta(vault),meta(vault)],Buffer.from([0,0]))]));checks++;
+  const mockPda=id=>PublicKey.findProgramAddressSync([Buffer.from('mock-vault')],id)[0];
+  const unsignable=PublicKey.findProgramAddressSync([Buffer.from('typo')],SystemProgram.programId)[0]; // off-curve, but no program derives or can sign for it
+  assert.ok(!PublicKey.isOnCurve(unsignable.toBytes()));
+  const POLICY=hash('p1-vault-policy'),ZERO=PublicKey.default;
+  const propose=(v,controller,pol=POLICY,keys=governKeys())=>ix('propose_governance_vault',keys,v.toBuffer(),controller.toBuffer(),pol);
+  const accept=v=>ix('accept_governance_vault',[meta(config,false,true),meta(v,true),meta(SYSVAR_INSTRUCTIONS_PUBKEY)]);
+  const state=async()=>{const d=await readConfig();return {active:new PublicKey(d.subarray(488,520)),activePolicy:Buffer.from(d.subarray(520,552)),pending:new PublicKey(d.subarray(594,626)),controller:new PublicKey(d.subarray(626,658)),pendingPolicy:Buffer.from(d.subarray(658,690))};};
+  const rejectsBuiltin=async(name,promise)=>assert.rejects(promise,e=>isInstructionFailure(e)&&e.chainError.InstructionError[1]===name,`expected runtime error ${name}`);
+  const nativeStillGoverns=async why=>{await setDelay(86_400);assert.equal((await readConfig()).readBigInt64LE(586),86_400n,why);await gSet(true);}; // 2-of-3 native keys still work
+  const nativeGovernedCalls=[['set_pause',governKeys(),Buffer.from([0,0])],['set_release_delay',governKeys(),i64(5)],['configure',governKeys(),roleBytes(),u64(2_000_000),u64(10_000_000)],['update_future_terms',governKeys(),treasury.publicKey.toBuffer(),policy]];
   let vaultChecks='SKIPPED (no mock vault .so supplied; CPI-signed vault path NOT exercised)';
+
+  // 6a. Proposal refusals. Every one leaves governance and the pending slot untouched.
+  const V1=mockPda(mockId),V2=mockPda(mockId2);
+  await gSet(false);
+  await rejectsWith(FAULT.Authority,send([propose(V1,mockId)],gov.slice(0,2)));checks++; // funding must be paused
+  await gSet(true);
+  await rejectsWith(FAULT.Authority,send([propose(Keypair.generate().publicKey,mockId)],gov.slice(0,2)));checks++; // NEGATIVE CURVE: a wallet-style (on-curve) key can never be a vault
+  await rejectsWith(FAULT.Authority,send([propose(V1,mockId,Buffer.alloc(32))],gov.slice(0,2)));checks++; // needs a policy digest
+  await rejectsWith(FAULT.Authority,send([propose(V1,ZERO)],gov.slice(0,2)));checks++; // needs a controlling program
+  await rejectsWith(FAULT.Authority,send([propose(V1,V1)],gov.slice(0,2)));checks++; // the controller cannot be the vault itself
+  await rejectsWith(FAULT.Authority,send([propose(V1,mockId,POLICY,[meta(config,false,true),meta(gov[0].publicKey,true),meta(gov[0].publicKey,true)])],[gov[0]]));checks++; // one governor
+  let st=await state();assert.ok(st.pending.equals(ZERO)&&st.active.equals(ZERO));checks++;
+  { const stranger=Keypair.generate(); await rejectsWith(FAULT.Authority,send([accept(stranger.publicKey)],[stranger])); } // nothing pending: a real signer that is not the (empty) pending key is refused
+  checks++;
+
+  // 6b. TYPO / UNSIGNABLE ADDRESS never activates, and native governance keeps working throughout.
+  await send([propose(unsignable,mockId)],gov.slice(0,2));
+  st=await state();assert.ok(st.pending.equals(unsignable)&&st.active.equals(ZERO)&&st.controller.equals(mockId)&&st.pendingPolicy.equals(POLICY));checks++;
+  await nativeStillGoverns('native governance is unchanged while a proposal is pending');checks++;
+  await rejectsWith(3010,send([ix('accept_governance_vault',[meta(config,false,true),meta(unsignable,false),meta(SYSVAR_INSTRUCTIONS_PUBKEY)])]));checks++; // AccountNotSigner: nobody can sign for it
   if(mockSo){
-    // Squads-style execution: the vault PDA signs through CPI, appearing twice in the governed instruction's accounts.
-    const viaVault=(name,keys,...data)=>{
-      const inner=ix(name,keys,...data),flags=inner.keys.map(k=>(k.isSigner?1:0)|(k.isWritable?2:0));
-      return new TransactionInstruction({programId:mockId,keys:[meta(program),...inner.keys.map(k=>meta(k.pubkey,k.isSigner&&!k.pubkey.equals(vault),k.isWritable))],data:Buffer.concat([Buffer.from([inner.keys.length]),Buffer.from(flags),inner.data])});
+    // The mock offers the unsignable address as a signer: it did not derive it, so the runtime refuses.
+    const viaMock=(id,name,keys,...data)=>{
+      const inner=ix(name,keys,...data),flags=inner.keys.map(k=>(k.isSigner?1:0)|(k.isWritable?2:0)),pdas=[V1,V2,unsignable];
+      return new TransactionInstruction({programId:id,keys:[meta(program),...inner.keys.map(k=>meta(k.pubkey,k.isSigner&&!pdas.some(p=>p.equals(k.pubkey)),k.isWritable))],data:Buffer.concat([Buffer.from([inner.keys.length]),Buffer.from(flags),inner.data])});
     };
-    const vaultKeys=[meta(config,false,true),meta(vault,true),meta(vault,true)];
-    await rejectsWith(FAULT.Authority,send([viaVault('set_pause',[meta(config,false,true),meta(vault,true),meta(gov[0].publicKey,true)],Buffer.from([0,0]))],[gov[0]]));checks++; // vault + one native key is not governance
-    await send([viaVault('set_pause',vaultKeys,Buffer.from([0,0]))]);
+    const acceptVia=(id,v)=>viaMock(id,'accept_governance_vault',[meta(config,false,true),meta(v,true),meta(SYSVAR_INSTRUCTIONS_PUBKEY)]);
+    await rejectsBuiltin('PrivilegeEscalation',send([acceptVia(mockId,unsignable)]));checks++;
+    st=await state();assert.ok(st.active.equals(ZERO));checks++; // still not activated
+
+    // 6c. WRONG CONTROLLER / WRONG PROGRAM. Pending vault is mock #1's PDA, but the proposal names mock #2 as its controller.
+    await send([propose(V1,mockId2)],gov.slice(0,2));
+    await rejectsWith(FAULT.WrongController,send([acceptVia(mockId,V1)]));checks++; // valid vault signature, wrong top-level program
+    await rejectsBuiltin('PrivilegeEscalation',send([acceptVia(mockId2,V1)]));checks++; // the named controller cannot sign for a PDA it does not own
+    await rejectsWith(FAULT.Authority,send([acceptVia(mockId2,V2)]));checks++; // its own PDA, but not the pending vault
+    st=await state();assert.ok(st.active.equals(ZERO)&&st.pending.equals(V1));checks++;
+    await nativeStillGoverns('a vault that never accepts leaves native governance working');checks++;
+
+    // 6d. Correct proposal. Acceptance is refused while funding is live, then succeeds once, and only then do natives lose.
+    await send([propose(V1,mockId)],gov.slice(0,2));
+    await gSet(false);
+    await rejectsWith(FAULT.Paused,send([acceptVia(mockId,V1)]));checks++;
+    await gSet(true);
+    await send([acceptVia(mockId,V1)]);
+    st=await state();assert.ok(st.active.equals(V1)&&st.activePolicy.equals(POLICY)&&st.pending.equals(ZERO)&&st.controller.equals(ZERO)&&st.pendingPolicy.every(b=>b===0));checks++;
+    await rejectsWith(FAULT.Authority,send([acceptVia(mockId,V1)]));checks++; // replay: nothing pending any more
+    for(const [name,keys,...data]of nativeGovernedCalls){await rejectsWith(FAULT.Authority,send([ix(name,keys,...data)],gov.slice(0,2)));checks++;} // natives are shut out
+    await rejectsWith(FAULT.Authority,send([propose(V2,mockId2)],gov.slice(0,2)));checks++; // and cannot re-propose either
+    await rejectsOnChain(send([ix('set_pause',[meta(config,false,true),meta(V1),meta(V1)],Buffer.from([0,0]))]));checks++; // the vault cannot be impersonated without a CPI signature
+
+    // 6e. Vault-governed operation, guardian alone.
+    const vaultKeys=[meta(config,false,true),meta(V1,true),meta(V1,true)];
+    await rejectsWith(FAULT.Authority,send([viaMock(mockId,'set_pause',[meta(config,false,true),meta(V1,true),meta(gov[0].publicKey,true)],Buffer.from([0,0]))],[gov[0]]));checks++; // vault + one native key is not governance
+    await send([viaMock(mockId,'set_pause',vaultKeys,Buffer.from([0,0]))]);
     cfg=await readConfig();assert.equal(cfg[560],0,'vault unpaused funding');checks++;
     await send([ix('emergency_pause',[meta(config,false,true),meta(roles.guardian.publicKey,true)],Buffer.from([0]))],[roles.guardian]);
     cfg=await readConfig();assert.equal(cfg[560],1,'guardian paused alone while the vault governs');checks++;
-    await rejectsWith(FAULT.Authority,send([ix('set_pause',governKeys(),Buffer.from([0,0]))],gov.slice(0,2)));checks++; // the guardian can pause but nobody native can resume
-    await send([viaVault('set_release_delay',vaultKeys,i64(86_400))]);
+    await rejectsWith(FAULT.Authority,send([ix('set_pause',governKeys(),Buffer.from([0,0]))],gov.slice(0,2)));checks++;
+    await send([viaMock(mockId,'set_release_delay',vaultKeys,i64(86_400))]);
     assert.equal((await readConfig()).readBigInt64LE(586),86_400n);checks++;
-    await send([viaVault('set_pause',vaultKeys,Buffer.from([0,0]))]);
+    await send([viaMock(mockId,'set_pause',vaultKeys,Buffer.from([0,0]))]);
     assert.equal((await readConfig())[560],0);checks++;
-    vaultChecks='exercised with a CPI-signed PDA vault (mock; NOT the Squads program)';
+    vaultChecks='exercised with CPI-signed PDA vaults (mock programs; NOT the Squads program)';
   }
   console.log(`P1 scenarios: ${checks-p1Start} groups passed; vault path: ${vaultChecks}`);
   await reportComputeUnits();
@@ -383,3 +446,6 @@ try {
   // Delete only the unique directory created by THIS helper, after process exit.
   if((!child||child.exitCode!==null)&&dirname(resolve(root))===resolve(tmpdir())&&basename(root).startsWith('flexsoar-local-'))rmSync(root,{recursive:true,force:true});
 }
+// The web3.js websocket client keeps retrying against the stopped validator and would keep this process alive for hours.
+// Reached only on success (a failure throws and exits non-zero before here): every assertion has already passed.
+process.exit(0);
