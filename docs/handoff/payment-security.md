@@ -6483,3 +6483,113 @@ Each new value is distinct from every other signature literal in the suite (`'2'
 `flexsoar_080_base` (078+079) and the untouched `flexsoar_mig_test_20261021`. The container is stopped.
 
 **Pinned files:** 079 `558ab750…` and 080 `87e7386b…` unchanged; `pins80` → `PINS_OK`. `npm test` 585/585, tsc and build pass.
+
+## 2026-10-22 - H1: live-site hardening (legacy Stripe/payout surface removed; link-wallet audit; settle v2-only)
+
+No migrations and no database connections.
+
+### Removed (git rm)
+
+**Routes and pages:**
+- `app/api/webhooks/stripe/route.ts`
+- `app/api/webhooks/stripe-connect/route.ts`
+- `app/api/consignor/connect/route.ts`
+- `app/api/cron/process-payouts/route.ts`
+- `app/(market)/consignor/connect/refresh/page.tsx`
+- `app/(market)/consignor/connect/return/page.tsx`
+- `components/market/PayoutSetup.tsx`: its only importer was the payouts page.
+
+**Proof nothing else needed them:** the only importer of any of these files was `app/(market)/payouts/page.tsx`
+(PayoutSetup). Every other hit was a doc comment. The founder is disabling both Stripe webhooks in the Stripe dashboard.
+
+**`app/(market)/payouts/page.tsx`:**
+- Removed the Connect section and `PayoutSetup`.
+- Now reads only `solana_address`; it no longer selects the `stripe_connect_*` or `is_consignor` columns.
+- Always shows the no-bank-payout text.
+
+**`app/api/solana/settle/route.ts`:** v2 only. Every non-v2 body now returns **410** `LEGACY_SETTLEMENT_REMOVED` with
+`receiptsPath: '/api/solana/receipts'` before any read. `createServiceSupabase` is no longer imported.
+
+The legacy branch was unreachable in practice, because:
+- no client calls `/api/solana/settle` (the buy panel reads `/api/solana/receipts`, `SolanaBuyPanel.tsx:21`);
+- no new legacy quote can be issued (quote and build-tx return 503; `issueQuote` has no app caller);
+- its only output, a buyer-bound legacy receipt, is served by `/api/solana/receipts` through the session, with RLS and no
+  service credential (`receipts/route.ts:11`).
+
+The branch was **not** gated by `FUNDING_AVAILABLE`. It was reachable by a hand-made request carrying an old signed quote. That
+is why it was removed rather than left.
+
+### Test changes
+
+**`tests/invariants.test.ts:1240-1408` (removed; a 3-line pointer comment left).** These were the mirror helpers
+(`parseSettlementMetadata`, `expectedCashCents`, `isPermanentError`) and their 13 tests:
+- metadata parsing: 5 tests;
+- cash-leg amount: 4 tests;
+- error classification: 4 tests.
+
+They tested a copy of the deleted webhook's logic, so they would have kept passing against code that no longer exists. They are
+replaced by `tests/legacy-removal.test.ts`.
+
+**`tests/purchase-payment.test.ts:141-178`.** The describe "actual settlement endpoint receipt authorization" (5 tests) became
+"legacy branch removed (H1)" (5 tests):
+
+| Test | Was | Now |
+|---|---|---|
+| requires a session | 401, no query | unchanged |
+| quote naming another buyer | 400 | **410**, no query |
+| authentic own legacy quote, TTL 300 / -1 | 200 receipt and 409 refused | **410**, `code`/`receiptsPath`/"do not pay again", no service query, no RPC |
+| refusal of another buyer's receipt (409) | asserted | no longer asserted here. That property now belongs to `/api/solana/receipts` (`eq('buyer_id', session)`), still asserted at `purchase-payment.test.ts:289-297` |
+| route source | (new) | does not contain `createServiceSupabase` |
+
+**`tests/legacy-removal.test.ts` (new, 17 tests):**
+- 6 removed paths have no route or page file. App Router serves 404 without one, and `next build`'s route list confirms none
+  remain.
+- No code line in `app/`, `components/` or `lib/` fetches or links to them. The single allowed exception is
+  `lib/api/contract.ts`, below.
+- Nothing imports `createConnectAccount` or `processAllDuePayouts`.
+- The payouts page has no Connect setup.
+- 8 link-wallet regression tests (below).
+
+Totals: `npm test` **590/590** (was 586; −13 mirrors, +17 new, settle block 5→5). tsc passes, build passes.
+
+### /api/solana/link-wallet audit: SOUND (no STOP)
+
+- **Who can call it:** any signed-in session. GET and POST both return 401 without a session, before any write
+  (`route.ts:28-33,42-47`).
+- **Target user:** from the session only (`auth.user.id`, `:43-44`). The write is `.eq('id', userId)` (`:76`), and no body
+  field is read for identity.
+  - Writing `auth.users.id` into `public.users.id` is correct because `users.id = auth_id` is enforced by trigger (004) and
+    verified by 069c (`069c_payment_v2_actor_current_user_id.sql:68-76`). Production V8 shows `id_ne_auth_id=0`.
+- **Ownership proof:** an Ed25519 signature over `FlexSoar wallet link\nuser:<session id>\nissued:<ts>`, by the wallet's own key
+  (`lib/solana/wallet.ts:22-24,59-71`). The message expires after 10 minutes and must not be future-dated (`:54`).
+  - Consequences: user A cannot link with a signature made for B's message, and cannot claim an address whose key A does not
+    hold. Both are tested.
+  - A replay inside the window re-links the same address to the same user, which is harmless.
+- **Rate limit:** **none.** `lib/api/rate-limit.ts` exists but is not used here.
+  - Abuse requires a session plus a valid signature, and each call only rewrites the caller's own column. Low risk.
+  - Recommend adding `checkRateLimit` per user (track/data).
+- **Pending or settled payouts:** an overwrite cannot redirect them.
+  - The v2 seller destination is copied into `payment_v2.sales.seller_wallet` when the sale is prepared
+    (`060_payment_v2_contracts.sql:113-117`). On chain, `open_sale` binds seller = card owner and seller token = its ATA
+    (`solana/.../lib.rs:88,93`).
+  - Legacy cash payouts are inert (`checkPayoutEligibility` marks every order ineligible), and the legacy quote path is
+    disabled.
+  - A changed `solana_address` only blocks *new* sale preparation until `payment_v2.wallet_accounts` matches it (`060:113-115`).
+- **Avoiding the service credential:** **no existing SECURITY DEFINER function** sets `users.solana_address`; 056 only adds the
+  column.
+  - A new `authenticated` DEFINER `fn_set_own_solana_address(addr)` would *bypass* the ownership proof, because Ed25519 cannot
+    be verified in SQL here (pgcrypto has no Ed25519).
+  - Proposal (report only): keep the app-side verification and replace the service client with a narrow server-only DB role
+    that can execute one DEFINER function. Alternatively, accept the current design; it is narrow, a single column for the
+    session's own row.
+- **Gap found for the worker plan:** nothing in the app writes `payment_v2.wallet_accounts`, which `prepare_sale` requires
+  (`060:113-115`). Seller wallet enrolment for v2 is unbuilt. Add it to W1 milestone M3.
+
+### Now-unused code, owned by track/data (not edited; contract.ts signatures are frozen and track/data-only)
+
+- `lib/api/contract.ts`: `createConnectAccount` (`:4232`, still builds `/consignor/connect/*` URLs at `:4332-4333`),
+  `processAllDuePayouts` (`:4444`), and likely `checkPayoutEligibility` and `executePayout` (still exercised by
+  `purchase-payment.test.ts:240-261`).
+- `lib/db/purchase-payment.ts` `recoverOrSettlePayment`, and `lib/solana/quotes.ts` `issueQuote`/`verifyQuote`/
+  `verifyQuoteSignature`: no app caller any more; tests only.
+- The `stripe` dependency: now used only by `createConnectAccount` and the app's Stripe checkout actions (`app/(market)/actions.ts`).

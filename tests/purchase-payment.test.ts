@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
 import { base58Encode } from '../lib/solana/base58';
 import { configPda, TOKEN_PROGRAM_ID } from '../lib/solana/sdk';
 import { inspectPurchaseTransaction, type PurchaseBinding, type PurchaseTransaction } from '../lib/solana/purchase-verification';
@@ -137,65 +138,40 @@ describe('production buy ABI verification', () => {
   });
 });
 
-describe('actual settlement endpoint receipt authorization', () => {
+describe('actual settlement endpoint: legacy branch removed (H1)', () => {
+  // Was: legacy quote-based receipt lookup through the service credential.
+  // Removed in H1; every non-v2 body is now 410 before any privileged read.
   const listingId = '11111111-1111-1111-1111-111111111111';
-  beforeEach(() => { mocks.query.mockReset(); mocks.auth.mockReset(); });
+  beforeEach(() => { mocks.query.mockReset(); mocks.auth.mockReset(); mocks.rpc.mockReset(); });
   it('requires a session before any privileged lookup', async () => {
     mocks.auth.mockResolvedValue({ data: { user: null } });
     expect((await POST(new Request('https://offline.invalid', { method: 'POST', body: '{}' }))).status).toBe(401);
     expect(mocks.query).not.toHaveBeenCalled();
   });
-  it('requires quote buyer correspondence before privileged lookup', async () => {
+  it('refuses a quote whose buyer is someone else with 410 (was 400); no privileged lookup', async () => {
     mocks.auth.mockResolvedValue({ data: { user: { id: 'other' } } });
     const request = new Request('https://offline.invalid', { method: 'POST', body: JSON.stringify({ listingId, signature, quote: { buyerId: 'buyer', listingId } }) });
-    expect((await POST(request)).status).toBe(400);
+    expect((await POST(request)).status).toBe(410);
     expect(mocks.query).not.toHaveBeenCalled();
   });
-  it('returns own expired-quote receipt before listing reads; refuses another buyer receipt', async () => {
-    const previous = process.env.SOLANA_QUOTE_SECRET;
-    process.env.SOLANA_QUOTE_SECRET = 'offline-endpoint-fixture';
-    mocks.auth.mockResolvedValue({ data: { user: { id: 'buyer' } } });
-    try {
-      const quote = await issueQuote({ buyerId: 'buyer', listingId, totalUnits: 1_000_000, ttlSeconds: -1 });
-      const receipt = { id: 'order', buyer_id: 'buyer', listing_id: listingId, settlement_ref: `sol:${signature}`, status: 'settled' };
-      const builder = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn() };
-      builder.select.mockReturnValue(builder); builder.eq.mockReturnValue(builder);
-      builder.maybeSingle.mockResolvedValue({ data: receipt, error: null });
-      mocks.query.mockReturnValue(builder);
-      const request = () => new Request('https://offline.invalid', { method: 'POST', body: JSON.stringify({ listingId, signature, quote }) });
-      const response = await POST(request());
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({ orderId: 'order', receiptOnly: true, paymentVerified: false });
-      expect(mocks.query.mock.calls.map(([table]) => table)).toEqual(['orders']);
-      builder.maybeSingle.mockResolvedValue({ data: { ...receipt, buyer_id: 'someone-else' }, error: null });
-      const refused = await POST(request());
-      expect(refused.status).toBe(409);
-      expect(await refused.json()).toMatchObject({ retrySettlementOnly: true, recoveryRequired: true });
-    } finally {
-      if (previous === undefined) delete process.env.SOLANA_QUOTE_SECRET; else process.env.SOLANA_QUOTE_SECRET = previous;
-    }
-  });
-  it.each([300, -1])('refuses unrecorded legacy payment even with an authentic quote (TTL %s)', async (ttlSeconds) => {
+  it.each([300, -1])('an authentic own legacy quote (TTL %s) is 410 and never reads orders with the service credential (was 200 receipt / 409)', async (ttlSeconds) => {
     const previous = process.env.SOLANA_QUOTE_SECRET;
     process.env.SOLANA_QUOTE_SECRET = 'offline-endpoint-fixture';
     mocks.auth.mockResolvedValue({ data: { user: { id: 'buyer' } } });
     try {
       const quote = await issueQuote({ buyerId: 'buyer', listingId, totalUnits: 1_000_000, ttlSeconds });
-      const builder = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn() };
-      builder.select.mockReturnValue(builder); builder.eq.mockReturnValue(builder);
-      builder.maybeSingle.mockResolvedValue({ data: null, error: null });
-      mocks.query.mockReturnValue(builder);
       const response = await POST(new Request('https://offline.invalid', { method: 'POST', body: JSON.stringify({ listingId, signature, quote }) }));
-      expect(response.status).toBe(409);
-      expect(await response.json()).toMatchObject({
-        retrySettlementOnly: true, recoveryRequired: true, signature, listingId,
-        error: expect.stringContaining('do not pay again'),
-      });
-      // No listing/wallet lookup, RPC verification, or settlement RPC is possible.
-      expect(mocks.query.mock.calls.map(([table]) => table)).toEqual(['orders', 'orders']);
+      expect(response.status).toBe(410);
+      expect(await response.json()).toMatchObject({ code: 'LEGACY_SETTLEMENT_REMOVED', receiptsPath: '/api/solana/receipts', error: expect.stringContaining('do not pay again') });
+      expect(mocks.query).not.toHaveBeenCalled();
+      expect(mocks.rpc).not.toHaveBeenCalled();
     } finally {
       if (previous === undefined) delete process.env.SOLANA_QUOTE_SECRET; else process.env.SOLANA_QUOTE_SECRET = previous;
     }
+  });
+  it('the settle route no longer imports the service-credential client', () => {
+    const source = fs.readFileSync('app/api/solana/settle/route.ts', 'utf8');
+    expect(source).not.toContain('createServiceSupabase');
   });
 });
 

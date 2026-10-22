@@ -1,10 +1,10 @@
 /**
  * app/(market)/payouts/page.tsx
  *
- * Payouts: seller balance first, Stripe Connect onboarding only at the point
- * of withdrawal (progressive onboarding — asking for bank KYC before a user
- * has ever sold kills conversion). The Connect section stays available but
- * quiet until there is money to cash out.
+ * Payouts: seller balance first, then the USDC payout wallet. Sellers are
+ * paid in USDC only (founder decision 2026-10-20); the Stripe Connect
+ * onboarding surface (/api/consignor/connect, /consignor/connect/*, the
+ * Connect webhooks) was removed in H1, so there is no bank setup here.
  *
  * Data:
  *   - Balance            settled, unpaid, cash-method orders where the caller
@@ -12,12 +12,6 @@
  *                        auth.uid()); split into available (clearing hold
  *                        elapsed) vs clearing. Defensive: any query failure
  *                        renders zeros, never an error state.
- *   - Payout setup       stored Connect status (webhook-landed columns, 028);
- *                        the live check runs on /consignor/connect/return and
- *                        via the account.updated webhook. Never pre-mints an
- *                        onboarding link: account links expire, so the link is
- *                        minted on button click (PayoutSetup POSTs to
- *                        /api/consignor/connect).
  *   - USDC payout wallet users.solana_address — the ONLY seller-side link path.
  */
 
@@ -30,39 +24,17 @@ import {
   PAYMENTS_NOT_LIVE,
   SELLER_PAYOUT_SUMMARY,
 } from "@/app/(market)/payout-copy";
-import { PayoutSetup } from "@/components/market/PayoutSetup";
 import { EmbeddedLinkButton } from "@/components/market/EmbeddedWalletSection";
 import { EmptyState } from "@/components/ui/EmptyState";
 
-async function getConnectStatus(userId: string): Promise<{
-  accountId: string | null;
-  payoutsEnabled: boolean;
-  isConsignor: boolean;
-  countryCode: string | null;
-  solanaAddress: string | null;
-}> {
+async function getPayoutWallet(userId: string): Promise<string | null> {
   const supabase = await createServerSupabase();
   const { data } = await supabase
     .from("users")
-    .select(
-      "stripe_connect_account_id, stripe_connect_payouts_enabled, is_consignor, country_code, solana_address",
-    )
+    .select("solana_address")
     .eq("id", userId)
     .maybeSingle();
-  const row = (data ?? {}) as {
-    stripe_connect_account_id?: string | null;
-    stripe_connect_payouts_enabled?: boolean | null;
-    is_consignor?: boolean | null;
-    country_code?: string | null;
-    solana_address?: string | null;
-  };
-  return {
-    accountId: row.stripe_connect_account_id ?? null,
-    payoutsEnabled: row.stripe_connect_payouts_enabled ?? false,
-    isConsignor: row.is_consignor ?? false,
-    countryCode: row.country_code ?? null,
-    solanaAddress: row.solana_address ?? null,
-  };
+  return (data as { solana_address?: string | null } | null)?.solana_address ?? null;
 }
 
 export const metadata: Metadata = {
@@ -123,14 +95,8 @@ export default async function PayoutsPage() {
     );
   }
 
-  const connectStatus = await getConnectStatus(me);
+  const solanaAddress = await getPayoutWallet(me);
   const overview = await getPayoutOverview(me);
-  const connected =
-    connectStatus.payoutsEnabled && connectStatus.accountId != null;
-  // No bank payout (founder decision 2026-10-20): Connect onboarding is a
-  // dead end, so the setup button stays hidden. Existing connections render
-  // as-is, labelled as not used for payouts.
-  const cashPayoutsPaused = true;
 
   return (
     <div className="flex flex-col gap-4">
@@ -169,24 +135,15 @@ export default async function PayoutsPage() {
         )}
       </section>
 
-      {/* Connect Payout Setup — paused while wallet-only. */}
+      {/* No bank payout (founder decision 2026-10-20). */}
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-bold tracking-tight text-foreground">
-          {connected ? "Stripe Connect account" : "Payout method"}
+          Payout method
         </h2>
-        {cashPayoutsPaused && !connected ? (
-          <p className="text-[12px] leading-snug text-muted">
-            {NO_BANK_PAYOUT} Sellers are paid in USDC to the wallet below.
-            Nothing to set up here.
-          </p>
-        ) : (
-          <PayoutSetup
-            accountId={connectStatus.accountId}
-            payoutsEnabled={connectStatus.payoutsEnabled}
-            isConsignor={connectStatus.isConsignor}
-            countryCode={connectStatus.countryCode}
-          />
-        )}
+        <p className="text-[12px] leading-snug text-muted">
+          {NO_BANK_PAYOUT} Sellers are paid in USDC to the wallet below.
+          Nothing to set up here.
+        </p>
       </section>
 
       {/* USDC payout wallet — the ONLY seller-side link path. Sellers never
@@ -197,11 +154,11 @@ export default async function PayoutsPage() {
         <h2 className="text-sm font-bold tracking-tight text-foreground">
           USDC payout wallet
         </h2>
-        {connectStatus.solanaAddress ? (
+        {solanaAddress ? (
           <div className="flex flex-col gap-2">
             <p className="text-[11px] text-muted">
-              Linked {connectStatus.solanaAddress.slice(0, 8)}…
-              {connectStatus.solanaAddress.slice(-6)} — USDC sale proceeds go
+              Linked {solanaAddress.slice(0, 8)}…
+              {solanaAddress.slice(-6)} — USDC sale proceeds go
               here (95% seller / 5% FlexSoar, split on-chain).
             </p>
             <EmbeddedLinkButton cta="Change payout wallet" />
