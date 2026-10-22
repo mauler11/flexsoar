@@ -199,20 +199,36 @@ caps are the main limit on what one person could do wrong at once, so keep the c
 
    Both account sizes change. **This is safe only before mainnet**: no v2 accounts exist on mainnet. Devnet and local
    rehearsals redeploy.
-2. **Two-person governance without a program change:**
-   - `initialize_v2` still needs 3 distinct governance keys.
-   - Ceremony, with funding paused (the program starts paused, `lib.rs:26`):
-     1. initialize with `[founder_hw, friend_hw, ceremony_key]`;
-     2. in the same ceremony, founder and friend call `install_governance_vault` with a **Squads 2-of-2** vault (founder +
-        friend);
-     3. destroy `ceremony_key`.
-   - From then on `govern()` accepts only the vault (`lib.rs:221-223`). That covers `configure`, `set_pause`,
-     `rotate_governance`, `update_future_terms`, `authorize_refund` and `resolve_dispute` (`:166`, `:179`). Every governance act
-     then needs both people.
+2. **Two-person governance through a Squads 2-of-3 vault** (founder decision 2026-10-22; it replaces the 2-of-2 first proposed):
+   - **Vault members:** founder (hardware), friend (hardware), and a **sealed recovery key** held by a third party.
+     Threshold 2.
+   - **Rationale (founder's):** with 2-of-2, losing one key permanently bricks governance, refunds included.
+   - **Ceremony,** with funding paused (the program starts paused, `lib.rs:26`):
+     1. `initialize_v2` still needs 3 distinct native governance keys. Initialize with
+        `[founder_hw, friend_hw, ceremony_key]`.
+     2. In the same ceremony, founder and friend call `install_governance_vault` (2-of-3 native) with the Squads 2-of-3 vault.
+     3. Destroy `ceremony_key`. The program state is unaffected, because after step 2 the native keys no longer govern.
+   - **From then on** `govern()` accepts only the vault (`lib.rs:221-223`). That covers `configure`, `set_pause`,
+     `rotate_governance`, `update_future_terms`, `authorize_refund` and `resolve_dispute` (`:166`, `:179`).
    - **Residual risk:** between steps 1 and 2, two of the three native keys are in the room. State this in the runbook, and do
      the steps back to back while paused, with caps at 0 (`lib.rs:28`).
-   - *Alternative:* change `governance` to `[Pubkey;2]` with "both must sign". That is a program change. Not recommended,
-     because the vault already does it.
+   - **Use of the recovery key:** recovery only, never routine. Its holder co-signs only on a written request from the founder
+     or the friend stating that the other key is lost or unavailable. Every use is logged in the handoff.
+     - The **DB** governor set stays the 2 people (founder, friend; `governors_required=2`). The recovery holder is **not** a DB
+       governor and has no staff row: the DB approves by signed-in person, the vault by key (below).
+
+   **What governance-required actions do when keys are lost:**
+
+   | Situation | On chain (vault 2-of-3) | DB (`approve_refund`, 2 distinct governor persons) | Escrows |
+   |---|---|---|---|
+   | All 3 keys available | Founder + friend sign | Founder + friend approve | Normal |
+   | **One key lost** (any one) | The 2 remaining keys still meet the threshold. If the founder's or friend's key is lost, the recovery key co-signs. | Unchanged: DB approval uses each person's **web session**, not the lost key | **Refunds and dispute resolutions continue.** Then replace the lost member with a Squads member-change transaction (2-of-3), under the same written procedure. |
+   | **Two keys lost** | Below the threshold: no `authorize_refund`, `resolve_dispute`, `configure`, `set_pause(false)` or `update_future_terms` | Still possible, but the operations it creates cannot reach chain | **Refund-pending escrows freeze.** Release still works: `authorize_release` is a staff key, not governance (`lib.rs:148-155`), so authenticated sales still complete. Pausing still works: `emergency_pause` is the guardian (`:69-72`). Funding cannot be re-enabled, and governance cannot be rotated (`rotate_governance` also needs the vault). This is unrecoverable without a program upgrade by the upgrade authority. |
+
+   - **Hence:** the upgrade authority must **not** be the same vault, or must be a separate multisig with its own recovery.
+     That keeps "two vault keys lost" fixable by a reviewed program upgrade. *(This links to W1 decision 4. Recommend: a
+     separate Squads multisig for upgrades, with the same three holders but a separate key set.)*
+   - *Alternative:* change `governance` to `[Pubkey;2]`. Rejected: same bricking risk as 2-of-2, and it is a program change.
 3. **Seller-signed listing floor:** §5.
 
 ### 3.4 Immutable audit trail and notification
@@ -305,26 +321,25 @@ The program needs Rust tests for `release_delay` and the seller floor (§5), plu
 
 ---
 
-## Decisions for the founder
+## Founder decisions (2026-10-22)
 
-1. **Accept solo mode with these exact changes** (§1). Recommend: yes, with the initial mode `separated` and the switch to solo
-   done through the governor RPCs (§2).
-2. **`mode_at_decision`:** recommend a new column on `decisions` rather than payload.
-3. **Release delay:** recommend **24 h**, enforced in the DB *and* on chain.
-4. **Governance:** recommend a Squads 2-of-2 vault (founder + friend) installed in the initialization ceremony, with no program
-   change for governance. Accept the stated ceremony window.
-5. **Funding on:** recommend making enabling a 2-governor DB action too (today it is owner SQL). Turning it off stays
-   single-person.
-6. **Seller-signed floor:** recommend yes, with a 2% FX tolerance, shipped in the same pre-mainnet build as the release delay.
+1. **Solo mode with these exact changes:** **yes.** Initial mode `separated`; the switch to solo goes through the governor RPCs (§2).
+2. **`mode_at_decision`:** **a column on `decisions`.**
+3. **Release delay:** **24 h**, enforced in the DB *and* on chain.
+4. **Governance:** **Squads 2-of-3** (founder, friend, sealed recovery key held by a third party), *not* 2-of-2. The ceremony
+   key is still destroyed. See §3.3.2 for the lost-key table.
+5. **Funding on:** **yes**, a 2-governor DB action. Turning it off stays single-person.
+6. **Seller-signed floor:** **yes**, with a **2% FX tolerance**, in the same pre-mainnet build.
 7. **Order of work:**
-   - 082: DB solo mode + the missing negative tests;
-   - a program upgrade: release delay + seller floor + Rust tests;
-   - a devnet rehearsal in solo mode;
-   - then W1 milestones M7 onwards.
+   - **081** (cleanup);
+   - **082** (DB solo mode + the missing negative tests);
+   - **one program upgrade** (release delay + seller-signed floor + governance);
+   - **devnet rehearsal**;
+   - **M7+**.
 
 ## Not verified
 
-- Squads 2-of-2 vault compatibility with `install_governance_vault` (an off-curve PDA signing through CPI, as `lib.rs:221-223`
+- Squads 2-of-3 vault compatibility with `install_governance_vault` (an off-curve PDA signing through CPI, as `lib.rs:221-223`
   expects).
 - The compute budget of an extra Ed25519 precompile instruction in `open_sale`.
 - Whether Privy embedded wallets expose `signMessage` for arbitrary bytes. The wallet-link flow already uses it
