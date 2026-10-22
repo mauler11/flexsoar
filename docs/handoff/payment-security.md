@@ -6336,3 +6336,34 @@ runbook's preflight prints the same list for production as `R1|` lines.
 - **The warehouse-custody preguard** cannot fire, because the predicate excludes warehouse. It is a tautological backstop.
 - **Full payment-db suite** (10/20/30, workers, races): not re-run; only the 080 files ran.
 - **`graphify update .`:** not run; this worktree has no `graphify-out/`.
+
+## 2026-10-22 - 080b/080c: payment-db suite gap; scripts/smoke_settlement.sql removed
+
+### Full payment-db suite: failing since 068 (found 080b; recorded, founder decision)
+
+`tests/payment-db/06_export_encoding_permit.sql` fails with `PAYMENT_V2_RETAINED_EVIDENCE_REQUIRED`.
+- **Where:** raised by `payment_v2.evidence_insert_guard()` (068) when the shared fixture (`01_fixtures.sql`, `pg_temp.fixture`)
+  calls `fn_payment_v2_record_lifecycle` without the retained-evidence rows 068 requires.
+- **Not 079 or 080:** reproduced, on the isolated container, on the 078 state (no 079, no 080) and on the 079 state, identically.
+- **History:** the suite was last fully green on 2026-10-16, at 067. Nothing recorded it running after 068.
+- **Results before the failure (post-080 copy):** 80/81/82 PASS, 03 PASS, 05 PASS, 06 FAIL, 07-90 not run.
+- **Founder decision:** 080 proceeds to production with this recorded. The fixture repair is 080c part B (below).
+
+### scripts/smoke_settlement.sql: removed (founder §2 exception, this task only)
+
+Why:
+- it called functions 063 retired (`fn_purchase_card`, `fn_reserve_credit`, `fn_list_card`, trade, vault and redeem paths), so it
+  could not run past its first purchase;
+- it authenticated a **seller-held** item (`fn_authenticate_item`), which 079 refuses;
+- it inserted `auth.users` rows, so it must never be pointed at production.
+
+The detail is in the 080 section above ("scripts/smoke_settlement.sql: stale").
+
+References updated: `HANDOFF.md` (status list, 026b checklist) and `docs/DEPLOY.md` (§9 step 1). There is no live-database
+replacement; the signed-out page loads remain the anon check.
+
+**track/data follow-ups (not edited, by founder instruction):**
+- `docs/handoff/data.md:593` still says the script verifies settlement live end to end.
+- `scripts/smoke_catalog.sql:810` points to it for settlement, vault custody and trades.
+- Comments in applied migrations `022b:248`, `024c:4`, `026:294`, `026b:20` and `026b:159`, and `027:868`, mention it.
+  Applied migrations are never edited; this is historical text only.

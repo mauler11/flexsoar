@@ -133,9 +133,11 @@ safe, not the session.
 **The app layer is built against it and works end to end in a browser.**
 
 - 172 tests passing (`npm test`), `npm run build` clean
-- `scripts/smoke_settlement.sql` — 14 sections, all passing: six settlement
-  quadrants, idempotency replay, V1–V4 vault custody and unwind, T1–T4 trades,
-  solvency and sweep ceiling
+- `scripts/smoke_settlement.sql` — 14 sections, all passing at the time: six
+  settlement quadrants, idempotency replay, V1–V4 vault custody and unwind,
+  T1–T4 trades, solvency and sweep ceiling. **Removed 2026-10-22** (080c): it
+  called functions 063 retired, authenticated seller-held items (refused since
+  079) and inserted `auth.users` rows. See docs/handoff/payment-security.md.
 - Signup, listing, submission, dashboard all exercised in a real browser
 - Market grid renders correctly signed out
 
@@ -314,7 +316,8 @@ adds a self-maintaining sweep that grants any policy-referenced `fn_*` and
 asserts none is missing.
 
 **Checklist before any future grant change:**
-1. run `scripts/smoke_settlement.sql`
+1. ~~run `scripts/smoke_settlement.sql`~~ — removed 2026-10-22 (it could no
+   longer run after 063); there is no live-database replacement yet
 2. load `/` signed out, in a private window
 3. load `/card/<id>` signed out
 

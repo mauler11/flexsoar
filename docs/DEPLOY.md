@@ -259,7 +259,10 @@ behaviour only exists against a real endpoint.
 In this order. Steps 1–3 are the 026b checklist and step 1 alone would have
 caught that incident.
 
-1. `scripts/smoke_settlement.sql` in the Supabase editor — still passes
+1. ~~`scripts/smoke_settlement.sql` in the Supabase editor~~ — removed
+   2026-10-22: it called functions 063 retired, authenticated seller-held items
+   and inserted `auth.users` rows, so it must never run against production.
+   There is no live-database replacement yet; steps 2–3 are the anon check.
 2. `https://flexsoar.net/` in a **private window**, signed out
 3. `https://flexsoar.net/card/<id>` signed out
 4. Sign up with a real email — confirm the magic link lands on the live site and
