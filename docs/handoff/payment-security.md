@@ -6318,7 +6318,10 @@ runbook's preflight prints the same list for production as `R1|` lines.
 
 ### Production runbook addendum (not run)
 
-- The runbook is `C:\Users\Family\flexsoar-reviews\prod-runbook-080.md`, with supporting files in `prod-runbook-080\`.
+- The runbook is `C:\Users\Family\flexsoar-reviews\prod-runbook-080.md` (sha256 `808e54a5…bcdc453`), with supporting files
+  in `prod-runbook-080\` (listed in `runbook-080.sha256`). It pins commit `722ea81` and 080 sha256 `87e7386b…`.
+- Tooling tested locally, with no connection: `pins80` passes, and catches a tampered file; `export-lf-080.sh` reproduces the
+  staging sha from `722ea81` and refuses a commit without 080 and a non-commit.
 - It reuses `prod-runbook-059-078\prod.py` and both guards unchanged (hash-checked).
 - It uses the 079 production outputs as baselines.
 - Its before/after audit expects exactly the one-row move above. `audit-diff-080.sh` checks this; it was tested offline against
