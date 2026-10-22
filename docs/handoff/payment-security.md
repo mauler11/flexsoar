@@ -6836,3 +6836,21 @@ Full report, runbook amendments and unverified list: **`docs/handoff/solana-p1c.
   `ec55c456643d4bb44486e6a292aeff4f826dffd00c2d9d15ca2b2c793fab8fba`. CU vs the P1b binary: `authorize_release` -3, `set_release_delay`/`set_pause` +45,
   `propose` +86, `accept` (whole tx via mock) +336.
 - **Do not deploy anywhere before R3 and the devnet runbook in `solana-p1b.md` (as amended by `solana-p1c.md`) pass their STOP points.**
+
+## 2026-10-23 - D1 devnet rehearsal: STOPPED at step 3 (no transaction sent); Privy proof page built
+
+Log (outside the repo): `C:\Users\Family\flexsoar-reviews\devnet-20261023\rehearsal-log.md`. Binary unchanged: `ec55c456643d4bb44486e6a292aeff4f826dffd00c2d9d15ca2b2c793fab8fba`.
+
+- **R3 (two LOW):** resolved as documented alternatives (`solana-p1c.md` section 8): R3-01 active vault may sit in the dormant native list (recommend a
+  program fix before mainnet), R3-02 the 819/1090 layout is declared the immutable version-1 baseline. Gate hardened in TypeScript only.
+- **AGENT_RULES 2b "Devnet exception"** added. Devnet guard (`solana/scripts/devnet-guard.mjs`): URL containing "mainnet" refused; first genesis
+  pinned to the published devnet value; mainnet-beta genesis refused; genesis re-checked before EVERY other RPC call. CLI wrapper and key generator
+  added; 23 throwaway keys in `C:\Users\Family\flexsoar-devnet-keys\`.
+- **Verified on devnet (read-only):** Squads v4 `SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf` is a deployed upgradeable program.
+- **STOP:** the program id declared in the binary, `CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF`, is **already deployed on devnet** (231,328 bytes,
+  sha256 `5151a0ea...`, an older program) with upgrade authority `98Hi2uh9Py7tL5Cm39ZCqimjTWAFjqMBJJXnivwbdqok`, owns **one** legacy `Config` account, and its
+  keypair is not on this machine. A fresh id means changing `declare_id!` and therefore the binary hash; reusing it means the holder of `98Hi2uh9...`
+  upgrades in place and the "zero accounts" inventory is relaxed to "zero V2 accounts". Founder decision A or B (see the log).
+- **Also blocked later:** `@sqds/multisig` is not installed (DEPS.md request filed, `2.1.3` unconfirmed against the registry).
+- **Privy proof (not run):** `app/dev/privy-sign-proof` (404 in production, development only; production build checked: no runner code in any
+  chunk), logic in `lib/solana/privy-proof.ts` (14 tests), run instructions in `docs/handoff/privy-sign-proof.md`.
