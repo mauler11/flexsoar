@@ -3,13 +3,14 @@
  * No environment discovery, operational keys, email or public RPC. */
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,openSync,mkdtempSync,readlinkSync,existsSync,statfsSync} from 'node:fs';
-import {createHash,randomUUID} from 'node:crypto';
+import {createHash,randomUUID,createPrivateKey,sign as edSign} from 'node:crypto';
 import {spawn,execFileSync} from 'node:child_process';
 import {join} from 'node:path';
 import net from 'node:net';
-import {Connection,Keypair,PublicKey,TransactionInstruction,TransactionMessage,VersionedTransaction,SystemProgram,AddressLookupTableProgram,SYSVAR_RENT_PUBKEY,SYSVAR_CLOCK_PUBKEY} from '@solana/web3.js';
+import {Connection,Keypair,PublicKey,TransactionInstruction,TransactionMessage,VersionedTransaction,SystemProgram,AddressLookupTableProgram,SYSVAR_RENT_PUBKEY,SYSVAR_CLOCK_PUBKEY,SYSVAR_INSTRUCTIONS_PUBKEY} from '@solana/web3.js';
 import {v2Addresses,buyV2Instruction,discriminator,outcomeInstruction,attestationInstruction} from '../../lib/solana/v2-sdk.ts';
 import {encodePermit,decodePermit} from '../../lib/solana/protocol-v2.ts';
+import {encodeListing,listingForSale,openSaleWithListing} from '../../lib/solana/listing-v2.ts';
 import {LocalV2Observer} from '../../lib/solana/v2-observer.ts';
 import {base58Encode,base58Decode} from '../../lib/solana/base58.ts';
 import {observeAuthorityTransaction} from '../../lib/solana/v2-authority-observer.ts';
@@ -98,9 +99,9 @@ async function finalizedClockTime(){
  return time;
 }
 async function wait(signature,finality='confirmed'){for(let i=0;i<300;i++){const s=(await connection.getSignatureStatuses([signature],{searchTransactionHistory:true})).value[0];if(s&&(s.confirmationStatus===finality||s.confirmationStatus==='finalized')){if(s.err){const tx=await connection.getTransaction(signature,{commitment:'confirmed',maxSupportedTransactionVersion:0});const e=new Error('CHAIN '+JSON.stringify(s.err)+' '+JSON.stringify(tx?.meta?.logMessages??[]));e.chainError=s.err;throw e;}return s;}await pause(200);}throw new Error('uncertain chain outcome: preserve signature '+signature);}
-async function send(instructions,signers=[],tables=[],finality='confirmed',label=null){
+async function send(instructions,signers=[],tables=[],finality='confirmed',label=null,payer=bootstrap){
  if(label&&existsSync(state(label+'.signed.json'))){const old=JSON.parse(readFileSync(state(label+'.signed.json'),'utf8'));const status=(await connection.getSignatureStatuses([old.signature],{searchTransactionHistory:true})).value[0];if(!status){assert.ok((await connection.isBlockhashValid(old.blockhash,'confirmed')).value,'expired original: no replacement');await connection.sendRawTransaction(Buffer.from(old.bytes,'base64'),{skipPreflight:true});}await wait(old.signature,finality);return old.signature;}
- const validity=await connection.getLatestBlockhash('confirmed');const message=new TransactionMessage({payerKey:bootstrap.publicKey,recentBlockhash:validity.blockhash,instructions}).compileToV0Message(tables);const tx=new VersionedTransaction(message);tx.sign([...new Map([bootstrap,...signers].map(k=>[k.publicKey.toBase58(),k])).values()]);assert.ok(tx.serialize().length<=1232,'LUT needed');
+ const validity=await connection.getLatestBlockhash('confirmed');const message=new TransactionMessage({payerKey:payer.publicKey,recentBlockhash:validity.blockhash,instructions}).compileToV0Message(tables);const tx=new VersionedTransaction(message);tx.sign([...new Map([payer,...signers].map(k=>[k.publicKey.toBase58(),k])).values()]);assert.ok(tx.serialize().length<=1232,'LUT needed');
  const signature=base58Encode(tx.signatures[0]),journal=JSON.stringify({signature,bytes:Buffer.from(tx.serialize()).toString('base64'),...validity});
  writeFileSync(state('transaction-'+signature+'.json'),journal,{flag:'wx',mode:0o600});
  if(label)writeFileSync(state(label+'.signed.json'),journal,{flag:'wx',mode:0o600});
@@ -219,12 +220,18 @@ try{
    assert.ok(!existsSync(state('blocked-inventory-'+index+'.json')),'original inventory registration outcome uncertain; no replacement signature authorized');
    await send([await ix('register_card',[meta(config),meta(a.card,false,true),meta(roles.inventory.publicKey,true,true),meta(roles.authenticator.publicKey,true),meta(SystemProgram.programId)],card,pair,seller.publicKey.toBuffer(),Buffer.from([mode]))],[roles.inventory,roles.authenticator],[],'confirmed','register-'+index);
   }
-  const tables=await lookup([config,a.card,a.sale,a.escrow,mint.publicKey,...[seller,treasury,...buyers].map(k=>ata(k.publicKey)),token,SystemProgram.programId,SYSVAR_RENT_PUBKEY]);
+  const tables=await lookup([config,a.card,a.sale,a.escrow,mint.publicKey,...[seller,treasury,...buyers].map(k=>ata(k.publicKey)),token,SystemProgram.programId,SYSVAR_RENT_PUBKEY,SYSVAR_INSTRUCTIONS_PUBKEY]);
   const openingPersisted=sql(`SELECT count(*) FROM payment_v2.lifecycle_evidence WHERE sale_id='${f.saleId}' AND kind='opened'`)==='1';
   if(!openingPersisted){
    const openContext=await paymentIssuerContext(issuer,f.saleId,'open_sale');assert.equal(openContext.actor,roles.issuer.publicKey.toBase58());
    const opening=await openSaleInstructionFromContext(openContext);
-   const opened=await send([opening],[roles.issuer],tables,'finalized','open-'+index);
+   // P1: open_sale needs the card owner's signed listing (floor + expiry) immediately before it, and the issuer must pay the fee
+   // (any other payer overruns the 1232-byte packet). The seller key is local to this harness; in production the seller's wallet signs.
+   const openPermit=decodePermit(Buffer.from(opening.data.subarray(8)));
+   const listing=listingForSale({domain:openPermit.domain,program:openPermit.program,card:openPermit.card,saleId:openPermit.saleId,generation:openPermit.generation},openPermit.total,BigInt(await finalizedClockTime()+7200));
+   const sellerKey=createPrivateKey({key:Buffer.concat([Buffer.from('302e020100300506032b657004220420','hex'),Buffer.from(seller.secretKey.subarray(0,32))]),format:'der',type:'pkcs8'});
+   const listingSignature=Uint8Array.from(edSign(null,Buffer.from(await encodeListing(listing)),sellerKey));
+   const opened=await send(await openSaleWithListing(opening,listing,listingSignature),[roles.issuer],tables,'finalized','open-'+index,roles.issuer);
    const observed=await retainAuthorityEvidence(opened,opening,{networkId:openContext.networkId,genesis:openContext.genesis,program:openContext.program,signature:opened,subjectKind:'lifecycle',subjectId:f.saleId,subjectAction:'opened'});
    await recordPaymentLifecycle(verifier,{saleId:f.saleId,kind:'opened',finality:'finalized',sale:openContext.sale,genesis:openContext.genesis,program:openContext.program,generation:openContext.generation,revision:openContext.revision,signature:opened,slot:observed.evidence.slot,executedAtSeconds:String(observed.evidence.blockTime),evidenceId:observed.evidenceId});
   }

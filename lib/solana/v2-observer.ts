@@ -5,10 +5,10 @@ import { discriminator, v2Addresses } from './v2-sdk';
 import { TOKEN_PROGRAM_ID } from './sdk';
 import { acquireFinalizedEvidence,LocalFinalizedRpcSource,validateRetainedFinalizedEvidence,type FinalizedTransactionSource,type VerifiedTransactionEvidence } from './v2-evidence';
 export interface SaleSnapshot { address: string; permit: PermitV2; state: number; fundedSlot: number; fundedAt: bigint; outcomeSlot: number; decisionRevision: bigint; listing?: SaleListingFields }
-/** Present only on accounts written by the P1 program (993 bytes): when authentication passed, the delay frozen for this sale, and the seller's signed floor/expiry. */
+/** Present only on accounts written by the P1 program (1090 bytes): when authentication passed, the delay frozen for this sale, and the seller's signed floor/expiry. */
 export interface SaleListingFields { authenticatedAt: bigint; releaseDelay: bigint; minTotal: bigint; listExpiresAt: bigint }
-/** SaleV2 grew from 961 to 993 bytes by appending four 8-byte fields; every earlier offset is unchanged, so both sizes decode. */
-export const SALE_V2_LEGACY_SIZE = 961, SALE_V2_SIZE = 993;
+/** SaleV2 is now 1090 bytes: the pre-P1 body (961), four 8-byte listing/delay fields, layout_version and 96 reserved bytes. Every earlier offset is unchanged, so the old 961-byte fixtures still decode. No intermediate size was ever deployed. */
+export const SALE_V2_LEGACY_SIZE = 961, SALE_V2_SIZE = 1090;
 export function localRpc(url: string): string {
   const u = new URL(url);
   if (u.protocol !== 'http:' || !['127.0.0.1','localhost','[::1]'].includes(u.hostname) || u.username || u.password || u.search || u.hash) throw new Error('only explicit loopback RPC is supported');
