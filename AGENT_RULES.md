@@ -101,6 +101,15 @@ delete another track's.
 
 ---
 
+## 2b. Devnet exception
+
+- Network: Solana DEVNET only. Before EVERY network action, getGenesisHash must equal the devnet genesis (pin it from the first call, compare to the published devnet value, refuse the mainnet-beta genesis 5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d always). Any RPC URL containing "mainnet" is refused.
+- Keys: throwaway keys generated locally into C:\Users\Family\flexsoar-devnet-keys\ (outside the repo and outside flexsoar-reviews). Never printed, committed, uploaded or zipped. No Privy, Helius, treasury, Supabase or other real credentials are used.
+- Funds: devnet faucet SOL only. USDC: a self-created 6-decimal TEST mint, not any real or Circle mint.
+- Scope ends at devnet. Mainnet, production DB and Vercel remain founder-only and forbidden.
+
+---
+
 ## 3. Architecture invariants
 
 Violating one of these is a bug even if it compiles and the tests pass. If a
