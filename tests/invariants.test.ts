@@ -3401,3 +3401,24 @@ describe('lib/db/errors.ts — 077/069c sign-in refusals and 079 raises', () => 
     ).toBe('WRONG_STATUS');
   });
 });
+
+
+describe('C11: admin submissions display the shared USDC label for stored cash', () => {
+  it('the queue labels the cash fixture USDC without exposing the internal enum', async () => {
+    const { SELLER_PAYOUT_METHOD_LABEL } = await import('@/app/(market)/payout-copy');
+    expect(SELLER_PAYOUT_METHOD_LABEL).toBe('USDC');
+    const html = renderToStaticMarkup(await SubmissionsQueuePage());
+    expect(html).toContain(`>${SELLER_PAYOUT_METHOD_LABEL}</td>`);
+    expect(html).not.toContain('>cash</td>');
+  });
+
+  it('the review header labels the cash fixture USDC without exposing the internal enum', async () => {
+    const { SELLER_PAYOUT_METHOD_LABEL } = await import('@/app/(market)/payout-copy');
+    expect(SELLER_PAYOUT_METHOD_LABEL).toBe('USDC');
+    const html = renderToStaticMarkup(await ReviewSubmissionPage({
+      params: Promise.resolve({ itemId: 'submission-1' }),
+    }));
+    expect(html).toContain(`paid as ${SELLER_PAYOUT_METHOD_LABEL} `);
+    expect(html).not.toContain('paid as cash');
+  });
+});
