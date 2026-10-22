@@ -616,3 +616,25 @@ dedicated transport/identity and real chain-to-DB recovery verification remain o
 No public-chain traffic, operational keys/funds/emails or shared DB used. Application
 validation is separate: current full suite486/490 (2 FSC +2 intermittent market-copy
 failures); targeted market2/2. No shared tests changed. See latest handoff for limits.
+
+## 080 post-079 cleanup: container run PASSED (2026-10-22)
+
+Files: `80_cleanup_setup.sql` (fixtures, COMMITTED, plus the pre-080 behaviour as BEFORE| lines),
+`81_cleanup_assert.sql` (after 080; read-only in effect, ends with ROLLBACK), `82_cleanup_refused_unchanged.sql`
+(after a refused 080: nothing changed), and the host-side driver `run_080_container.sh`.
+
+```bash
+# WSL host. Refuses unless the container is network-none, has no port bindings, is unprivileged and loopback-only.
+bash tests/payment-db/run_080_container.sh <container-id> <db-at-078> <out-dir>
+```
+
+The driver never writes `<db-at-078>`: it is only a CREATE DATABASE template for `flexsoar_080_base` (+079), and each
+scenario gets a fresh `flexsoar_payment_v2_test` copied from that. 079/080 run as `postgres`, tests as `supabase_admin`.
+
+- `nonadmin`, `enrolled`: 080 is refused by its preguard (a seller-review stamp by a non-admin user; a candidate enrolled in
+  `payment_v2.inventory`), and 82 proves no item, redemption, ACL or body changed.
+- `main`: 80 setup, 82 (before), 080 (NOTICE `moved 2`), 81 (28 PASS lines), 080 again (refused: `already carries the 080
+  fragment 1`), 81 again (identical output).
+
+Run on container `6ef7375a8c4e` (`flexsoar-schema-replay-20261021-0031`, supabase/postgres 17.11) from
+`flexsoar_mig_test_20261021` (its 4 pre-079 bodies hash to production's preflight values): `T080_RUN_PASS`.

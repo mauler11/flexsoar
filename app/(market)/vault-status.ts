@@ -6,10 +6,17 @@
  * the pair AND has authenticated it — `items.custody === 'warehouse'` plus a
  * non-null `items.authenticated_at`.
  *
- * Custody alone is not enough: `items.custody` is NOT NULL DEFAULT
- * 'warehouse' (013_seller_custody.sql:54), so any row created without an
- * explicit custody reads as warehouse whether or not a shoe ever arrived.
- * Who listed the item (admin, mod, a handle) is deliberately not an input.
+ * Custody alone is not enough: a warehouse row says where the pair should
+ * be, not that it arrived and passed. `items.custody` was NOT NULL DEFAULT
+ * 'warehouse' in 013 and has defaulted to 'seller' since 019b, but rows from
+ * before 019b carry the old default, and a warehouse item stays unauthenticated
+ * until intake. Who listed the item (admin, mod, a handle) is deliberately not
+ * an input.
+ *
+ * `authenticated_at` is warehouse authentication only. Seller review is
+ * `items.review_approved_at` (079; 080 moved the older review stamps there),
+ * and it is deliberately not an input either: a seller-held pair is never
+ * vaulted, however it was reviewed.
  *
  * Pure — no Supabase, no `next/headers` — so it is directly unit-testable.
  */

@@ -466,8 +466,22 @@ export interface Item {
   grade_accessories: number | null;
   /** jsonb, default '[]'. Intake photos. */
   photos: Json;
+  /**
+   * FlexSoar physically holds the pair (custody 'warehouse') AND has
+   * authenticated it: fn_authenticate_item (warehouse only since 079) or the
+   * v2 release after an attested authentication pass. Never seller review —
+   * 080 moved the pre-079 review stamps to `review_approved_at`.
+   */
   authenticated_at: Timestamptz | null;
   authenticated_by: UUID | null;
+  /**
+   * 079: when an admin approved a seller submission (fn_approve_submission).
+   * A review of photos and listing, not physical authentication, so it never
+   * makes an item "Vaulted". Optional to the type for the same reason as
+   * `custody` below: lib/mock fixtures predate the column.
+   */
+  review_approved_at?: Timestamptz | null;
+  review_approved_by?: UUID | null;
   custody_location: string | null;
   reserve_price_cents: Cents | null;
   created_at: Timestamptz;

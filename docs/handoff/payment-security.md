@@ -6139,3 +6139,197 @@ them. Step 0 checks their hashes.
 - **`f_stamped_in_mint_txn` can false-positive:** a warehouse item authenticated and minted in one admin SQL transaction. None of
   the app's paths do that; read it together with the other flags.
 - **`graphify update .`:** not run. This worktree has no `graphify-out/`.
+
+## 2026-10-22 - Migration 080: post-079 cleanup (container + staging applied; production NOT touched)
+
+Founder authorization (TASK 080, this task only): author `080` on `track/payment-security`; execute it only against isolated
+container databases and Supabase `flexsoar-staging` (ref `krkydvvvtszceutprfmy`) through the guarded staging wrapper. Lanes
+widened for this task: `tests/payment-db/**`, `lib/db/types.ts`, the admin item pages, the vault-status comment.
+**No production connection was made.** Pre-flight: branch `track/payment-security`, `git log HEAD..main` empty.
+
+Production context (from the founder's 079 run, 2026-10-22): `items=2`; exactly one row carries a seller-review stamp in
+`authenticated_at` (custody seller, seller_declared, minted, card pending_vault, `f_reads_as_vaulted=f`,
+`f_v2_attested_pass=f`, `review_approved_at` NULL). `fn_approve_submission`'s ACL includes PUBLIC (`=X/postgres`).
+
+### 080_post_079_cleanup.sql
+
+One transaction. It takes `LOCK TABLE items IN SHARE ROW EXCLUSIVE MODE` first, so writers wait and readers do not.
+
+| Step | What | Guards |
+|---|---|---|
+| 1 data | Every item with `custody <> 'warehouse' AND authenticated_at IS NOT NULL AND review_approved_at IS NULL` and no v2 `authentication_pass`/`review_authentication_pass` attestation for a sale of it: `review_approved_at/by := authenticated_at/by`, `authenticated_at/by := NULL`. NOTICE with the count. | Pre: refuse if any candidate is in warehouse custody (unreachable by construction; kept as asked), is enrolled in `payment_v2.inventory`, or was stamped by a non-admin user. Post: zero rows match the predicate; each moved row equals its snapshot outside the four stamp columns, with the values carried across; every other item is byte-identical (count + md5 of all rows). |
+| 2 ACL | `REVOKE EXECUTE ON fn_approve_submission(uuid,integer,integer) FROM PUBLIC, anon`. Body untouched. | Pre: PUBLIC holds EXECUTE (otherwise "already applied or drifted"); no unexpected grantee; body md5 = 079's `947e0f9b…`. Post: ACL = the old entries minus PUBLIC/anon, and exactly `{postgres, authenticated, service_role}` EXECUTE without grant option; effective anon=f, authenticated=t, service_role=t. |
+| 3 fn_confirm_shipment | One single-line fragment, placed after the holder check: refuse unless `status = 'requested'` (warehouse, fulfiller NULL) or `'awaiting_seller'` (seller-held), with `shipped_at` and `defaulted_at` both NULL. Message: `redemption % is %, expected %` (→ WRONG_STATUS by the existing `, expected` rule). | 074/078/079 style: pinned CR-stripped md5 (077 body `a933c7a7…`, = production V6); fragment exactly once and not already applied (a re-run reports `already carries the 080 fragment 1`); one overload; owner, secdef, search_path, ACL and all other `pg_proc` metadata identical. |
+
+**Allowed source states (step 3), from the code:**
+- Redemptions are created only as `'requested'` (warehouse) or `'awaiting_seller'` (seller-held) (013:272, 026:140, 048:120).
+  `fn_redeem_card` is retired by 063, and the v2 redeem refuses.
+- They leave by `'shipped'` (`fn_mark_shipped`, `fn_confirm_shipment`) or `'defaulted'` (`fn_mark_default`, which since 079
+  accepts awaiting_seller only).
+- No other value is ever written.
+- The status is bound to custody (fulfiller set ↔ awaiting_seller), so an inconsistent row is refused too.
+- Non-holders see the same check order as before: they still get `only the holder of this item can confirm shipment` first.
+
+**Readers of `items.authenticated_at/by` (live catalog on staging + grep of lib/, app/, components/):**
+
+| Reader | Effect of clearing the stamp on a seller-held minted item |
+|---|---|
+| `fn_mint_card` | Reads at mint only. Seller custody is gated on `review_approved_at` since 079; the moved row is already minted. |
+| `fn_grade_item` | Refuses any status but `pending_intake`/`in_custody`. |
+| `fn_authenticate_item` | Writer; warehouse custody only since 079. |
+| `fn_payment_v2_prepare_sale`, `payment_v2.correspondence()` (078) | Seller → mode 0 without reading the stamp. |
+| `fn_payment_v2_record_attestation` (078) | Receipt clears the stamp anyway. |
+| `fn_payment_v2_reconcile_event` (061) | Writer at release, from the attested pass. |
+| Escrow release / payout eligibility | No reader. Mode-0 release depends on the attestation chain. |
+| Redemption | `fn_redeem_card` retired (063), v2 redeem refuses (062). Neither reads the stamp. |
+| Views, policies, indexes | None reference the columns. Only `items_authenticated_by_fkey` depends on one, and NULL satisfies it. |
+| Triggers on items | `trg_items_condition_grade` fires on float_value only. `payment_v2_fence` refuses non-owner writes to v2-enrolled items, hence the explicit "enrolled" preguard. Nothing else blocks a write to the columns. |
+| `app/(market)/vault-status.ts`, `CardDetail` | Seller → "Held by seller" whatever the stamp. |
+| `/admin/mint`, `/admin/grading` (`getItems({authenticated})`) | `in_custody` / `pending_intake` only; a minted item never appears. |
+| `/admin/cards/[id]`, `/admin/consignments/[id]` | "Authenticated at" now shows "—" for the moved row; "Review approved at" shows the time (below). |
+
+### Container (isolated) run: PASS
+
+`tests/payment-db/run_080_container.sh` ran on container `6ef7375a8c4e` (`flexsoar-schema-replay-20261021-0031`,
+supabase/postgres 17.11). Isolation was verified first: NetworkMode none, PortBindings {}, Privileged false, 3 read-only mounts,
+lo only.
+
+The database chain:
+1. Source DB `flexsoar_mig_test_20261021`, left untouched. Its four pre-079 bodies hash to production's P3 values.
+2. Template copy `flexsoar_080_base`, plus 079 (sha `558ab750…`, as postgres).
+3. A fresh `flexsoar_payment_v2_test` per scenario.
+
+| Scenario | Result |
+|---|---|
+| nonadmin | 080 rc=3 `1 candidate item(s) were stamped by a non-admin user`; 82: nothing changed |
+| enrolled | 080 rc=3 `1 candidate item(s) are enrolled in payment_v2.inventory`; 82: nothing changed |
+| main | 080 rc=0 `moved 2`; 81: 28 PASS; re-run rc=3 `already carries the 080 fragment 1`; 81 again identical |
+
+What 81 covers:
+- **Data:** both seller-review stamps moved, with the values carried across, the admin as reviewer, and all other columns
+  equal. **Every warehouse item is untouched** (authenticated, legacy review stamp, unauthenticated), and every other item is
+  byte-identical. The stamp+review row is left. Redemptions are unchanged by 080.
+- **ACL:** the approve ACL is exact. anon gets `42501 permission denied for function fn_approve_submission`. An admin still
+  approves; a non-admin still gets `admin privileges required`.
+- **fn_confirm_shipment:** the matrix below. A no-users-row session still gets `sign in to confirm a shipment`. Metadata is
+  unchanged.
+
+| fn_confirm_shipment | Before 080 | After 080 |
+|---|---|---|
+| awaiting_seller, fulfiller | accepted | accepted (shipped, item shipped) |
+| **defaulted, fulfiller / admin** | **accepted** | refused `is defaulted, expected awaiting_seller` |
+| **warehouse defaulted, admin** | **accepted** | refused `is defaulted, expected requested` |
+| warehouse requested, admin | accepted | accepted |
+| shipped | `is already shipped` | same |
+| **seller-held 'requested'** / **awaiting_seller with shipped_at** | **accepted** | refused `, expected awaiting_seller` |
+| defaulted, non-holder | `only the holder …` | same |
+
+### Staging (PG 17.11, system_identifier 7692131729119822239): applied
+
+The wrapper `stg.py` and `guard.sql` are 079's, byte-identical (sha `aced31e2…` / `46428260…`). Every session printed
+`GUARD_OK staging`.
+
+1. **Read-only baseline:** the catalog reader audit (above), `preflight-080.sql`, `audit-080-stamps.sql`, the 059-078
+   `verify-post.sql`, `verify-079.sql`, and the catalog inventory (1298 objects).
+2. **`checks80.sql` BEFORE** (synthetic rows, rolled back): the "before" column above, reproduced on Supabase.
+3. **Dry run** (080 with ROLLBACK): rc=0, `moved 0`.
+4. **Dry run with a synthetic production-shape row** (rolled back): `moved 1`.
+   - The row ends in custody seller, with auth NULL and review = the old stamp, by an admin. It is not vaulted.
+   - The warehouse-authenticated row is untouched.
+   - The confirm and ACL probes match the "after" column.
+   - This proves step 1 through the real `payment_v2_fence` and RLS, as `postgres`.
+5. **080 applied: rc=0, COMMIT** at 2026-10-22T02:25:05Z. File sha256 `87e7386b…`, CR=0. NOTICEs: `moved 0` and
+   `…left as is: 0`.
+6. **Inventory diff:** 1298 → 1298 objects, exactly two changed:
+   - `fn_approve_submission`: ACL only; body md5 unchanged.
+   - `fn_confirm_shipment`: body `a933c7a7…` → `4f1b8f83…`; metadata unchanged.
+7. **Verification:**
+   - `verify-080.sql`: Q1-Q4 as the runbook expects.
+   - 059-078 `verify-post.sql`: only the V6 `fn_confirm_shipment` md5 line differs.
+   - `verify-079.sql`: only the Q1 approve ACL differs.
+   - Audit: unchanged (staging has no items).
+8. **`checks80.sql` AFTER:** the "after" column. Re-apply: refused (`already carries the 080 fragment 1`), atomic.
+
+### PUBLIC / anon EXECUTE on public.fn_* (READ-ONLY report)
+
+Source: the staging catalog, which equals the 059-079 replay. Production may differ, because its 001-058 history drifted. The
+runbook's preflight prints the same list for production as `R1|` lines.
+
+| Function | PUBLIC | anon | Definer | Class | Note |
+|---|---|---|---|---|---|
+| `fn_approve_submission(uuid,int,int)` | yes | yes | yes | admin-only | **Revoked by 080.** Before, `fn_require_admin()` refused inside. |
+| `fn_set_card_visibility(uuid,bool)` | yes | yes | yes | user | The owner/admin check refuses anon (`owner_id` is NOT NULL, so it is distinct from NULL). Anon access is unnecessary; a candidate for a later revoke. It distinguishes "not found" from "not your card". |
+| `fn_current_user_id()` | | yes | yes | user (helper) | Returns the caller's users.id; NULL for anon. Used by policies and RPC guards. |
+| `fn_is_admin()` | | yes | yes | user (helper) | `false` for anon. Used by policies. |
+| `fn_sale_history_public(uuid)` | | yes | yes | intentionally public | Settled sale prices per model (the public tape). |
+| `fn_card_value_cents(uuid)` | | yes | | intentionally public | Invoker; the fair value shown beside every price. |
+| `fn_tier_for_sku(uuid)` | yes | yes | | intentionally public | Invoker. |
+| `fn_tier_for_price(int)`, `fn_grade_for_float(numeric)`, `fn_float_multiplier(uuid,numeric)`, `fn_config_bool(text)`, `fn_config_num(text)` | | yes | | intentionally public | Invoker; pure or config reads. |
+| `fn_payment_v2_managed(text,jsonb)` | yes | yes | yes | intentionally public (063) | The invoker fence trigger calls it as any role. It returns only whether a row is v2-managed. V1 expects it. |
+| `fn_payment_v2_legacy_guard()`, `fn_guard_sku_model_art_url()` | yes | yes | | trigger | Trigger functions cannot be called directly. |
+
+### App (lanes widened by the task)
+
+- **`lib/db/types.ts`:** adds `Item.review_approved_at?` / `review_approved_by?`. They are optional, like `custody`, because
+  lib/mock predates them. The doc comment on `authenticated_at` now says it means warehouse authentication only.
+- **Admin pages:** `app/admin/cards/[id]/page.tsx` shows "Review approved at" beside "Authenticated at".
+  `app/admin/consignments/[id]/page.tsx` has a "Review approved" column before "Authenticated".
+- **`components/admin/db-reads.ts`:** adds `getItemReviewApprovals(itemIds: UUID[]): Promise<Map<UUID, Timestamptz | null>>`.
+  - Why: `getCard()` and `getConsignment()` (contract.ts, track/data) do not project the column.
+  - The task did not name this file. It is the admin lane's read adapter file, and the pages cannot show the value without it.
+- **`app/(market)/vault-status.ts`:** comment fixed. The custody default has been `'seller'` since 019b, and review approval is
+  never an input. The task named `lib/vault-status.ts`, which does not exist; this is the file the 079 handoff flagged.
+- **`tests/review-approved.test.ts` (13 tests):**
+  - both pages render the two values in separate places;
+  - review approval never makes an item Vaulted;
+  - the new refusals map to WRONG_STATUS;
+  - the static shape of 080: ASCII/LF, one transaction, no UUID literals, the exact predicate, one UPDATE that never sets
+    custody, and the single REVOKE.
+
+`npx tsc --noEmit` rc=0. `npm test`: 22 files, **585/585** (was 572). `npm run build` rc=0.
+
+### scripts/smoke_settlement.sql: stale (not edited)
+
+- **Retired calls:** it calls functions 063 retired (`PAYMENT_V2_LEGACY_PATH_RETIRED`): `fn_purchase_card` (12),
+  `fn_reserve_credit` (5), `fn_list_card` (5), `fn_create_trade_offer`/`fn_accept_trade_offer`,
+  `fn_confirm_sale_cancellation`, `fn_redeem_card`, `fn_vault_receive`, `fn_vault_mark_defaulted`. It cannot run past its
+  first purchase.
+- **Seller authentication:** `mk_unvaulted_listing` (≈703-713) runs `fn_authenticate_item` on a **seller-custody** item, which
+  079 refuses. The seller path now needs `fn_approve_submission` (review approval), not authentication.
+- **Receipt as authentication:** line 813 asserts "item vaulted" via `fn_vault_receive`. That function's
+  `coalesce(authenticated_at, now())` made receipt alone count as "authenticated" (023c). The path is retired, and under the
+  founder rule receipt is not authentication.
+- **Dropped trigger:** ≈883 asserts on `payout_release_at`, which only the dropped `trg_vaulted_instant_release` (078) set.
+- **auth.users:** it inserts `auth.users` rows (in a non-fatal block), so it must never be pointed at production.
+
+### Found, outside this lane (not changed)
+
+- **track/admin: `/admin/cards/[id]` throws on the server.**
+  - `RetireCardForm` evaluates `document.querySelector(…)` during render, in a Server Component file (`page.tsx` ≈192).
+  - So a real server render raises `ReferenceError: document is not defined`.
+  - The new test stubs `document` for its own render only.
+  - Not verified against a running server.
+- **track/data:** project `review_approved_at` on `CardDetail.item` (getCard) and `ConsignmentDetail.items` (getConsignment).
+  `getItemReviewApprovals` can then be deleted.
+- **Production data:** the moved item's card is `pending_vault` while the item is seller-held. That status came from
+  `trg_hold_card_pending_vault` (023c, dropped by 063). 080 does not change it; it needs its own decision.
+- **Unchanged behaviour:** `fn_confirm_shipment` still lets an admin ship a warehouse redemption without crediting anyone, as
+  before.
+
+### Production runbook addendum (not run)
+
+- The runbook is `C:\Users\Family\flexsoar-reviews\prod-runbook-080.md`, with supporting files in `prod-runbook-080\`.
+- It reuses `prod-runbook-059-078\prod.py` and both guards unchanged (hash-checked).
+- It uses the 079 production outputs as baselines.
+- Its before/after audit expects exactly the one-row move above. `audit-diff-080.sh` checks this; it was tested offline against
+  one good output and four bad ones.
+
+### Not verified
+
+- **Production values:** `fn_confirm_shipment`'s CR count, the R1 ACL list, and whether production still has exactly one
+  candidate. The preflight reads them; P5 must say `candidates=1`.
+- **17.6 vs 17.11:** 080 uses `LOCK TABLE`, `pg_get_functiondef`, `aclexplode`, `REVOKE` and `has_function_privilege`, all
+  stable within 17.x. Not run on 17.6.
+- **The warehouse-custody preguard** cannot fire, because the predicate excludes warehouse. It is a tautological backstop.
+- **Full payment-db suite** (10/20/30, workers, races): not re-run; only the 080 files ran.
+- **`graphify update .`:** not run; this worktree has no `graphify-out/`.

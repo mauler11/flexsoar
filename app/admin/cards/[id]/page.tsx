@@ -9,6 +9,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAdminPage } from "@/components/admin/auth";
+import { getItemReviewApprovals } from "@/components/admin/db-reads";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -51,6 +52,8 @@ export default async function CardDetailPage({
 
   const card = await getCard(id);
   if (!card) notFound();
+  const reviewApprovedAt =
+    (await getItemReviewApprovals([card.item.id])).get(card.item.id) ?? null;
 
   return (
     <main className="mx-auto flex w-full max-w-4xl flex-col gap-5 p-6">
@@ -104,6 +107,9 @@ export default async function CardDetailPage({
           <Field label="Item ID" value={card.item.id} />
           <Field label="Status" value={card.item.status} />
           <Field label="Graded at" value={formatTimestamp(card.item.graded_at)} />
+          {/* Two different facts: an admin approving a seller's submission,
+              and FlexSoar physically holding and authenticating the pair. */}
+          <Field label="Review approved at" value={formatTimestamp(reviewApprovedAt)} />
           <Field label="Authenticated at" value={formatTimestamp(card.item.authenticated_at)} />
           <Field label="Custody location" value={card.item.custody_location ?? "—"} />
         </dl>

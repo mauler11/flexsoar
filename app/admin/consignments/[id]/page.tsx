@@ -15,13 +15,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAdminPage } from "@/components/admin/auth";
 import { TransitionControls } from "@/components/admin/consignments/TransitionControls";
+import { getItemReviewApprovals } from "@/components/admin/db-reads";
 import { statusLabel, statusTone } from "@/components/admin/consignments/transitions";
 import { formatMyr } from "@/components/card/format";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Table, TBody, THead, Td, Th, Tr } from "@/components/ui/Table";
 import { getConnectOnboardingStatus, getConsignment } from "@/lib/api/contract";
-import type { ItemStatus } from "@/lib/db/types";
+import type { ItemStatus, Timestamptz, UUID } from "@/lib/db/types";
 
 export const metadata: Metadata = {
   title: "Consignment — FlexSoar admin",
@@ -63,6 +64,12 @@ export default async function ConsignmentDetailPage({
   const connect = consignment.consignor?.id
     ? await getConnectOnboardingStatus(consignment.consignor.id)
     : null;
+
+  // An empty consignment has nothing to look up.
+  const reviewApprovals =
+    consignment.items.length > 0
+      ? await getItemReviewApprovals(consignment.items.map((item) => item.id))
+      : new Map<UUID, Timestamptz | null>();
 
   if (!consignment) notFound();
 
@@ -137,6 +144,7 @@ export default async function ConsignmentDetailPage({
                 <Th>Status</Th>
                 <Th className="text-right">Float</Th>
                 <Th>Graded</Th>
+                <Th>Review approved</Th>
                 <Th>Authenticated</Th>
                 <Th>Custody</Th>
                 <Th className="text-right">Photos</Th>
@@ -161,6 +169,9 @@ export default async function ConsignmentDetailPage({
                   </Td>
                   <Td className="text-muted tabular-nums">
                     {formatTimestamp(item.graded_at)}
+                  </Td>
+                  <Td className="text-muted tabular-nums">
+                    {formatTimestamp(reviewApprovals.get(item.id) ?? null)}
                   </Td>
                   <Td className="text-muted tabular-nums">
                     {formatTimestamp(item.authenticated_at)}

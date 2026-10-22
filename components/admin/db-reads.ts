@@ -24,6 +24,8 @@
  *                                RedemptionSummary
  *   - getProofOverdue()       -> wants the items_proof_overdue view (013)
  *   - getPlatformConfig()     -> wants platform_config (011/013) on any surface
+ *   - getItemReviewApprovals(ids) -> wants review_approved_at (079) on
+ *                                CardDetail.item and ConsignmentDetail.items
  *
  * The last six are all one shape of gap: migrations 010-013 are applied to the
  * live project but their `.sql` files are not in this worktree and nothing they
@@ -824,4 +826,47 @@ export async function getPlatformConfig(): Promise<PlatformConfig> {
     sellerShipmentDays: byKey.get("seller_shipment_days") ?? null,
     proofOfPossessionDays: byKey.get("proof_of_possession_days") ?? null,
   };
+}
+
+// ------------------------------------------------------------
+// review_approved_at — seller review, kept apart from authentication
+// ------------------------------------------------------------
+
+/**
+ * `items.review_approved_at` (079) for the given items, keyed by item id.
+ *
+ * getCard() and getConsignment() do not project the column yet (wants
+ * `review_approved_at` on CardDetail.item and ConsignmentDetail.items; filed
+ * in docs/handoff/payment-security.md, 080). Until they do, the card and
+ * consignment pages read it here so "Review approved at" can sit beside
+ * "Authenticated at" instead of being folded into it: the first is an admin
+ * approving a seller's photos, the second is FlexSoar holding the pair.
+ *
+ * Visibility is items_admin_read (004); authenticated has column SELECT on it
+ * exactly as on authenticated_by (079 postguard). An item missing from the
+ * map is one this session may not see, shown as "—" like any null.
+ */
+export async function getItemReviewApprovals(
+  itemIds: UUID[],
+): Promise<Map<UUID, Timestamptz | null>> {
+  const approvals = new Map<UUID, Timestamptz | null>();
+  if (itemIds.length === 0) return approvals;
+
+  const supabase = await createServerSupabase();
+
+  const result = await supabase
+    .from("items")
+    .select("id, review_approved_at")
+    .in("id", itemIds);
+  if (result.error) {
+    throw new Error(`items: ${result.error.message}`, { cause: result.error });
+  }
+
+  for (const row of (result.data ?? []) as {
+    id: UUID;
+    review_approved_at: Timestamptz | null;
+  }[]) {
+    approvals.set(row.id, row.review_approved_at);
+  }
+  return approvals;
 }
