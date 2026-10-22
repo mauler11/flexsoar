@@ -159,3 +159,14 @@ Payment security v2 local verification (no installation performed by agent):
   Real Postgres integration awaits HUMAN-authored schema in an isolated project.
 
 - PostgreSQL client psql 17.11 (SYSTEM EXECUTABLE, not an npm package) -- required by dedicated payment worker transport. Already available in the pinned isolated helper image; provision explicitly for a future worker runtime. No manifest/lockfile installation or Vercel worker activation performed.
+
+## Requested by track/payment-security (devnet rehearsal D1, 2026-10-23)
+
+- @sqds/multisig@2.1.3 — the Squads v4 SDK, EXACT version pin (no range). Used only by the local devnet rehearsal scripts to create the
+  governance and upgrade multisigs, read their accounts (`Multisig.fromAccountAddress`) to verify threshold, members, config authority,
+  time lock and transaction indexes, derive the vault PDA (`getVaultPda`), and build/execute vault transactions. It is how the Squads
+  ceremony checklist in `docs/handoff/solana-p1b.md` section 4 gets checked against the SDK's own field names instead of from memory.
+  Not imported by app code. **Version caveat:** this agent could not query the npm registry (the Devnet exception allows Solana devnet
+  traffic only), so 2.1.3 is the version I recall as published, not one I confirmed. Whoever installs it should confirm the exact
+  version exists and is the intended Squads v4 release, and tell me if it differs; the rehearsal records the version actually installed.
+  Install without a range, e.g. `npm install --save-exact @sqds/multisig@2.1.3`, on `main`.
