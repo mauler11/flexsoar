@@ -1,5 +1,9 @@
 # P1b: R1 review fixes and devnet prerequisites
 
+> **Superseded in part by `docs/handoff/solana-p1c.md` (R2 review fixes).** Where they differ, P1c wins: `accept_governance_vault` now takes the expected proposal
+> revision and must be a direct CPI, the funding gate's API (pinned deployment and raw DB rows, no caller-supplied address), config offsets 691+ (revision then
+> 120 reserved bytes), and runbook steps 6c, 6d and 9.
+
 Branch `track/payment-security`, 2026-10-22, on top of P1 (`8b40a7c`). Responds to the independent review
 `flexsoar-reviews\proposals-20261022\r1\p1-security-review.md` and founder decisions A-F. **Local only. Nothing was deployed, no network
 was touched, no real key was used.** This document **supersedes** `solana-p1-upgrade.md` wherever they differ: account sizes

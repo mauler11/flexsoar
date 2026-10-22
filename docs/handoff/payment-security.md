@@ -6819,3 +6819,20 @@ Full report, runbook and unverified list: **`docs/handoff/solana-p1b.md`** (supe
 - **Results (committed tree `7c56f73`):** Rust 16; on-chain 165 groups (clean exit, peak 1.63 GB); `npm test` 677; `.so`
   `0e4c710c221b4f1599a3af6303d18fb9f32c0f6e2910480f0b0bde122f4902dd`. `authorize_release` +1,210 CU; open/buy changes are inside run-to-run noise.
 - **Do not deploy anywhere before the devnet runbook in `solana-p1b.md` is run and its STOP points pass.**
+
+## 2026-10-22 - P1c: fixes for every R2 finding (local only; NOT deployed)
+
+Full report, runbook amendments and unverified list: **`docs/handoff/solana-p1c.md`** (supersedes parts of `solana-p1b.md`). Commits `8351ac1`
+(program, script), `4caf1b5` (gate, tests), plus this documentation. Next step: independent R3 review, then devnet.
+
+- **R2-01:** `accept_governance_vault` must be a direct CPI from the top-level controller (stack height = top level + 1); `C -> D -> settlement`
+  and `C -> D` forwarding C's vault signer are refused (`NotDirectCall` 6015), on chain. Squads is expected to be a direct CPI: verify on devnet.
+- **R2-05:** `cancel_governance_vault_proposal`; `proposal_revision` (config offset 691, out of reserved, size still 819); accept takes the expected
+  revision (`StaleProposal` 6016). **R2-04:** one `vault_conflicts` predicate in propose, accept, configure and rotate (`VaultConflict` 6017).
+- **R2-02 / R2-03:** the funding gate parses the DB row at runtime (33 malformed shapes refused) and binds to the pinned cluster (genesis, derived
+  config PDA, executable flags, strict booleans, empty pending/reserved), returning its target identity; any RPC error is a refusal.
+- **R2-06:** init read-back checks the ConfigV2 discriminator and executable=false; every header byte mutated in a test.
+- **Results (committed tree `4caf1b5`):** Rust 18; on-chain 185 groups (clean exit, peak 1.64 GB); `npm test` 722; `.so`
+  `ec55c456643d4bb44486e6a292aeff4f826dffd00c2d9d15ca2b2c793fab8fba`. CU vs the P1b binary: `authorize_release` -3, `set_release_delay`/`set_pause` +45,
+  `propose` +86, `accept` (whole tx via mock) +336.
+- **Do not deploy anywhere before R3 and the devnet runbook in `solana-p1b.md` (as amended by `solana-p1c.md`) pass their STOP points.**

@@ -311,8 +311,12 @@ under-price". A correct builder alone does not establish it.
    build an open transaction when none is stored.
 6. **No substitution.** The worker must re-derive the binding from its own sale row and compare it to the stored message before
    submitting, so a corrupted store cannot open a sale on a card the seller did not sign for.
-7. **Gate before funding.** `checkFundingGate` (`lib/solana/v2-funding-gate.ts`) runs before any funding-enable approval and must
-   report no failures: on-chain delay and vault state at least as strict as the database's `governance_mode`.
+7. **Gate before funding.** `checkFundingGate(rpc, pinnedDeployment, rawGovernanceModeRows)` (`lib/solana/v2-funding-gate.ts`) runs before any
+   funding-enable approval and its decision must be `ok === true`. The adapter hands it the RAW `governance_mode` projection (exactly
+   three fields: `operational_separation`, `governors_required`, `release_delay_seconds`, in seconds); the gate validates it and refuses
+   anything malformed. The pinned deployment (genesis hash and program id) comes from the reviewed manifest, never from the RPC being
+   asked; the gate derives the config address itself. The returned `target` (genesis, program, config, slot) is the identity the
+   funding-enable action must act on, promptly, re-running the gate if governance changes in between. Treat any exception as a refusal.
 
 **Review checklist for this milestone:** the UI test shows the signed bytes equal the displayed numbers for a table of prices and
 rates; an issuer-supplied message is refused by the UI; a wallet that changes the bytes is detected; the worker has no code path that
