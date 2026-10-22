@@ -13,5 +13,6 @@ BEGIN
   SELECT st0.id,st0.user_id,st0.person_id,st0.role,st0.public_key,st0.active INTO st.id,st.user_id,st.person_id,st.role,st.public_key,st.active FROM payment_v2.staff st0 JOIN payment_v2.decisions dec ON dec.actor_staff=st0.id WHERE dec.id=(d->>'commandId')::uuid;
  END IF;
  p:=jsonb_build_object('commandId',d->>'commandId','finality','finalized','sale',f->'proof'->>'sale','genesis',f->'proof'->>'genesis','program',f->'proof'->>'program','action',a,'evidenceDigest',d->>'evidenceDigest','pairCommitment',d->>'pairCommitment','signature',payment_v2.b58(sha512(uuid_send((d->>'commandId')::uuid))),'slot',seq+10,'executedAtSeconds',extract(epoch FROM now())::bigint,'resultingRevision',(x.decision_revision+CASE WHEN a IN('release','refund','dispute','resolve_dispute_release','resolve_dispute_refund') THEN 1 ELSE 0 END)::text,'actor',payment_v2.b58(st.public_key));
+ p:=pg_temp.retained(p,'attestation',(d->>'commandId')::uuid,a,(f->>'network')::uuid);
  PERFORM public.fn_payment_v2_record_attestation(p);RETURN d;
 END $$;

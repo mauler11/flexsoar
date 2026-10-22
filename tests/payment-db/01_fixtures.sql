@@ -7,6 +7,29 @@ BEGIN
   IF strpos(SQLERRM,fragment)=0 THEN RAISE EXCEPTION 'unexpected error: % (wanted %)',SQLERRM,fragment;END IF;RETURN;
  END;RAISE EXCEPTION 'expected rejection: %',statement;
 END $$;
+-- 068: every event/attestation/lifecycle proof must name retained verified chain evidence (proof.evidenceId) for the same
+-- subject, action, signature, slot and network. Synthetic envelope only: 1 signature (the proof's own 64 signature bytes) and a
+-- 32-byte synthetic message; never a real or broadcastable transaction. Stored through the actual verifier RPC, unbypassed.
+CREATE FUNCTION pg_temp.b58_bytes(p text) RETURNS bytea LANGUAGE plpgsql AS $$
+DECLARE n numeric:=0;i int;out bytea:='\x'::bytea;
+BEGIN
+ FOR i IN 1..length(p) LOOP n:=n*58+(strpos('123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz',substr(p,i,1))-1);END LOOP;
+ WHILE n>0 LOOP out:=set_byte('\x00'::bytea,0,mod(n,256)::int)||out;n:=div(n,256);END LOOP;
+ RETURN decode(repeat('00',length(p)-length(ltrim(p,'1'))),'hex')||out;
+END $$;
+CREATE FUNCTION pg_temp.retained(p_proof jsonb,p_kind text,p_subject uuid,p_action text,p_network uuid) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE sig bytea:=pg_temp.b58_bytes(p_proof->>'signature');msg bytea:=sha256(convert_to(p_kind||':'||p_action,'UTF8')||uuid_send(p_subject));raw bytea;b64 text;t bigint:=extract(epoch FROM clock_timestamp())::bigint;
+BEGIN
+ IF octet_length(sig)<>64 OR payment_v2.b58(sig) IS DISTINCT FROM p_proof->>'signature' THEN RAISE EXCEPTION 'fixture signature is not 64 base58 bytes: %',p_proof->>'signature';END IF;
+ raw:=decode('01','hex')||sig||msg;b64:=replace(encode(raw,'base64'),E'\n','');
+ RETURN p_proof||jsonb_build_object('evidenceId',public.fn_payment_v2_store_chain_evidence(jsonb_build_object(
+  'formatVersion',1,'subjectKind',p_kind,'subjectId',p_subject,'subjectAction',p_action,'networkId',p_network,
+  'genesis',p_proof->>'genesis','program',p_proof->>'program','signature',p_proof->>'signature','slot',(p_proof->>'slot')::bigint,'blockTime',t,
+  'finality','finalized','sourceKind','primary','sourceLabel','synthetic-payment-db-fixture','transactionBase64',b64,
+  'transactionDigest',encode(sha256(raw),'hex'),'messageDigest',encode(sha256(msg),'hex'),
+  'rpcResult',jsonb_build_object('slot',(p_proof->>'slot')::bigint,'blockTime',t,'meta',jsonb_build_object('err',NULL),'transaction',jsonb_build_array(b64,'base64')),
+  'parsedRpcResult',jsonb_build_object('slot',(p_proof->>'slot')::bigint,'blockTime',t,'meta',jsonb_build_object('err',NULL),'transaction',jsonb_build_object('signatures',jsonb_build_array(p_proof->>'signature'))))));
+END $$;
 -- Synthetic rows only; no data copied from Panda, production, customer records or wallets.
 CREATE FUNCTION pg_temp.fixture(mode smallint,valid_seconds integer DEFAULT 600,record_evidence boolean DEFAULT true,p_total numeric DEFAULT 5000000) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE seller uuid:=gen_random_uuid();buyer uuid:=gen_random_uuid();model uuid:=gen_random_uuid();sku uuid:=gen_random_uuid();item uuid:=gen_random_uuid();card uuid:=gen_random_uuid();listing uuid:=gen_random_uuid();net uuid:=gen_random_uuid();sale uuid:=gen_random_uuid();u uuid;st uuid;enroller uuid;reviewer uuid;i int;role_name text;status jsonb;permit text;proof jsonb;event uuid;funded bigint:=extract(epoch FROM clock_timestamp())::bigint;
@@ -43,11 +66,13 @@ BEGIN
  (buyer,net,sha256(uuid_send(buyer)),sha256(uuid_send(buyer)||decode('01','hex')),sha256(uuid_send(buyer)));
  PERFORM public.fn_payment_v2_prepare_sale(listing,net,jsonb_build_object('id',sale,'saleAddress',payment_v2.b58(sha256(uuid_send(sale))),'escrowAddress',payment_v2.b58(sha256(uuid_send(sale)||decode('02','hex'))),'totalUnits',p_total::text,'fxSnapshot',jsonb_build_object('myrSen',2000,'usdcBaseUnits',p_total::text,'source','synthetic'),'validFrom',funded-10,'expiresAt',funded+valid_seconds));
  proof:=jsonb_build_object('saleId',sale,'kind','opened','finality','finalized','sale',payment_v2.b58(sha256(uuid_send(sale))),'genesis',payment_v2.b58(sha256(uuid_send(net))),'program',payment_v2.b58(sha256(uuid_send(model))),'generation','1','revision','1','signature',repeat('2',88),'slot',1);
+ proof:=pg_temp.retained(proof,'lifecycle',sale,'opened',net);
  PERFORM public.fn_payment_v2_record_lifecycle(proof);
  PERFORM set_config('request.jwt.claim.sub',buyer::text,true);
  status:=public.fn_payment_v2_initiate(listing,gen_random_uuid(),'MY-USDC-ESCROW-1','834ca943173d4db87622426e161eeb17afcdbac94e37368e6f697430961925c5');
  IF record_evidence THEN permit:=public.fn_payment_v2_authorize_attempt((status->>'id')::uuid);END IF;
  proof:=jsonb_build_object('kind',CASE mode WHEN 0 THEN 'funded' ELSE 'direct' END,'signature',repeat('3',88),'slot',2,'fundedAtSeconds',funded::text,'decisionRevision','0','permitHex',permit,'genesis',proof->>'genesis','program',proof->>'program','sale',proof->>'sale','attempt',payment_v2.b58(sha256(uuid_send((status->>'id')::uuid))),'finality','finalized');
+ proof:=pg_temp.retained(proof,'payment_event',(status->>'id')::uuid,proof->>'kind',net);
  IF record_evidence THEN event:=public.fn_payment_v2_record_verified_event(proof);END IF;
  RETURN jsonb_build_object('issuerTerms',(SELECT issuer_terms FROM payment_v2.sales WHERE id=sale),'seller',seller,'buyer',buyer,'card',card,'item',item,'listing',listing,'network',net,'sale',sale,'attempt',status->>'id','permit',permit,'event',event,'proof',proof);
 END $$;
