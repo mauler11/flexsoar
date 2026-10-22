@@ -686,3 +686,36 @@ bash tests/payment-db/run_081b_container.sh <container-id> <db-at-078> <out-dir>
   - 86 again, identical.
 
 Run on `6ef7375a8c4e` from `flexsoar_mig_test_20261021`: `T081B_RUN_PASS`.
+
+## 082 solo-operator mode: container run PASSED (2026-10-22)
+
+`83_solo_mode.sql` (one transaction, ROLLBACK; includes `01_fixtures.sql`) and the host driver `run_082_container.sh`.
+
+```bash
+bash tests/payment-db/run_082_container.sh <container-id> <db-at-078> <out-dir>
+```
+
+- **Role mirror:** staging and production run migrations as `postgres`, a SET+INHERIT member of the six payment_v2 roles
+  (059 ran with `createrole_self_grant='set, inherit'`). A replay built as `supabase_admin` lacks that, so the driver grants
+  it inside the isolated container and says so. Without it, 082 stops at its first check
+  ("cannot SET ROLE / inherit payment_v2_owner").
+- **Refused, nothing created:** 082 without 081; 082 while a network has funding enabled. A re-run after success is refused
+  by the body pins.
+- **83, 18 stages:**
+  - **S (separated, the initial mode):** a 4th governor fails `funding_configuration` and `THREE_GOVERNORS_REQUIRED`; one
+    person with distinct keys is refused (`INDEPENDENT_PERSON_REQUIRED`, inventory `CORRESPONDENCE`); an independent release
+    reconciles; decisions stamped `separated`.
+  - **G (governance RPCs):** only an active governor proposes; no mode change while funding is on; one guardian disables
+    funding everywhere; invalid payloads refused; `enable_funding` refused while unconfigured; 2 distinct governor persons
+    apply a proposal once (same person, re-apply, stale base, missing proposal refused); audited; records immutable; the
+    mode row is a singleton and enforces the solo floor.
+  - **O (solo):** an in-flight release decided under `separated` reconciles after the switch (judged by its stamped mode);
+    distinct keys accepted, the same key refused (`INDEPENDENT_KEY_REQUIRED`); release inside 24 h refused at decision
+    and at reconcile (`RELEASE_DELAY`); release 25 h after authentication reconciles; refunds need exactly 2 governor
+    persons (`GOVERNOR_SET_INCOMPLETE`).
+  - **R:** a solo configuration (1 operational person, 2 governors, 9 keys) enables funding by 2 governors; switching back
+    to `separated` restores the 3-governor and 4-person rules.
+- **Full suite on 078+079+080+081+081b+082:** 03 through 90, all rc=0, `FINAL ACCEPTANCE COMMITTED` (34+1+2 checkpoints).
+  The 7 decisions it records are all stamped `separated`.
+
+Run on `6ef7375a8c4e` from `flexsoar_mig_test_20261021`: `T082_RUN_PASS`.
