@@ -1,6 +1,6 @@
 /** Converts role-scoped immutable database contexts into exact protocol instructions.
  * No API accepts caller-provided expected account lists or authorization bytes. */
-import { PublicKey, SYSVAR_RENT_PUBKEY, SystemProgram, TransactionInstruction } from '@solana/web3.js';
+import { PublicKey, SYSVAR_INSTRUCTIONS_PUBKEY, SYSVAR_RENT_PUBKEY, SystemProgram, TransactionInstruction } from '@solana/web3.js';
 import { base58Decode } from './base58';
 import { decodePermit, consumptionDigestV1, equalBytes } from './protocol-v2';
 import { TOKEN_PROGRAM_ID } from './sdk';
@@ -25,7 +25,7 @@ export async function openSaleInstructionFromContext(value:unknown):Promise<Tran
     !equalBytes(permit.attempt,new Uint8Array(32))||!equalBytes(permit.beneficiary,new Uint8Array(32))||!equalBytes(permit.buyer,new Uint8Array(32))||!equalBytes(permit.buyerToken,new Uint8Array(32))||!equalBytes(permit.refundToken,new Uint8Array(32))||permit.total!==BigInt(text(c,'totalUnits'))||
     permit.validFrom!==BigInt(text(c,'validFrom'))||permit.expiresAt!==BigInt(text(c,'expiresAt'))||permit.fee!==permit.total*BigInt(500)/BigInt(10000)||permit.net+permit.fee!==permit.total)throw new Error('sale template differs from authoritative context');
  const addresses=v2Addresses(program,permit.card,permit.saleId);if(addresses.sale.toBase58()!==text(c,'sale')||addresses.escrow.toBase58()!==text(c,'escrow')||addresses.config.toBase58()!==text(c,'config'))throw new Error('sale PDA differs from authoritative context');
- return new TransactionInstruction({programId:new PublicKey(program),keys:[meta(addresses.config),meta(addresses.card,false,true),meta(addresses.sale,false,true),meta(addresses.escrow,false,true),meta(key(c,'mint')),meta(key(c,'actor'),true,true),meta(new PublicKey(TOKEN_PROGRAM_ID)),meta(SystemProgram.programId),meta(SYSVAR_RENT_PUBKEY)],data:Buffer.concat([Buffer.from(await discriminator('global:open_sale')),Buffer.from(templateHex,'hex')])});
+ return new TransactionInstruction({programId:new PublicKey(program),keys:[meta(addresses.config),meta(addresses.card,false,true),meta(addresses.sale,false,true),meta(addresses.escrow,false,true),meta(key(c,'mint')),meta(key(c,'actor'),true,true),meta(new PublicKey(TOKEN_PROGRAM_ID)),meta(SystemProgram.programId),meta(SYSVAR_RENT_PUBKEY),meta(SYSVAR_INSTRUCTIONS_PUBKEY)],data:Buffer.concat([Buffer.from(await discriminator('global:open_sale')),Buffer.from(templateHex,'hex')])});
 }
 
 export async function revokeSaleInstructionFromContext(value:unknown):Promise<TransactionInstruction>{

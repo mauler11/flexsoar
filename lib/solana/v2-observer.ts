@@ -4,14 +4,18 @@ import { base58Encode, base58Decode } from './base58';
 import { discriminator, v2Addresses } from './v2-sdk';
 import { TOKEN_PROGRAM_ID } from './sdk';
 import { acquireFinalizedEvidence,LocalFinalizedRpcSource,validateRetainedFinalizedEvidence,type FinalizedTransactionSource,type VerifiedTransactionEvidence } from './v2-evidence';
-export interface SaleSnapshot { address: string; permit: PermitV2; state: number; fundedSlot: number; fundedAt: bigint; outcomeSlot: number; decisionRevision: bigint }
+export interface SaleSnapshot { address: string; permit: PermitV2; state: number; fundedSlot: number; fundedAt: bigint; outcomeSlot: number; decisionRevision: bigint; listing?: SaleListingFields }
+/** Present only on accounts written by the P1 program (993 bytes): when authentication passed, the delay frozen for this sale, and the seller's signed floor/expiry. */
+export interface SaleListingFields { authenticatedAt: bigint; releaseDelay: bigint; minTotal: bigint; listExpiresAt: bigint }
+/** SaleV2 grew from 961 to 993 bytes by appending four 8-byte fields; every earlier offset is unchanged, so both sizes decode. */
+export const SALE_V2_LEGACY_SIZE = 961, SALE_V2_SIZE = 993;
 export function localRpc(url: string): string {
   const u = new URL(url);
   if (u.protocol !== 'http:' || !['127.0.0.1','localhost','[::1]'].includes(u.hostname) || u.username || u.password || u.search || u.hash) throw new Error('only explicit loopback RPC is supported');
   return u.href;
 }
 export async function decodeSale(address: string, bytes: Uint8Array, program: string): Promise<SaleSnapshot> {
-  if (bytes.length !== 961 || !equalBytes(bytes.slice(0,8),await discriminator('account:SaleV2'))) throw new Error('invalid SaleV2 account');
+  if ((bytes.length !== SALE_V2_LEGACY_SIZE && bytes.length !== SALE_V2_SIZE) || !equalBytes(bytes.slice(0,8),await discriminator('account:SaleV2'))) throw new Error('invalid SaleV2 account');
   const permit = decodePermit(bytes.slice(8,698));
   const derived = v2Addresses(program,permit.card,permit.saleId);
   if (new PublicKey(permit.program).toBase58() !== program || derived.sale.toBase58() !== address || !derived.config.equals(new PublicKey(permit.config))) throw new Error('sale PDA/program mismatch');
@@ -20,7 +24,9 @@ export async function decodeSale(address: string, bytes: Uint8Array, program: st
   if(![1,2,3,4,5,6].includes(bytes[698]))throw new Error('invalid sale lifecycle');
   if([2,3,4,5].includes(bytes[698]))validatePermit(permit,fundedAt);
   const safeSlot = (offset: number) => { const v = view.getBigUint64(offset,true); if (v > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('unsafe slot'); return Number(v); };
-  return {address,permit,state:bytes[698],fundedSlot:safeSlot(700),fundedAt,outcomeSlot:safeSlot(716),decisionRevision:view.getBigUint64(921,true)};
+  const snapshot:SaleSnapshot={address,permit,state:bytes[698],fundedSlot:safeSlot(700),fundedAt,outcomeSlot:safeSlot(716),decisionRevision:view.getBigUint64(921,true)};
+  if(bytes.length===SALE_V2_SIZE)snapshot.listing={authenticatedAt:view.getBigInt64(961,true),releaseDelay:view.getBigInt64(969,true),minTotal:view.getBigUint64(977,true),listExpiresAt:view.getBigInt64(985,true)};
+  return snapshot;
 }
 export interface V2Transaction {
   slot: number; transaction: {signatures: string[]; message: {

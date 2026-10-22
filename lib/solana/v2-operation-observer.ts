@@ -18,7 +18,8 @@ export async function observeSignedOutcome(url:string, plan:ExitPlan, envelope:S
  if(!Array.isArray(accountResult.value)||accountResult.value.length!==2)throw new Error('missing operation accounts');
  const accounts=accountResult.value.map(v=>{const a=object(v);if(a.owner!==plan.program||a.executable!==false||!Array.isArray(a.data)||a.data[1]!=='base64'||typeof a.data[0]!=='string')throw new Error('operation account owner/encoding mismatch');return Buffer.from(a.data[0],'base64');});
  const sale=await decodeSale(plan.instruction.accounts[1].pubkey,accounts[0],plan.program),config=accounts[1];
- if(config.length!==586||!equalBytes(config.subarray(0,8),await discriminator('account:ConfigV2'))||base58Encode(config.subarray(8,40))!==plan.genesis||![0,1].includes(config[561])||new PublicKey(sale.permit.config).toBase58()!==plan.instruction.accounts[0].pubkey)throw new Error('operation config/domain mismatch');
+// ConfigV2 grew from 586 to 594 bytes (release_delay appended); every earlier offset is unchanged.
+ if((config.length!==586&&config.length!==594)||!equalBytes(config.subarray(0,8),await discriminator('account:ConfigV2'))||base58Encode(config.subarray(8,40))!==plan.genesis||![0,1].includes(config[561])||new PublicKey(sale.permit.config).toBase58()!==plan.instruction.accounts[0].pubkey)throw new Error('operation config/domain mismatch');
  const statuses=object(await rpc('getSignatureStatuses',[[envelope.signature],{searchTransactionHistory:true}]));
  if(!Array.isArray(statuses.value)||statuses.value.length!==1)throw new Error('signature observation incomplete');
  const status=statuses.value[0]===null?null:object(statuses.value[0]);
