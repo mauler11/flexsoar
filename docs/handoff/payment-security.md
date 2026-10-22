@@ -6688,3 +6688,60 @@ The agent checked them against the runbook **from the files only**:
 | I8 | `visible_on_market_candidates=0`: **already not on /market** (listing sold) |
 
 So this is option (b): a first sale exists, with an admin buyer. 081b design waits for the founder's decision.
+
+## 2026-10-22 - Migration 081b: retire the pre-launch test item (container + staging; production NOT touched)
+
+**Founder decision (option b):** the admin buyer is the founder's own test account; the sale was on devnet; no real money moved.
+
+`081b_retire_prelaunch_test_item.sql` names the five rows by id. This is founder-approved for this one-off:
+- item `89887db1…`, card `0d90f5e4…`, listing `f39fbe1f…`, order `478ef5b4…`, intake `4b59ace6…`;
+- every value the production inventory showed is asserted.
+
+**Writes:**
+- card `pending_vault` → `burned`. This is `fn_burn_card`'s end state; that function cannot be used here because it needs an
+  admin session and refuses `pending_vault`.
+- intake `awaiting_shipment` → `cancelled`, with the note "081b (founder decision 2026-10-22): pre-launch test sale on devnet;
+  buyer was the founder's own test account; no funds moved. …"
+- `fn_burn_card`'s live-listing cancel must touch 0 rows.
+
+The order, listing, item, ledger and provenance are untouched (history).
+
+**Guards (any difference aborts):**
+- 080 and 081 applied.
+- The item's I1 values: seller, minted, seller_declared, `authenticated_at` NULL, `review_approved_at` set.
+- The only card is `pending_vault` and not owned by the consignor.
+- Exactly one listing, `sold`.
+- Exactly one order: settled, `paid_out=false`, no transfer, `sol:`, buyer is an admin owning the card, seller not an admin.
+- Exactly one intake: `awaiting_shipment`, never shipped, received or defaulted.
+- 0 redemptions, trade offers, credit holds or payment-v2 rows.
+- **All five rows present, or none:** none is a no-op for databases that never had the sale, such as staging. Any other count
+  aborts.
+
+**Postguards:**
+- the card differs only in status, and the intake only in status and note;
+- the other rows of 8 tables are byte-identical (count + md5);
+- no `public`/`early_access` listing exists for the card;
+- the card's status is not `active`/`locked`/`pending_vault`, so it is not on `/market` (`LIVE_LISTING_STATUSES=['public']`,
+  `contract.ts:1069`) or profiles (`u/[handle]/page.tsx:64`).
+
+**The order's cash payout cannot be picked up by any remaining code path** (grep):
+- No migration sets `paid_out`, and no `transfers.create` exists.
+- `checkPayoutEligibility` returns `eligible:false` for every order. For `sol:` it gives "USDC settlement must never receive a
+  Stripe payout" (`lib/db/purchase-payment.ts:51`, `contract.ts:4407-4422`).
+- `executePayout` always throws (`:4427-4434`).
+- `processAllDuePayouts` has no caller (cron route removed in H1).
+- **Display only:** `/payouts` sums the seller's unpaid cash orders into "Available/Still clearing" (`payouts/page.tsx:56-62`),
+  so the test seller's account shows RM19.00 clearing. Not a payout path; the market lane could drop that sum (USDC-only
+  payouts).
+
+**Container** (`run_081b_container.sh`): **PASS.** 8 refusal variants, the absent no-op, main, and a refused re-run. Details
+in `tests/payment-db/README.md`.
+
+**Staging:**
+- **Synthetic dry run** (production shape, rolled back): `rows_changed=2` of 19, the card `burned`, the intake `cancelled`, the
+  order still settled and unpaid, not visible.
+- **Apply:** **rc=0, COMMIT** at 2026-10-22T07:42:50Z, sha256 `b55adf0b…`. The `all absent; nothing to retire` NOTICE.
+- **After:** audit, 081, 080 and 059-078 verifies, and the 1298-object catalog all unchanged.
+
+**Tests:** `tests/migration-081.test.ts` +4 (the five ids only; the three allowed updates; guards present). `npm test`
+623/623, tsc passes, build passes.

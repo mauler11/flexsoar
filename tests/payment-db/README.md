@@ -656,3 +656,33 @@ and gives each phase a fresh `flexsoar_payment_v2_test`.
 - A re-run is refused (`no longer grants EXECUTE to PUBLIC`), and the output is identical afterwards.
 
 Run on `6ef7375a8c4e` from `flexsoar_mig_test_20261021`: `T081_RUN_PASS`.
+
+## 081b retire the pre-launch test item: container run PASSED (2026-10-22)
+
+`85_retire_test_item_setup.sql` (COMMITS; `-v variant=...`), `86_retire_test_item_assert.sql`,
+`87_retire_test_item_unchanged.sql` and the host driver `run_081b_container.sh`.
+
+```bash
+bash tests/payment-db/run_081b_container.sh <container-id> <db-at-078> <out-dir>
+```
+
+- **85** builds the production shape from the 2026-10-22 inventory, with the real ids:
+  - a seller-held, review-approved, minted item;
+  - its card, `pending_vault` and owned by an admin buyer;
+  - the sold listing;
+  - a settled, unpaid `sol:` order;
+  - mint plus sale ledger legs (two card legs and three currency legs netting to zero), 2 provenance rows and 1 notification;
+  - an `awaiting_shipment` intake;
+  - plus an unrelated sold card with its own open intake ("noise").
+- **Refused variants:** `intake_shipped`, `order_paid`, `live_listing`, `card_active`, `redemption`, `not_reviewed`, `partial`,
+  and the main shape without 081. Each is refused, and 87 shows every row identical afterwards.
+- **`absent`** (noise only): 081b commits a no-op with a NOTICE; every row is identical.
+- **`main`:**
+  - 87 before;
+  - 081b (NOTICE);
+  - 86: exactly the card (status) and the intake (status and note) changed; the order is still settled and unpaid; not on
+    `/market` or profile lists; noise untouched;
+  - re-run refused;
+  - 86 again, identical.
+
+Run on `6ef7375a8c4e` from `flexsoar_mig_test_20261021`: `T081B_RUN_PASS`.
