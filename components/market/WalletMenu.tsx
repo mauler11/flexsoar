@@ -16,7 +16,8 @@
  */
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { FUNDING_AVAILABLE } from "@/lib/db/payment-v2";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { Banner } from "@/components/market/Banner";
@@ -252,11 +253,18 @@ export function WalletMenu() {
   const [tab, setTab] = useState<View>("deposit");
   const [balance, setBalance] = useState<BalancesResponse | null>(null);
 
+  const balancesUnavailable = useRef(false);
+
   useEffect(() => {
+    if (!FUNDING_AVAILABLE || balancesUnavailable.current) return;
     let live = true;
     async function load() {
       try {
         const res = await fetch("/api/solana/balances");
+        if (res.status === 501 || res.status === 503) {
+          balancesUnavailable.current = true;
+          return;
+        }
         if (!res.ok) return;
         const body = (await res.json()) as BalancesResponse;
         if (live && typeof body.usdcUnits === "number") setBalance(body);
@@ -265,6 +273,9 @@ export function WalletMenu() {
       }
     }
     if (open && !balance) load();
+    return () => {
+      live = false;
+    };
   }, [open, balance]);
 
   function close() {

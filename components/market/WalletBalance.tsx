@@ -11,7 +11,8 @@
  */
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { FUNDING_AVAILABLE } from "@/lib/db/payment-v2";
 import { formatSol, formatUsdc, formatFiatFromUsd } from "@/lib/solana/balances";
 import { useFiat } from "@/components/market/Fiat";
 
@@ -34,11 +35,20 @@ export function WalletBalance({
   const { balanceCode } = useFiat();
   const [balance, setBalance] = useState<BalancesResponse | null>(null);
 
+  const balancesUnavailable = useRef(false);
+
   useEffect(() => {
+    if (!FUNDING_AVAILABLE || balancesUnavailable.current) return;
     let live = true;
     async function load() {
+      if (!live || balancesUnavailable.current) return;
       try {
         const res = await fetch("/api/solana/balances");
+        if (res.status === 501 || res.status === 503) {
+          balancesUnavailable.current = true;
+          clearInterval(timer);
+          return;
+        }
         if (!res.ok) return;
         const body = (await res.json()) as BalancesResponse;
         if (live && typeof body.usdcUnits === "number") setBalance(body);
