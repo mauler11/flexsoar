@@ -6781,3 +6781,24 @@ Commit `1d25fe1` (+ this handoff). File `supabase/migrations/082_payment_v2_solo
   `PAYMENT_V2_INDEPENDENT_KEY_REQUIRED`, `RELEASE_DELAY`, `GOVERNOR_SET_INCOMPLETE`, `FUNDING_ENABLED`, `GOVERNANCE_*`, `GOVERNOR_REQUIRED`).
 - **Do not switch production to `solo` before the program upgrade is devnet-verified.**
 - Tests: `npm test` 637 (631 + 6 in `tests/migration-082.test.ts`), tsc and build clean.
+
+## 2026-10-22 - P1 program upgrade: seller-signed floor, release delay, vault governance (local only; NOT deployed)
+
+Full report, runbook and unverified list: **`docs/handoff/solana-p1-upgrade.md`**. Summary:
+
+- **Program:** `open_sale` requires the card owner's Ed25519 listing signature (floor + expiry) in the instruction before it;
+  `buy_sale` refuses `total < floor` and any buy after the seller's expiry; a passing authentication stamps a per-sale snapshot of the
+  governance-set `release_delay` and `authorize_release` waits for it; new `set_release_delay`. `ConfigV2` 586 -> 594 bytes,
+  `SaleV2` 961 -> 993 bytes (appended; old offsets unchanged). New error codes 6007-6012.
+- **Deviation from the approved design:** the listing message is **61 bytes** (`tag || SHA-256(domain|program|card|sale|generation) || floor || expiry`),
+  not 165. The 165-byte form makes the `open_sale` transaction 1,276 bytes vs the 1,232 limit, i.e. unsendable. The open transaction must
+  be fee-paid by the issuer (1,172 bytes).
+- **Found and fixed:** `install_governance_vault` panicked on chain (`Pubkey::is_on_curve` is `unimplemented!()` on SBF), so the approved
+  governance ceremony could not have run. Now uses the curve25519 syscall.
+- **Results:** Rust 8 -> 14; on-chain local-validator groups 84 -> 137 (incl. a CPI-signed PDA vault via a test-only mock, NOT Squads);
+  `npm test` 637 -> 645; `.so` `437c0c7b...64ecda`. CU on matched sales: `open_sale` +5,199, `buy_sale` +607, `authorize_release` +562.
+- **Migration 083 (DRAFT, container-tested `T083_RUN_PASS`, not staged):** additive seller-listing tables, two issuer RPCs and an attempts
+  trigger; changes no existing function body. Suite 88 (6 stages) passes and suite 83 is still 18 stages on top of it.
+- **Not done / unverified:** the real Squads program; Privy `signMessage` over the 61 bytes; `tests/payment-integration/integrated.mjs`
+  (stale: it will fail at `open_sale`); nothing cross-checks the on-chain delay with the DB mode; no worker calls the 083 RPCs.
+- **Do not switch production to `solo` before the devnet rehearsal in the runbook passes.**
