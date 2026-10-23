@@ -72,8 +72,9 @@ delete another track's.
   **Sole exception:** only when the current task prompt explicitly authorizes
   it, an agent on `track/payment-security` may author new forward migration
   files and execute them only against `flexsoar_payment_v2_integration_test`
-  (or another database explicitly named by that task) inside the verified
-  isolated container. Authorization is per task, never standing. Never target
+  or `flexsoar_payment_v2_test` inside the verified isolated container, or
+  another database explicitly named by that task. Authorization is per task,
+  never standing. Never target
   the cloud Supabase project or any shared or production database. Never edit
   applied migrations; fixes are new forward migrations. Without that explicit
   authorization, the prohibition above applies in full.   **Staging exception:** only when the current task prompt explicitly authorizes it, an
