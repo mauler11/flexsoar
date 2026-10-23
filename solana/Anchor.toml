@@ -5,6 +5,9 @@ skip-lint = false
 [programs.localnet]
 flexsoar_settlement = "CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF"
 
+[programs.devnet]
+flexsoar_settlement = "CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF"
+
 [provider]
 cluster = "http://127.0.0.1:8899"
 # Deliberately absent; local test operator supplies an EPHEMERAL wallet only.

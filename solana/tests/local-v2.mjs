@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync, writeFileSync, readlinkSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync, readlinkSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname, basename } from 'node:path';
 import net from 'node:net';
@@ -42,7 +42,7 @@ const roles=Object.fromEntries(roleNames.map(n=>[n,Keypair.generate()]));
 const seller=Keypair.generate(),treasury=Keypair.generate(),buyers=[Keypair.generate(),Keypair.generate(),Keypair.generate()],mint=Keypair.generate();
 const root=mkdtempSync(join(tmpdir(),'flexsoar-local-'));let child;let validatorErrors='';
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
-const program=new PublicKey('CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF');
+const program=new PublicKey(readFileSync(new URL('../programs/flexsoar-settlement/src/lib.rs',import.meta.url),'utf8').match(/declare_id!\("([1-9A-HJ-NP-Za-km-z]+)"\)/)[1]);
 const token=new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),ataProgram=new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
 const hash=s=>createHash('sha256').update(s).digest(),disc=n=>hash(`global:${n}`).subarray(0,8),u64=n=>{const b=Buffer.alloc(8);b.writeBigUInt64LE(BigInt(n));return b;};
 const keyBytes=k=>k.toBuffer(),pda=(...seeds)=>PublicKey.findProgramAddressSync(seeds,program)[0];
@@ -76,7 +76,7 @@ async function send(instructions,signers=[],tables=[],payer=bootstrap){
   return signature;
 }
 // Compute units are read back from the validator for the whole transaction (incl. precompile + budget ix).
-const cuNames=['open_sale','buy_sale','authorize_release','propose_governance_vault','cancel_governance_vault_proposal','set_release_delay','set_pause'],cuLog=[];
+const cuNames=['open_sale','buy_sale','authorize_release','propose_governance_vault','cancel_governance_vault_proposal','set_release_delay','set_pause','rotate_governance','configure'],cuLog=[];
 async function reportComputeUnits(){
   const byName={};
   for(const {name,signature}of cuLog){
@@ -496,6 +496,36 @@ try {
     await rejectsWith(FAULT.Authority,send([ix('set_pause',governKeys(),Buffer.from([0,0]))],gov.slice(0,2)));checks++;
     await send([viaMock(mockId,'set_release_delay',vaultKeys,i64(86_400))]);
     assert.equal((await readConfig()).readBigInt64LE(586),86_400n);checks++;
+    // D2 / R3-01: active vault excluded from EVERY dormant native seat, with and without another pending vault.
+    const members=gov.map(g=>g.publicKey);
+    const rotateVia=next=>viaMock(mockId,'rotate_governance',vaultKeys,Buffer.concat(next.map(k=>k.toBuffer())));
+    const unchangedAfter=async(code,instruction)=>{
+      const before=await readConfig();await rejectsWith(code,send([instruction]));
+      assert.deepEqual(await readConfig(),before,'refusal leaves the whole config unchanged');checks++;
+    };
+    for(const pending of [false,true]){
+      if(pending)await send([viaMock(mockId,'propose_governance_vault',vaultKeys,V2.toBuffer(),mockId2.toBuffer(),POLICY)]);
+      for(let seat=0;seat<3;seat++){
+        const next=[...members];next[seat]=V1;
+        await unchangedAfter(FAULT.VaultConflict,rotateVia(next));
+      }
+      if(pending){
+        for(let seat=0;seat<3;seat++){
+          const next=[...members];next[seat]=V2;
+          await unchangedAfter(FAULT.VaultConflict,rotateVia(next));
+        }
+        await send([viaMock(mockId,'cancel_governance_vault_proposal',vaultKeys)]);
+      }
+    }
+    // Native member first, proposal second: reject every seat, then restore the member set.
+    for(let seat=0;seat<3;seat++){
+      const next=[...members];next[seat]=V2;
+      const signature=await send([rotateVia(next)]);cuLog.push({name:'rotate_governance (whole tx, via mock CPI)',signature});
+      await unchangedAfter(FAULT.VaultConflict,viaMock(mockId,'propose_governance_vault',vaultKeys,V2.toBuffer(),mockId2.toBuffer(),POLICY));
+      await send([rotateVia(members)]);
+    }
+    // Preserve the existing active-vault/operational-role error, independently of the new member check.
+    await unchangedAfter(FAULT.Authority,viaMock(mockId,'configure',vaultKeys,rolesWith('reconciler',V1),u64(2_000_000),u64(10_000_000)));
     await send([viaMock(mockId,'set_pause',vaultKeys,Buffer.from([0,0]))]);
     assert.equal((await readConfig())[560],0);checks++;
     vaultChecks='exercised with CPI-signed PDA vaults (mock programs; NOT the Squads program)';
@@ -503,6 +533,13 @@ try {
   console.log(`P1 scenarios: ${checks-p1Start} groups passed; vault path: ${vaultChecks}`);
   await reportComputeUnits();
   console.log(`LOCAL VALIDATOR ONLY: ${checks} on-chain scenario groups passed; no database integration asserted.`);
+  if(mockSo){
+    // The normal instruction paths cannot create an accept-time member conflict. Exercise that defensive check in genesis
+    // fixtures, sequentially: the ~1.65 GB validator above MUST exit before any fixture validator is started.
+    child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),pause(5000)]);
+    assert.ok(child.exitCode!==null || child.signalCode!==null,'main validator must stop before genesis fixtures');
+    execFileSync(process.execPath,[new URL('./vault-conflict-genesis.mjs',import.meta.url).pathname,resolve(so),resolve(mockSo)],{stdio:'inherit',env:process.env});
+  }
 } finally {
   if(child&&child.exitCode===null){child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),pause(5000)]);}
   // Delete only the unique directory created by THIS helper, after process exit.

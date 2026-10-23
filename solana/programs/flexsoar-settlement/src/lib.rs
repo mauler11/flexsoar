@@ -61,6 +61,8 @@ pub mod flexsoar_settlement {
         govern(&ctx.accounts.config, &ctx.accounts.first, &ctx.accounts.second)?;
         require!(ctx.accounts.config.funding_paused, Fault::Paused);
         ctx.accounts.config.roles.validate(&governance)?;
+        // R3-01: the dormant native list must exclude the active vault as well as a pending vault.
+        require!(ctx.accounts.config.governance_vault == Pubkey::default() || !vault_conflicts(&ctx.accounts.config.roles, &governance, &ctx.accounts.config.governance_vault), Fault::VaultConflict);
         require!(ctx.accounts.config.pending_vault == Pubkey::default() || !vault_conflicts(&ctx.accounts.config.roles, &governance, &ctx.accounts.config.pending_vault), Fault::VaultConflict);
         ctx.accounts.config.governance = governance; Ok(())
     }
@@ -282,7 +284,7 @@ fn govern(c: &ConfigV2, first: &Signer, second: &Signer) -> Result<()> {
     Ok(())
 }
 /// True when `vault` is already used as an operational role key or a native governance member. A vault shares no key with any
-/// role (R2-04): checked at proposal, again at acceptance, and by `configure` / `rotate_governance` while a proposal is pending.
+/// role or native member: checked at proposal and acceptance, and for both active and pending vaults on member rotation.
 fn vault_conflicts(roles: &Roles, governance: &[Pubkey;3], vault: &Pubkey) -> bool {
     [roles.issuer,roles.inventory,roles.receiver,roles.authenticator,roles.reviewer,roles.release,roles.reconciler,roles.guardian].contains(vault) || governance.contains(vault)
 }
