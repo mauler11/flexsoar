@@ -129,7 +129,7 @@ END $separated$;
 
 -- G: governance RPCs.
 DO $governance$
-DECLARE p1 uuid;p2 uuid;p3 uuid;r jsonb;n integer;
+DECLARE p1 uuid;p2 uuid;p3 uuid;r jsonb;n integer;disabled integer;n_after integer;
   solo jsonb:='{"separation":"solo","governors":2,"delaySeconds":86400}';
 BEGIN
  PERFORM pg_temp.act(pg_temp.s('F_receiver'));
@@ -142,8 +142,9 @@ BEGIN
  PERFORM pg_temp.ok('G1 only an active governor proposes; no mode change while funding is enabled');
  PERFORM pg_temp.act(pg_temp.s('guardian'));
  SELECT count(*) INTO n FROM payment_v2.networks WHERE funding_enabled;
- PERFORM pg_temp.assert_true(public.fn_payment_v2_disable_funding()=n
-  AND NOT EXISTS(SELECT 1 FROM payment_v2.networks WHERE funding_enabled),'guardian disabled every network that was funding-enabled');
+ SELECT public.fn_payment_v2_disable_funding() INTO disabled;
+ SELECT count(*) INTO n_after FROM payment_v2.networks WHERE funding_enabled;
+ PERFORM pg_temp.assert_true(disabled=n AND n_after=0,'guardian disabled every network that was funding-enabled');
  PERFORM pg_temp.assert_true(public.fn_payment_v2_disable_funding()=0,'disable is idempotent');
  PERFORM pg_temp.ok('G2 a single guardian disables funding everywhere');
  PERFORM pg_temp.act(pg_temp.s('gov1'));

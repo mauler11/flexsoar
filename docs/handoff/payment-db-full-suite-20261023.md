@@ -340,3 +340,79 @@ Files after the stop were not run in the full target: 84, 85, 86, 87, 88, 89, 90
 SHA-256 for 084: `25dfcd88a5a23b47dacc046fd2e6e595271b3431738b86e9f675e12cfb418283` (unchanged). SHA-256 for edited 085: `a10ba3cf0c3b2b4e703cf93c6618e75d9d40984ce60cf45440bbe6190c80b7cf`.
 
 Dropped `flexsoar_payment_v2_test` and revoked/dropped all disposable `payment_db_test_%` and `payment_db_race_%` logins. Final cluster query found no matching test databases or logins. The 078 source and pre-existing helper databases were preserved. No staging, production, or network database was contacted.
+
+## W2-P1-FIX continuation — G2 snapshot correction and full acceptance (2026-10-23)
+
+### G2 proof and change
+
+The test bug was reproduced before editing `83_solo_mode.sql`, on the same seven synthetic enabled network rows in one rollback-only transaction on the isolated 078→085 target. The proof recorded baseline `n=7`. The combined statement (`fn_payment_v2_disable_funding()=n AND NOT EXISTS(... funding_enabled ...)`) returned false. A controlled subtransaction rollback restored the same seven rows; the separated RPC statement returned `7`, and the next statement counted `0` enabled rows. Output: `G2_PROOF combined_result=f, before=7, split_rpc=7, split_remaining=0`. No migration/function change was needed. The edited G2 now records `n`, calls the guardian RPC in its own SQL statement, then counts remaining enabled networks in a following statement and asserts the RPC count equals `n` and the remaining count is zero. The idempotence assertion and other G2 checks are unchanged.
+
+The edit is in `tests/payment-db/83_solo_mode.sql`. Full 83 passed all 18 stages on the final 078→085 acceptance target, including G2. It also passed through the stage-specific 082 and 083 drivers and the 084 driver.
+
+### Full 078→085 target and acceptance
+
+Container: `733813cfd1b173d984ef248ed6518b921cd37e3c3fdf57c30d51f1c33b290518`, rechecked running, `NetworkMode=none`, no port bindings, `Privileged=false`, only loopback. Source was the preserved `flexsoar_mig_test_20261021` 078 database. All database sessions used `-h 127.0.0.1`; no network, staging, production, or external database was contacted. Migrations 079, 080, 081, 081b, 082, 083, 084 and 085 passed as `postgres` in a fresh `flexsoar_payment_v2_test` clone.
+
+Standard SQL test command used one psql process per file, with the file-specific login shown below:
+
+```text
+docker exec -e PGOPTIONS='-c payment_v2.test_identity=synthetic-payment-v2-only' \
+  733813cfd1b173d984ef248ed6518b921cd37e3c3fdf57c30d51f1c33b290518 \
+  psql -X -v ON_ERROR_STOP=1 -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY \
+  -h 127.0.0.1 -U LOGIN -d flexsoar_payment_v2_test -f /tmp/w2g2proof/FILE.sql
+```
+
+| File / case | Login and relevant variables | Result |
+|---|---|---|
+| 03, 04, 05, 06, 07, 08, 09, 10, 20, 30 | `supabase_admin`; 07 received the offline comparison JSON from `make-encoding-vectors.mjs permit` | PASS; actual 690-byte SQL/TypeScript permit comparison matched |
+| 35 | `supabase_admin` | PASS |
+| 36, 37, 38, 39 | `payment_db_test_issuer`, `_verifier`, `_settler`, `_executor` respectively | PASS |
+| 40 concurrency setup; 40 notifier | `supabase_admin`; then `payment_db_test_notifier` | PASS |
+| 41/42, `race_mode=0` and `race_mode=1` | separate interactive `supabase_admin` sessions | PASS; B observed `Lock|transactionid` before A committed, for both modes |
+| 45 export / offline signed fixture / 47 | `payment_db_test_executor`; signed fixture created locally with a new valueless ephemeral key, never sent | PASS; one stale temp output name collided with an older file, then the same stage passed with a unique temp filename |
+| 46 | `supabase_admin` | PASS |
+| 50 | `supabase_admin` | PASS |
+| `conflicting_signature` (51/52/53) | settler A, verifier B, `worker_role` values `payment_v2_settler` / `payment_v2_verifier` | PASS; transaction lock wait observed |
+| `conflicting_attempt` (51/52/53) | settler A, verifier B | PASS; transaction lock wait observed |
+| `release_refund` (51/52, 58/59, 53) | verifier A/B; settler consumer A/B | PASS; arbitration and terminal-consumption lock waits observed |
+| `refund_release` (51/52, 58/59, 53) | verifier A/B; settler consumer A/B | PASS; arbitration and terminal-consumption lock waits observed |
+| `funding_cancel` (51/52/53) | `supabase_admin` A; settler B | PASS; transaction lock wait observed |
+| `funding_revoke` (51/52/53) | settler A; verifier B | PASS; transaction lock wait observed |
+| `revoked_funding` (51/52/53) | verifier A/B | PASS; transaction lock wait observed |
+| `rollback` (51/52, 60, 53) | settler A/B; A rolled back, then ran 60 in the same backend | PASS; transaction lock wait observed |
+| `operations` (57, 51/52/53) | executor A/B (`payment_db_race_executor_a/b`, `payment_v2_executor`) | PASS; both transactions overlapped; distinct eligible rows/leases confirmed by 53. No lock wait is expected for `SKIP LOCKED`. |
+| `outbox` (57, 51/52/53) | notifier A/B (`payment_db_race_notifier_a/b`, `payment_v2_notifier`) | PASS; both transactions overlapped; distinct rows/leases confirmed |
+| `operation_takeover` (57, 51, 54, 52, 55, 53) | executor A/B; stale completion as original A login | PASS; same work id, new lease, stale A refused |
+| `outbox_takeover` (57, 51, 54, 52, 55, 53) | notifier A/B; stale completion as original A login | PASS; same work id, new lease, stale A refused |
+| 70, 71 | `supabase_admin`; waited 35 seconds between setup and recovery | PASS |
+| 83 | `supabase_admin` | PASS, 18/18 stages; G2 uses separate statements |
+| 88, 89 | `supabase_admin` | PASS; 6 stages in 88 and all 89 assertions passed |
+| 91 | `supabase_admin` | PASS |
+| 92 | real `payment_db_test_executor` login | PASS; missing UUID, wrong lease, `open_sale`, and `revoke_sale` refusals identical |
+| 93 | real `payment_db_test_issuer` login | PASS; issuer queue remains available |
+| 94 | `supabase_admin` | PASS; refused executor attempts left issuer operations unchanged |
+| 90 | same isolated test administrator `supabase_admin` | PASS; durable final row printed `PAYMENT_DB_FINAL_ACCEPTANCE_COMPLETE`, suite version 3, 37 required checkpoints |
+
+`56_consume_canonical_terminal.sql` was not run because this run used the README-required concurrent 58/59 terminal-consumer path for both terminal races. `53` was run after each completed case and 90 accepted all required checkpoints.
+
+### Stage-specific migration test drivers
+
+The migration-specific 080/081/081b tests require pre-migration catalogs, so they ran on fresh stage copies with the documented host drivers, in the same isolated container and from the preserved 078 source:
+
+- `run_080_container.sh ... flexsoar_mig_test_20261021 ...`: **T080_RUN_PASS**. Nonadmin/enrolled refusals left state unchanged; main apply moved two stamps; post-apply assertions and refused reapply matched (28 PASS lines).
+- `run_081_container.sh ... flexsoar_mig_test_20261021 ...`: **T081_RUN_PASS**. 84 before/after ACL checks passed; refused missing-080 and reapply left state unchanged.
+- `run_081b_container.sh ... flexsoar_mig_test_20261021 ...`: **T081B_RUN_PASS**. All refusal variants, absent no-op, main exact-row assertions and refused reapply passed.
+- `run_082_container.sh ... flexsoar_mig_test_20261021 ...`: **T082_RUN_PASS**. 082 missing-081/funding-enabled/reapply guards and updated 83 passed.
+- `run_083_container.sh ... flexsoar_082_pre ...`: **T083_RUN_PASS**. 083 missing-082/funding-enabled/reapply guards, 88 and 83 passed.
+- First `run_084_container.sh` attempt stopped at `35_workers_setup.sql` because the main full-suite run's disposable issuer login still existed. Its cleanup trap removed the task database and test logins; verified none remained. A fresh retry from 078 passed all 084 drift/funding/reapply cases, 83/88/89, 91–94 and printed `T085_FOCUSED_RUN_PASS`.
+
+### Project gates, hashes and cleanup
+
+- `npm test` default worker count: 793 passed, two tests timed out at 5 seconds (`tests/payment-db-adapters.test.ts` internal-route test and `tests/legacy-removal.test.ts` path scan). Rerun with `npm test -- --maxWorkers=2`: **39 files, 795 tests passed**.
+- `npx tsc --noEmit`: completed with no diagnostics.
+- `npm run build`: completed successfully; Next 16.3.8 compiled, type checking and all 35 static pages completed.
+- SHA-256 084: `25dfcd88a5a23b47dacc046fd2e6e595271b3431738b86e9f675e12cfb418283` (unchanged).
+- SHA-256 085: `a10ba3cf0c3b2b4e703cf93c6618e75d9d40984ce60cf45440bbe6190c80b7cf` (unchanged).
+- Dropped `flexsoar_payment_v2_test` and all task-created 080–084 helper databases. Verified no `payment_db_test_%` or `payment_db_race_%` roles remain. Preserved `flexsoar_mig_test_20261021` (078). Final container check remained `none|{}|false|running`, loopback only.
+
+This handoff supersedes the prior G2 stop finding above. Only `tests/payment-db/83_solo_mode.sql` and this handoff are changed for this continuation. No migration, application source or package metadata changed. Next step: independent R5c review.
