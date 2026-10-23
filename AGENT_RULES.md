@@ -76,7 +76,7 @@ delete another track's.
   another database explicitly named by that task. Authorization is per task,
   never standing. Never target
   the cloud Supabase project or any shared or production database. Never edit
-  applied migrations; fixes are new forward migrations. Without that explicit
+  applied migrations; fixes are new forward migrations. 'Applied' means applied to flexsoar-staging or production. A migration that has only been replayed in the isolated container (and whose staging/production runbook has not been run) may be edited in place; record the edit and the new sha256 in the handoff. Once a migration is applied to staging or production, it is frozen. Without that explicit
   authorization, the prohibition above applies in full.   **Staging exception:** only when the current task prompt explicitly authorizes it, an
   agent on `track/payment-security` may connect over the network to the Supabase project
   `flexsoar-staging` (project ref `krkydvvvtszceutprfmy`) and NO other cloud project, and there
