@@ -2,13 +2,12 @@
 \set ON_ERROR_STOP on
 \if :{?payment_v2_test_ack}
 \else
-\echo 'Refusing: pass -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY after independent target review.'
-\quit 3
+DO $guard$ BEGIN RAISE EXCEPTION 'REFUSING: pass -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY after independent target review'; END $guard$;
 \endif
 SELECT :'payment_v2_test_ack' = 'ISOLATED_SYNTHETIC_ONLY' AS acknowledged \gset
 \if :acknowledged
 \else
-\quit 3
+DO $guard$ BEGIN RAISE EXCEPTION 'REFUSING: payment_v2_test_ack must equal ISOLATED_SYNTHETIC_ONLY'; END $guard$;
 \endif
 DO $target$ BEGIN
  IF current_database()<>'flexsoar_payment_v2_test' OR inet_server_addr() IS NULL OR inet_server_addr() NOT IN('127.0.0.1'::inet,'::1'::inet)

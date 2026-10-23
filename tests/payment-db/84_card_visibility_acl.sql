@@ -1,11 +1,11 @@
 -- 081 container test: fn_set_card_visibility EXECUTE, before and after 081. psql only, never npm.
 -- Read-only in effect: synthetic fixtures and every probe are rolled back.
 --   psql -X -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -v phase=before|after -f 84_card_visibility_acl.sql
+\set ON_ERROR_STOP on
 \ir 00_target_guard.sql
 \if :{?phase}
 \else
-\echo 'Refusing: pass -v phase=before or -v phase=after'
-\quit 3
+DO $guard$ BEGIN RAISE EXCEPTION 'REFUSING: pass -v phase=before or -v phase=after'; END $guard$;
 \endif
 \set QUIET 1
 BEGIN;

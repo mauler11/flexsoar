@@ -144,6 +144,11 @@ BEGIN
   WHERE s.id=p_subject_id AND u.auth_id IS NOT DISTINCT FROM u.id
    AND (p_kind<>'prepare_recovery' OR s.issuer_terms->>'id'=p_subject_id::text);
   IF NOT FOUND THEN IF p_kind='prepare_recovery' THEN RETURN jsonb_build_object('found',false); END IF; RAISE EXCEPTION 'PAYMENT_V2_ISSUER_SUBJECT_MISSING'; END IF;
+   IF r.id IS NULL OR r.listing_id IS NULL OR r.owner_id IS NULL OR r.owner_auth_id IS NULL OR r.card_id IS NULL OR r.network_id IS NULL
+    OR r.state IS NULL OR r.seller_wallet IS NULL OR r.genesis IS NULL OR r.program IS NULL OR r.config IS NULL OR r.mint IS NULL
+    OR r.token_program IS NULL OR r.issuer IS NULL OR r.total_units IS NULL OR r.fx_snapshot IS NULL OR r.valid_from IS NULL
+    OR r.expires_at IS NULL OR r.prepared_at IS NULL OR r.tolerance_bps IS NULL OR r.issuer_terms IS NULL THEN
+    RAISE EXCEPTION 'PAYMENT_V2_ISSUER_SUBJECT_MISSING'; END IF;
   out_json:=jsonb_build_object('found',true,'saleId',r.id,'listingId',r.listing_id,'ownerId',r.owner_id,'ownerAuthId',r.owner_auth_id,'cardId',r.card_id,'networkId',r.network_id,'state',r.state,'sellerWallet',payment_v2.b58(r.seller_wallet),'quoteTotalUnits',r.total_units::text,'quoteValidFrom',r.valid_from::text,'quoteExpiresAt',r.expires_at::text,'toleranceBps',r.tolerance_bps,'preparedAt',r.prepared_at,'fxSnapshot',r.fx_snapshot,'issuerTerms',r.issuer_terms);
   RETURN out_json;
  ELSIF p_kind='attempt' THEN
@@ -168,14 +173,18 @@ END $$;
 
 CREATE FUNCTION public.fn_payment_v2_consume_issuer_nonce(p_kid text,p_nonce bytea) RETURNS timestamptz
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
-DECLARE v_now timestamptz:=clock_timestamp();active_kid text;v_exp timestamptz;
+DECLARE v_now timestamptz:=clock_timestamp();active_kid text;active_count integer;v_exp timestamptz;
 BEGIN
  PERFORM payment_v2.require_role('payment_v2_issuer');
  IF p_kid IS NULL OR p_nonce IS NULL OR octet_length(p_nonce)<>16 THEN RAISE EXCEPTION 'PAYMENT_V2_ISSUER_NONCE_MALFORMED'; END IF;
  PERFORM pg_advisory_xact_lock(860086);
- SELECT e.kid INTO active_kid FROM payment_v2.issuer_hmac_key_events e
-  WHERE e.event='activated' AND NOT EXISTS(SELECT 1 FROM payment_v2.issuer_hmac_key_events z WHERE z.kid=e.kid AND z.id>e.id)
-  ORDER BY e.id DESC LIMIT 1;
+  SELECT count(*) INTO active_count FROM (
+   SELECT DISTINCT ON(e.kid) e.kid,e.event FROM payment_v2.issuer_hmac_key_events e ORDER BY e.kid,e.id DESC
+  ) latest WHERE latest.event='activated';
+  IF active_count<>1 THEN RAISE EXCEPTION 'PAYMENT_V2_ISSUER_KEY_STATE_INVALID'; END IF;
+  SELECT latest.kid INTO active_kid FROM (
+   SELECT DISTINCT ON(e.kid) e.kid,e.event FROM payment_v2.issuer_hmac_key_events e ORDER BY e.kid,e.id DESC
+  ) latest WHERE latest.event='activated';
  IF active_kid IS DISTINCT FROM p_kid THEN RAISE EXCEPTION 'PAYMENT_V2_ISSUER_KEY_INACTIVE'; END IF;
  v_exp:=v_now+interval '10 minutes';
  INSERT INTO payment_v2.issuer_hmac_nonces(kid,nonce,consumed_at,expires_at) VALUES(p_kid,p_nonce,v_now,v_exp);
@@ -207,6 +216,11 @@ BEGIN
  LOOP
   SELECT * INTO s FROM payment_v2.sales WHERE id=op.sale_id FOR UPDATE;
   IF NOT FOUND OR s.state<>'opening' OR NOT s.fence THEN CONTINUE; END IF;
+   -- Operation row SKIP LOCKED alone does not serialize duplicate operations
+   -- for one sale. The sale lock is held here; skip this sale if a sibling
+   -- operation still owns a live open_sale lease.
+   IF EXISTS(SELECT 1 FROM payment_v2.operations other WHERE other.sale_id=s.id AND other.action='open_sale' AND other.id<>op.id
+    AND other.state='leased' AND other.lease_id IS NOT NULL AND other.leased_by IS NOT NULL AND other.lease_until>clock_timestamp()) THEN CONTINUE; END IF;
   SELECT * INTO l FROM payment_v2.sale_listings WHERE sale_id=s.id FOR SHARE;
   IF NOT FOUND OR l.expires_at<=extract(epoch FROM v_now) OR octet_length(l.message)<>61 OR octet_length(l.signature)<>64 OR octet_length(l.signer)<>32 OR octet_length(l.binding)<>32 OR l.binding<>substring(l.message FROM 14 FOR 32) THEN CONTINUE; END IF;
   IF op.issuer_fencing_token=9223372036854775807 THEN RAISE EXCEPTION 'PAYMENT_V2_ISSUER_FENCE_EXHAUSTED'; END IF;
@@ -228,7 +242,7 @@ BEGIN
  IF NOT FOUND OR o.action<>'open_sale' OR o.state<>'leased' OR o.lease_id IS DISTINCT FROM p_lease OR o.issuer_fencing_token IS DISTINCT FROM p_token OR o.leased_by IS DISTINCT FROM session_user OR o.lease_until IS NULL OR o.lease_until<=v_now THEN RAISE EXCEPTION 'PAYMENT_V2_OPERATION_LEASE_LOST'; END IF;
  SELECT * INTO s FROM payment_v2.sales WHERE id=o.sale_id FOR UPDATE;
  SELECT * INTO l FROM payment_v2.sale_listings WHERE sale_id=s.id FOR SHARE;
- IF s.state<>'opening' OR NOT s.fence OR NOT FOUND OR l.expires_at<=extract(epoch FROM v_now) OR NOT EXISTS(
+  IF s.state<>'opening' OR NOT s.fence OR NOT FOUND OR l.expires_at<=extract(epoch FROM v_now) OR octet_length(l.message)<>61 OR octet_length(l.signature)<>64 OR octet_length(l.signer)<>32 OR octet_length(l.binding)<>32 OR l.binding<>substring(l.message FROM 14 FOR 32) OR l.min_total_units<=0 OR NOT EXISTS(
   SELECT 1 FROM payment_v2.networks n JOIN payment_v2.inventory i ON i.card_id=s.card_id AND i.item_id=s.item_id AND NOT i.quarantined
    JOIN public.listings pl ON pl.id=s.listing_id AND pl.card_id=s.card_id AND pl.seller_id=s.seller_id
    JOIN payment_v2.wallet_accounts wa ON wa.user_id=s.seller_id AND wa.network_id=s.network_id AND wa.wallet=s.seller_wallet AND wa.token_account=s.seller_token
@@ -248,13 +262,13 @@ BEGIN
  IF NOT FOUND OR o.action<>'open_sale' OR o.state<>'leased' OR o.lease_id IS DISTINCT FROM p_lease OR o.issuer_fencing_token IS DISTINCT FROM p_token OR o.leased_by IS DISTINCT FROM session_user OR o.lease_until IS NULL OR o.lease_until<=v_now THEN RAISE EXCEPTION 'PAYMENT_V2_OPERATION_LEASE_LOST'; END IF;
  SELECT * INTO s FROM payment_v2.sales WHERE id=o.sale_id FOR UPDATE;
  SELECT * INTO l FROM payment_v2.sale_listings WHERE sale_id=s.id FOR SHARE;
- IF s.state<>'opening' OR NOT s.fence OR NOT FOUND OR l.expires_at<=extract(epoch FROM v_now) OR NOT EXISTS(
+  IF s.state<>'opening' OR NOT s.fence OR NOT FOUND OR l.expires_at<=extract(epoch FROM v_now) OR octet_length(l.message)<>61 OR octet_length(l.signature)<>64 OR octet_length(l.signer)<>32 OR octet_length(l.binding)<>32 OR l.binding<>substring(l.message FROM 14 FOR 32) OR l.min_total_units<=0 OR NOT EXISTS(
   SELECT 1 FROM payment_v2.networks n JOIN payment_v2.inventory i ON i.card_id=s.card_id AND i.item_id=s.item_id AND NOT i.quarantined
    JOIN public.listings pl ON pl.id=s.listing_id AND pl.card_id=s.card_id AND pl.seller_id=s.seller_id
    JOIN payment_v2.wallet_accounts wa ON wa.user_id=s.seller_id AND wa.network_id=s.network_id AND wa.wallet=s.seller_wallet AND wa.token_account=s.seller_token
   WHERE n.id=s.network_id AND n.funding_enabled AND (s.network_snapshot).genesis=n.genesis AND (s.network_snapshot).program=n.program
    AND (s.network_snapshot).config=n.config AND (s.network_snapshot).mint=n.mint AND (s.network_snapshot).token_program=n.token_program AND (s.network_snapshot).issuer=n.issuer) THEN RAISE EXCEPTION 'PAYMENT_V2_OPERATION_LEASE_LOST'; END IF;
- IF p_outcome NOT IN('send_ack','send_unknown','preexisting_exact_pda','conflict','retryable_failure') THEN RAISE EXCEPTION 'PAYMENT_V2_ISSUER_FINISH_OUTCOME'; END IF;
+  IF p_outcome IS NULL OR p_outcome NOT IN('send_ack','send_unknown','preexisting_exact_pda','conflict','retryable_failure') THEN RAISE EXCEPTION 'PAYMENT_V2_ISSUER_FINISH_OUTCOME'; END IF;
  IF (p_outcome IN('send_ack','send_unknown','preexisting_exact_pda'))<>(p_signature IS NOT NULL) THEN RAISE EXCEPTION 'PAYMENT_V2_ISSUER_SIGNATURE_SHAPE'; END IF;
  IF p_signature IS NOT NULL THEN
   IF p_signature !~ '^[1-9A-HJ-NP-Za-km-z]{64,88}$' THEN RAISE EXCEPTION 'PAYMENT_V2_ISSUER_SIGNATURE_SHAPE'; END IF;
@@ -297,6 +311,7 @@ BEGIN
    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role,payment_v2_issuer,payment_v2_verifier,payment_v2_settler,payment_v2_executor,payment_v2_notifier',f);
  END LOOP;
  ALTER FUNCTION payment_v2.guard_issuer_hmac_event() OWNER TO payment_v2_owner;
+  REVOKE ALL ON FUNCTION payment_v2.guard_issuer_hmac_event() FROM PUBLIC,anon,authenticated,service_role,payment_v2_issuer,payment_v2_verifier,payment_v2_settler,payment_v2_executor,payment_v2_notifier;
  ALTER FUNCTION payment_v2.operations_terms_guard_086() OWNER TO payment_v2_owner;
  ALTER FUNCTION payment_v2.cleanup_issuer_nonces(integer) OWNER TO payment_v2_owner;
  REVOKE ALL ON FUNCTION payment_v2.cleanup_issuer_nonces(integer) FROM PUBLIC,anon,authenticated,service_role,payment_v2_issuer,payment_v2_verifier,payment_v2_settler,payment_v2_executor,payment_v2_notifier;
@@ -310,13 +325,23 @@ GRANT EXECUTE ON FUNCTION public.fn_payment_v2_renew_open_sale_lease(uuid,uuid,b
 GRANT EXECUTE ON FUNCTION public.fn_payment_v2_finish_open_sale(uuid,uuid,bigint,text,text) TO payment_v2_issuer;
 
 DO $post$
-DECLARE r record;fn regprocedure;
+DECLARE r record;fn regprocedure;acl_role text;
 BEGIN
  IF EXISTS(SELECT 1 FROM m086_before b JOIN pg_proc p ON p.oid=b.oid WHERE md5(replace(p.prosrc,chr(13),'')) IS DISTINCT FROM b.body OR p.proowner IS DISTINCT FROM b.proowner OR p.proacl IS DISTINCT FROM b.proacl OR p.prosecdef IS DISTINCT FROM b.prosecdef OR p.proconfig IS DISTINCT FROM b.proconfig)
   OR EXISTS(SELECT 1 FROM m086_before b WHERE NOT EXISTS(SELECT 1 FROM pg_proc p WHERE p.oid=b.oid)) THEN RAISE EXCEPTION 'PAYMENT_V2_ISSUER_PREEXISTING_FUNCTION_CHANGED'; END IF;
  IF EXISTS(SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE (n.nspname='payment_v2' OR (n.nspname='public' AND p.proname LIKE 'fn\_payment\_v2\_%')) AND p.oid NOT IN(SELECT oid FROM m086_before) AND
   (p.proowner<>'payment_v2_owner'::regrole OR NOT p.prosecdef OR p.proconfig IS DISTINCT FROM ARRAY['search_path=pg_catalog']::text[])) THEN RAISE EXCEPTION 'PAYMENT_V2_ISSUER_FUNCTION_HARDENING'; END IF;
  IF EXISTS(SELECT 1 FROM pg_class c WHERE c.oid IN('payment_v2.issuer_hmac_keys'::regclass,'payment_v2.issuer_hmac_key_events'::regclass,'payment_v2.issuer_hmac_nonces'::regclass) AND (NOT c.relrowsecurity OR NOT c.relforcerowsecurity OR EXISTS(SELECT 1 FROM aclexplode(c.relacl) a WHERE a.grantee NOT IN(c.relowner) OR a.privilege_type<>'SELECT' AND a.privilege_type<>'INSERT' AND a.privilege_type<>'UPDATE' AND a.privilege_type<>'DELETE' AND a.privilege_type<>'TRUNCATE' AND a.privilege_type<>'REFERENCES' AND a.privilege_type<>'TRIGGER' AND a.privilege_type<>'MAINTAIN'))) THEN RAISE EXCEPTION 'PAYMENT_V2_ISSUER_TABLE_HARDENING'; END IF;
+  IF EXISTS(SELECT 1 FROM pg_proc p WHERE p.oid='payment_v2.guard_issuer_hmac_event()'::regprocedure AND EXISTS(
+    SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')) THEN RAISE EXCEPTION 'PAYMENT_V2_ISSUER_EVENT_GUARD_ACL'; END IF;
+  IF EXISTS(SELECT 1 FROM pg_class s WHERE s.oid='payment_v2.issuer_hmac_key_events_id_seq'::regclass AND
+    (s.relowner<>'payment_v2_owner'::regrole OR EXISTS(SELECT 1 FROM aclexplode(coalesce(s.relacl,acldefault('S',s.relowner))) a WHERE a.grantee<>s.relowner))) THEN
+   RAISE EXCEPTION 'PAYMENT_V2_ISSUER_SEQUENCE_ACL'; END IF;
+  FOREACH acl_role IN ARRAY ARRAY['anon','authenticated','service_role','payment_v2_issuer','payment_v2_verifier','payment_v2_executor','payment_v2_settler','payment_v2_notifier'] LOOP
+   IF has_function_privilege(acl_role,'payment_v2.guard_issuer_hmac_event()'::regprocedure,'EXECUTE') THEN RAISE EXCEPTION 'PAYMENT_V2_ISSUER_EVENT_GUARD_ACL'; END IF;
+   IF has_sequence_privilege(acl_role,'payment_v2.issuer_hmac_key_events_id_seq','USAGE') OR has_sequence_privilege(acl_role,'payment_v2.issuer_hmac_key_events_id_seq','SELECT') OR has_sequence_privilege(acl_role,'payment_v2.issuer_hmac_key_events_id_seq','UPDATE') THEN
+    RAISE EXCEPTION 'PAYMENT_V2_ISSUER_SEQUENCE_ACL'; END IF;
+  END LOOP;
  IF NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='payment_v2.operations'::regclass AND tgname='immutable_terms' AND NOT tgisinternal AND tgenabled='O' AND tgfoid='payment_v2.operations_terms_guard_086()'::regprocedure)
   OR (SELECT count(*) FROM pg_trigger WHERE tgrelid='payment_v2.operations'::regclass AND tgname='immutable_terms' AND NOT tgisinternal)<>1 THEN RAISE EXCEPTION 'PAYMENT_V2_ISSUER_OPERATION_TERMS_GUARD_POSTGUARD'; END IF;
  FOR r IN SELECT x.role_name,f.allowed,f.sig FROM unnest(ARRAY['anon','authenticated','service_role','payment_v2_issuer','payment_v2_verifier','payment_v2_executor','payment_v2_settler','payment_v2_notifier']) x(role_name)

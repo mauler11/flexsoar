@@ -6977,3 +6977,30 @@ SHA-256: 086 `42158d31b3be6a5a542b4f9234bc27137ad24da6579fb5ed815237ada9343d64`.
 After adding the 086 error-mapping unit test: `npm test` passed 40 files / 797 tests; `npx tsc --noEmit` completed with no diagnostics; `npm run build` completed successfully on Next.js 16.3.8. No application service code, key material, deployment, or migration beyond 086 was added.
 
 Next step: independent code review R7. Do not apply this migration outside the authorized isolated container.
+
+### P2b-086-fix continuation (2026-10-24)
+
+Applied the six R7 fixes to the still-unapplied migration 086 and its focused suite:
+
+- `claim_open_sale` checks for another live `open_sale` lease after locking the sale. The corrected test proves at most one active lease per sale under same-sale contention while a different sale remains claimable. Against a scratch copy of the pre-fix 086 body, that regression failed with a second active lease (`actual 1`, expected 0).
+- `finish_open_sale` refuses NULL outcomes for both NULL and non-NULL signatures; the suite proves operation and lease fields remain unchanged.
+- The sale and recovery subject reader now hard-refuses a missing quote row and NULL required row fields.
+- The HMAC event trigger function is explicitly revoked from PUBLIC and runtime roles. Its owner and ACL, the identity-sequence owner/ACL, and effective runtime privileges are checked by the migration postguard and runtime suite probes.
+- Nonce consumption requires exactly one active key after taking the advisory lock, and that key must equal the requested `kid`. The isolated suite injects a multi-active lifecycle state with owner-level trigger bypass, confirms refusal, and restores the fixture.
+- Renew and finish recheck listing byte shape, binding equality, positive minimum units, and persisted listing/network bindings; deliberately corrupted bindings are refused without changing lease state.
+
+The focused test harness now supports either explicitly named isolated database. It failed when first invoked after the full worker suite because its fixture sale was already terminal; it passed on a separate fresh 078-to-086 integration clone, after synthetic worker setup and before terminal processing. The full payment-db acceptance used its own fresh 078-to-086 `_test` clone.
+
+#### Fail-closed psql guards
+
+Fixed psql guard fall-through in the payment-db target guard, signed-storage and 081 ACL test scripts, and integration outcome assertions. Guards now use `ON_ERROR_STOP` and a SQL `RAISE EXCEPTION`, and every psql runner supplies `-v ON_ERROR_STOP=1`. Added `00_guard_fail_closed_selftest.mjs`; on the isolated test target, missing acknowledgement exited non-zero and the post-guard sentinel remained false. A repository-wide `tests/` scan now finds no `\quit` commands with arguments. The 083-085 production kit was inspected read-only: its production guard raises under `ON_ERROR_STOP`, `prod.py` invokes psql with `ON_ERROR_STOP=1`, and no `\quit` pattern was found. No kit files were changed.
+
+The previous polluted `flexsoar_payment_v2_test` was dropped after all four leftover psql clients were terminated. The fresh target was cloned from the preserved 078 database. The first 079 replay attempt as the restricted `postgres` role failed before commit with a public-schema permission error; the connection closed and the transaction rolled back. The complete 079-086 replay then passed as the isolated container superuser `supabase_admin`. Migration SHA-256 is now `fae4075172f57c89d09c71a2ad6b8d8aa1b91b8b936261ffa3f4aaca892e2248`.
+
+#### Verification
+
+- Fresh 078-to-086 `_test` replay passed. The payment-db acceptance path through 94 passed, including the mode-0 and mode-1 transaction-lock races, eight evidence/funding/rollback races, both terminal-consumer races, queue `SKIP LOCKED`, same-work-ID takeovers, stale-worker refusals, expiry recovery, and suites 83 (18 stages), 88 (6 stages), 89 (7 stages), and 92-94. The committed 90 result reports suite version 3 and 37 required checkpoints and printed `PAYMENT_DB_FINAL_ACCEPTANCE_COMPLETE`.
+- On a separate fresh 078-to-086 `_integration_test` clone, the focused `086_issuer_contract.mjs` completed with `T086|PASS`, including the six R7 findings and all listed refusal cases. No background psql client remains.
+- Production and staging were not contacted. The isolated container remained network-none with no port bindings; its databases were limited to the named test targets and preserved 078 source.
+
+The updated migration remains subject to independent R7b code review. It must not be edited after that review accepts it or applied outside an explicitly authorized isolated container task.

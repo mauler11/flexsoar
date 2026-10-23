@@ -6,7 +6,7 @@ SELECT current_database()='flexsoar_payment_v2_integration_test'
  AND inet_server_addr() IS NOT DISTINCT FROM '127.0.0.1'::inet AS correct_target \gset
 \if :correct_target
 \else
-\quit 3
+DO $guard$ BEGIN RAISE EXCEPTION 'REFUSING: integration assertions require flexsoar_payment_v2_integration_test on loopback'; END $guard$;
 \endif
 SELECT set_config('payment.integration_cases',:'cases',true) IS NOT NULL;
 DO $$DECLARE f jsonb;s payment_v2.sales%rowtype;a payment_v2.attempts%rowtype;o public.orders%rowtype;n bigint;BEGIN
