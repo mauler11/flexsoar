@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 084 isolated replay: source database is the preserved 078 replay, all derived databases stay in this one container.
+# 084/085 isolated replay and focused acceptance: source database is the preserved 078 replay, all derived databases stay in this one container.
 #   bash tests/payment-db/run_084_container.sh <container-id> <db-at-078> <out-dir>
 set -u
 C=${1:?container}; SRC=${2:?source db}; OUT=${3:?out dir}
@@ -37,10 +37,10 @@ links=$(docker exec "$C" ip -o link | wc -l)
 ISOLATED=1
 
 T=/tmp/t084; docker exec "$C" sh -c "rm -rf $T && mkdir -p $T"
-for f in 00_target_guard.sql 01_fixtures.sql 83_solo_mode.sql 88_seller_listing_floor.sql 89_wallet_enrollment_views.sql; do
+for f in 00_target_guard.sql 01_fixtures.sql 02_attestation_fixture.sql 35_workers_setup.sql 83_solo_mode.sql 88_seller_listing_floor.sql 89_wallet_enrollment_views.sql 91_executor_fence_setup.sql 92_executor_open_sale_fence.sql 93_issuer_open_sale_queue.sql 94_executor_fence_assert.sql; do
  docker cp "$HERE/$f" "$C:$T/$f" >/dev/null || fail "copy $f"
 done
-for f in 079_review_approval_is_not_authentication.sql 080_post_079_cleanup.sql 081_revoke_public_set_card_visibility.sql 081b_retire_prelaunch_test_item.sql 082_payment_v2_solo_operator_mode.sql 083_payment_v2_seller_listing_floor.sql 084_payment_v2_wallet_enrollment_and_views.sql; do
+for f in 079_review_approval_is_not_authentication.sql 080_post_079_cleanup.sql 081_revoke_public_set_card_visibility.sql 081b_retire_prelaunch_test_item.sql 082_payment_v2_solo_operator_mode.sql 083_payment_v2_seller_listing_floor.sql 084_payment_v2_wallet_enrollment_and_views.sql 085_payment_v2_executor_action_fence.sql; do
  [[ $(tr -cd '\r' < "$REPO/supabase/migrations/$f" | wc -c) == 0 ]] || fail "CR in $f"
  docker cp "$REPO/supabase/migrations/$f" "$C:$T/$f" >/dev/null || fail "copy $f"
  echo "sha256 $(sha256sum "$REPO/supabase/migrations/$f" | cut -c1-64) $f"
@@ -54,6 +54,14 @@ suite(){ local label=$1 file=$2; docker exec -e PGOPTIONS='-c payment_v2.test_id
  psql -X -v ON_ERROR_STOP=1 -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -h 127.0.0.1 -U supabase_admin -d flexsoar_payment_v2_test \
  -At -f "$T/$file" > "$OUT/$label.log" 2>&1; local rc=$?
  echo "== $label rc=$rc"; grep -E 'T08[389]|ERROR' "$OUT/$label.log" | sed 's/^psql:[^ ]* //;s/^NOTICE: *//;s/^/   /'; return $rc; }
+dedicated_suite(){ local login=$1 label=$2 file=$3; docker exec -e PGOPTIONS='-c payment_v2.test_identity=synthetic-payment-v2-only' "$C" \
+ psql -X -v ON_ERROR_STOP=1 -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -h 127.0.0.1 -U "$login" -d flexsoar_payment_v2_test \
+ -At -f "$T/$file" > "$OUT/$label.log" 2>&1; local rc=$?
+  echo "== $label as $login rc=$rc"; grep -E 'T09[123]|ERROR' "$OUT/$label.log" | sed 's/^psql:[^ ]* //;s/^NOTICE: *//;s/^/   /'; return $rc; }
+suite_assert(){ local label=$1 file=$2; docker exec -e PGOPTIONS='-c payment_v2.test_identity=synthetic-payment-v2-only' "$C" \
+ psql -X -v ON_ERROR_STOP=1 -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY -h 127.0.0.1 -U supabase_admin -d flexsoar_payment_v2_test \
+ -At -f "$T/$file" > "$OUT/$label.log" 2>&1; local rc=$?
+ echo "== $label rc=$rc"; grep -E 'T094|ERROR' "$OUT/$label.log" | sed 's/^psql:[^ ]* //;s/^NOTICE: *//;s/^/   /'; return $rc; }
 
 [[ $(adm "SELECT to_regprocedure('public.fn_payment_v2_reconcile_event(uuid)') IS NOT NULL AND to_regclass('payment_v2.governance_mode') IS NULL" "$SRC") == t ]] || fail "source is not the expected 078 base"
 [[ $(adm "SELECT count(*) FROM pg_auth_members WHERE member='postgres'::regrole AND roleid='payment_v2_owner'::regrole AND inherit_option AND set_option") == 1 ]] || fail "postgres lacks the required owner membership"
@@ -70,7 +78,21 @@ adm "CREATE DATABASE flexsoar_084_pre81b TEMPLATE flexsoar_084_pre81 OWNER postg
 mig flexsoar_084_pre81b 082_payment_v2_solo_operator_mode.sql apply_082 || fail 082
 mig flexsoar_084_pre81b 083_payment_v2_seller_listing_floor.sql apply_083 || fail 083
 
-# Assert the funding-on refusal in a fresh copy and prove transaction rollback.
+# Each catalog-drift refusal starts from its own 083 clone and proves rollback.
+# Catalog-drift refusal proofs: each starts from an independent 083 clone and
+# must roll back before any of the four new RPCs are created.
+for drift in trigger_disabled trigger_function missing_unique; do
+ fresh flexsoar_084_pre81b
+ case $drift in
+  trigger_disabled) adm "ALTER TABLE payment_v2.wallet_accounts DISABLE TRIGGER immutable" flexsoar_payment_v2_test >/dev/null || fail "$drift fixture"; expected='immutable trigger or helper' ;;
+  trigger_function) adm "DROP TRIGGER immutable ON payment_v2.wallet_accounts; CREATE TRIGGER immutable BEFORE UPDATE OR DELETE ON payment_v2.wallet_accounts FOR EACH ROW EXECUTE FUNCTION payment_v2.audit_configuration()" flexsoar_payment_v2_test >/dev/null || fail "$drift fixture"; expected='immutable trigger or helper' ;;
+  missing_unique) adm "ALTER TABLE payment_v2.wallet_accounts DROP CONSTRAINT wallet_accounts_network_id_token_account_key" flexsoar_payment_v2_test >/dev/null || fail "$drift fixture"; expected='keys or NOT NULL columns' ;;
+ esac
+ mig flexsoar_payment_v2_test 084_payment_v2_wallet_enrollment_and_views.sql "refuse_$drift"; rc=$?
+ if [[ $rc != 3 ]] || ! grep -q "084: wallet_accounts $expected" "$OUT/refuse_$drift.log"; then fail "$drift preguard did not refuse"; fi
+ [[ $(adm "SELECT to_regprocedure('public.fn_payment_v2_enroll_wallet(uuid,uuid,bytea,bytea,bytea)') IS NULL" flexsoar_payment_v2_test) == t ]] || fail "$drift refusal left objects"
+done
+
 fresh flexsoar_084_pre81b
 adm "INSERT INTO payment_v2.networks(id,genesis,program,config,mint,token_program,treasury,treasury_token,issuer,authority_epoch,policy_version,funding_enabled,max_trade_units,max_escrow_units)
  SELECT gen_random_uuid(),k,k,k,k,k,k,k,k,1,'MY-USDC-ESCROW-1',true,1,1 FROM (SELECT sha256(convert_to('t084-synthetic-network','UTF8')) k) s" flexsoar_payment_v2_test >/dev/null || fail funding_fixture
@@ -86,4 +108,13 @@ if [[ $rc != 3 ]] || ! grep -q '084: one or more wallet/view RPCs already exist'
 suite suite_83 83_solo_mode.sql && grep -q '^T083|SUITE_PASS$' "$OUT/suite_83.log" && [[ $(grep -c 'T083|PASS' "$OUT/suite_83.log") == 18 ]] || fail suite_83
 suite suite_88 88_seller_listing_floor.sql && grep -q '^T088|SUITE_PASS$' "$OUT/suite_88.log" && [[ $(grep -c 'T088|PASS' "$OUT/suite_88.log") == 6 ]] || fail suite_88
 suite suite_89 89_wallet_enrollment_views.sql && grep -q '^T089|SUITE_PASS$' "$OUT/suite_89.log" || fail suite_89
-echo T084_RUN_PASS
+mig flexsoar_payment_v2_test 085_payment_v2_executor_action_fence.sql apply_085 || fail 085
+suite suite_35 35_workers_setup.sql || fail suite_35
+suite suite_91 91_executor_fence_setup.sql || fail suite_91
+dedicated_suite payment_db_test_executor suite_92 92_executor_open_sale_fence.sql || fail suite_92
+grep -q '^T092|SUITE_PASS$' "$OUT/suite_92.log" || fail suite_92_marker
+dedicated_suite payment_db_test_issuer suite_93 93_issuer_open_sale_queue.sql || fail suite_93
+grep -q '^T093|SUITE_PASS$' "$OUT/suite_93.log" || fail suite_93_marker
+suite_assert suite_94 94_executor_fence_assert.sql || fail suite_94
+grep -q '^T094|SUITE_PASS$' "$OUT/suite_94.log" || fail suite_94_marker
+echo T085_FOCUSED_RUN_PASS

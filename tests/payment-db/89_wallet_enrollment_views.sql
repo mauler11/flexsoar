@@ -9,6 +9,7 @@ DO $pre$ BEGIN
   OR to_regprocedure('public.fn_payment_v2_open_sale_queue(integer)') IS NULL THEN RAISE EXCEPTION 'apply 084 first';END IF;
 END $pre$;
 CREATE TEMP TABLE fx(name text PRIMARY KEY,f jsonb NOT NULL);
+INSERT INTO fx SELECT 'unsigned-'||n,pg_temp.fixture(0::smallint,600,false) FROM generate_series(1,20) n;
 INSERT INTO fx VALUES('one',pg_temp.fixture(0::smallint,600,false)),('two',pg_temp.fixture(0::smallint,600,false));
 -- fixture() records the synthetic opened event; restore only its synthetic rows to the pre-open phase under test.
 UPDATE payment_v2.sales SET state='opening' WHERE id=(SELECT (f->>'sale')::uuid FROM fx WHERE name='one');
@@ -96,14 +97,20 @@ END $g$;
 DO $q$
 DECLARE f jsonb:=pg_temp.f('one');s uuid:=(f->>'sale')::uuid;m bytea;rows jsonb;
 BEGIN
+ -- Twenty older prepared sales deliberately lack stored seller listings. They must not
+ -- consume the queue limit ahead of the later, fully eligible signed listing.
+ UPDATE payment_v2.sales SET state='opening'
+  WHERE id IN(SELECT (fx.f->>'sale')::uuid FROM fx WHERE name LIKE 'unsigned-%');
+ UPDATE payment_v2.operations SET state='pending',lease_id=NULL,leased_by=NULL,lease_until=NULL
+  WHERE action='open_sale' AND sale_id IN(SELECT (fx.f->>'sale')::uuid FROM fx WHERE name LIKE 'unsigned-%');
  m:=decode('46534f415256322d4c49535400','hex')||sha256(convert_to('w84-binding','UTF8'))||decode(repeat('00',16),'hex');
  INSERT INTO payment_v2.sale_listings(sale_id,message,signature,signer,binding,min_total_units,expires_at)
  SELECT s,m,decode(repeat('5a',64),'hex'),seller_wallet,substring(m FROM 14 FOR 32),4900000,extract(epoch FROM clock_timestamp())::bigint+7200
  FROM payment_v2.sales WHERE id=s;
  SET LOCAL ROLE payment_v2_issuer;
- rows:=public.fn_payment_v2_open_sale_queue(10);
+ rows:=public.fn_payment_v2_open_sale_queue(1);
  PERFORM pg_temp.assert_true(jsonb_array_length(rows)=1 AND rows->0->>'saleId'=s::text AND rows->0->>'operationId' IS NOT NULL,
-  'issuer queue returns the listing-backed open-sale operation and minimum build context');
+  'issuer queue filters all eligibility predicates before limit despite twenty older unsigned prepared sales');
  PERFORM pg_temp.expect_error('SELECT public.fn_payment_v2_open_sale_queue(21)','OPEN_SALE_LIMIT');
  RESET ROLE;
  PERFORM pg_temp.stage('Q issuer queue requires a persisted listing and bounded query');

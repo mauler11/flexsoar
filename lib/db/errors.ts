@@ -162,6 +162,7 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   { pattern: /^PAYMENT_V2_WALLET_(?:MALFORMED|ENROLLMENT_CONFLICT|TOKEN_ACCOUNT_USED)$/, code: 'WRONG_STATUS' },
   { pattern: /^PAYMENT_V2_LISTING_NOT_YOURS$/, code: 'NOT_OWNER' },
   { pattern: /^PAYMENT_V2_OPEN_SALE_LIMIT$/, code: 'INVALID_AMOUNT' },
+  { pattern: /^PAYMENT_V2_EXECUTOR_ACTION_FORBIDDEN$/, code: 'FORBIDDEN' },
   // fn_submit_listing — 'this account cannot list items' (is_restricted)
   { pattern: /this account cannot list items/i, code: 'RESTRICTED' },
   // fn_submit_listing — cash / either settlement gated behind a completed-

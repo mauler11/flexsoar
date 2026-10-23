@@ -15,13 +15,18 @@ describe('084 migration: wallet enrollment and narrow readers', () => {
     expect(code).toContain('m084_before');
     expect(code).toContain('pre-existing function % changed');
     expect(code).toContain('a pre-existing function disappeared');
-    expect(code).toContain('084: role grants are wrong');
+    expect(code).toContain('084: unexpected EXECUTE privilege for % on %');
   });
 
   it('pins the 083 base, funding-off state, wallet immutability and all new signatures', () => {
     expect(code).toContain('084: 082 and 083 are not applied');
     expect(code).toContain('084: funding must be disabled on every network');
-    expect(code).toContain('084: wallet_accounts immutability trigger is missing');
+    expect(code).toContain("t.tgenabled='O' AND t.tgtype=27 AND t.tgnargs=0 AND t.tgqual IS NULL");
+    expect(code).toContain("md5(replace(p.prosrc,chr(13),''))='c13177e3b317e9c215f7d8d7679feafa'");
+    expect(code).toContain('wallet_accounts keys or NOT NULL columns are not the expected definition');
+    expect(code).toContain('wallet_accounts table ACL or owner is not owner-only');
+    expect(code).toContain('WITH eligible AS');
+    expect(code).toContain('LIMIT p_limit');
     for (const signature of [
       'fn_payment_v2_enroll_wallet(uuid,uuid,bytea,bytea,bytea)',
       'fn_payment_v2_listing_view(uuid)',

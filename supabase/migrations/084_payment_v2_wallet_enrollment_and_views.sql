@@ -26,8 +26,31 @@ BEGIN
   OR to_regprocedure('public.fn_payment_v2_open_sale_queue(integer)') IS NOT NULL THEN
   RAISE EXCEPTION '084: one or more wallet/view RPCs already exist';
  END IF;
- IF NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='payment_v2.wallet_accounts'::regclass AND tgname='immutable' AND NOT tgisinternal) THEN
-  RAISE EXCEPTION '084: wallet_accounts immutability trigger is missing';
+ IF NOT EXISTS(
+  SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid
+  WHERE t.tgrelid='payment_v2.wallet_accounts'::regclass AND t.tgname='immutable' AND NOT t.tgisinternal
+   AND t.tgenabled='O' AND t.tgtype=27 AND t.tgnargs=0 AND t.tgqual IS NULL
+   AND t.tgfoid='payment_v2.immutable()'::regprocedure
+   AND p.proowner='payment_v2_owner'::regrole AND NOT p.prosecdef
+   AND p.proconfig=ARRAY['search_path=pg_catalog']
+   AND md5(replace(p.prosrc,chr(13),''))='c13177e3b317e9c215f7d8d7679feafa'
+ ) THEN
+  RAISE EXCEPTION '084: wallet_accounts immutable trigger or helper is not the enabled expected definition';
+ END IF;
+ IF (SELECT count(*) FROM pg_constraint c WHERE c.conrelid='payment_v2.wallet_accounts'::regclass
+      AND c.contype IN('p','u') AND c.convalidated AND NOT c.condeferrable
+      AND ((c.conname='wallet_accounts_pkey' AND pg_get_constraintdef(c.oid)='PRIMARY KEY (user_id, network_id, wallet)')
+        OR (c.conname='wallet_accounts_network_id_token_account_key' AND pg_get_constraintdef(c.oid)='UNIQUE (network_id, token_account)')))<>2
+  OR (SELECT count(*) FROM pg_constraint c WHERE c.conrelid='payment_v2.wallet_accounts'::regclass AND c.contype IN('p','u'))<>2
+  OR (SELECT count(*) FROM pg_attribute a WHERE a.attrelid='payment_v2.wallet_accounts'::regclass AND a.attnum>0 AND NOT a.attisdropped
+      AND a.attname IN('user_id','network_id','wallet','token_account','proof_digest') AND a.attnotnull)<>5 THEN
+  RAISE EXCEPTION '084: wallet_accounts keys or NOT NULL columns are not the expected definition';
+ END IF;
+ IF NOT EXISTS(SELECT 1 FROM pg_class c WHERE c.oid='payment_v2.wallet_accounts'::regclass AND c.relowner='payment_v2_owner'::regrole
+      AND (SELECT count(*) FROM aclexplode(c.relacl) a)=8
+      AND NOT EXISTS(SELECT 1 FROM aclexplode(c.relacl) a WHERE a.grantee<>c.relowner
+        OR a.privilege_type NOT IN('SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN'))) THEN
+  RAISE EXCEPTION '084: wallet_accounts table ACL or owner is not owner-only';
  END IF;
  IF (SELECT count(*) FROM payment_v2.governance_mode)<>1 THEN RAISE EXCEPTION '084: governance_mode is not a singleton';END IF;
 END $preguard$;
@@ -104,19 +127,26 @@ DECLARE r jsonb;
 BEGIN
  PERFORM payment_v2.require_role('payment_v2_issuer');
  IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 20 THEN RAISE EXCEPTION 'PAYMENT_V2_OPEN_SALE_LIMIT';END IF;
- SELECT coalesce(jsonb_agg(jsonb_build_object('operationId',o.id,'saleId',s.id,'saleAddress',payment_v2.b58(s.sale_address),
-   'escrowAddress',payment_v2.b58(s.escrow_address),'saleCommitment',payment_v2.b58(s.sale_commitment),
-   'generation',s.generation::text,'cardId',s.card_id,'cardCommitment',payment_v2.b58(i.card_commitment),
-   'pairCommitment',payment_v2.b58(i.pair_commitment),'sellerWallet',payment_v2.b58(s.seller_wallet),
-   'mode',s.mode,'network',jsonb_build_object('genesis',payment_v2.b58((s.network_snapshot).genesis),
-   'program',payment_v2.b58((s.network_snapshot).program),'config',payment_v2.b58((s.network_snapshot).config),
-   'issuer',payment_v2.b58((s.network_snapshot).issuer))) ORDER BY o.created_at,o.id),'[]'::jsonb)
+ WITH eligible AS (
+  SELECT op.id,op.sale_id,op.created_at,s.id AS eligible_sale_id,s.sale_address,s.escrow_address,s.sale_commitment,
+         s.generation,s.card_id,s.seller_wallet,s.mode,s.network_snapshot,i.card_commitment,i.pair_commitment
+  FROM payment_v2.operations op
+  JOIN payment_v2.sales s ON s.id=op.sale_id AND s.state='opening' AND s.fence
+  JOIN payment_v2.inventory i ON i.card_id=s.card_id
+  JOIN payment_v2.sale_listings l ON l.sale_id=s.id
+  WHERE op.action='open_sale' AND op.ready AND op.state<>'observed'
+  ORDER BY op.created_at,op.id
+  LIMIT p_limit
+ )
+ SELECT coalesce(jsonb_agg(jsonb_build_object('operationId',e.id,'saleId',e.eligible_sale_id,'saleAddress',payment_v2.b58(e.sale_address),
+   'escrowAddress',payment_v2.b58(e.escrow_address),'saleCommitment',payment_v2.b58(e.sale_commitment),
+   'generation',e.generation::text,'cardId',e.card_id,'cardCommitment',payment_v2.b58(e.card_commitment),
+   'pairCommitment',payment_v2.b58(e.pair_commitment),'sellerWallet',payment_v2.b58(e.seller_wallet),
+   'mode',e.mode,'network',jsonb_build_object('genesis',payment_v2.b58((e.network_snapshot).genesis),
+   'program',payment_v2.b58((e.network_snapshot).program),'config',payment_v2.b58((e.network_snapshot).config),
+   'issuer',payment_v2.b58((e.network_snapshot).issuer))) ORDER BY e.created_at,e.id),'[]'::jsonb)
  INTO r
- FROM (SELECT id,sale_id,created_at FROM payment_v2.operations WHERE action='open_sale' AND ready AND state<>'observed'
-       ORDER BY created_at,id LIMIT p_limit) o
- JOIN payment_v2.sales s ON s.id=o.sale_id AND s.state='opening' AND s.fence
- JOIN payment_v2.inventory i ON i.card_id=s.card_id
- JOIN payment_v2.sale_listings l ON l.sale_id=s.id;
+ FROM eligible e;
  RETURN r;
 END $$;
 

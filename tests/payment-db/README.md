@@ -719,3 +719,21 @@ bash tests/payment-db/run_082_container.sh <container-id> <db-at-078> <out-dir>
   The 7 decisions it records are all stamped `separated`.
 
 Run on `6ef7375a8c4e` from `flexsoar_mig_test_20261021`: `T082_RUN_PASS`.
+
+## Duplicate-session driver identity
+
+Run `41_session_a.sql` and `42_session_b.sql` as `supabase_admin`, the owner of
+`payment_db_test` and `payment_db_acceptance.completions`. For example:
+
+```sh
+psql -X -U supabase_admin -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY \
+  -v race_mode=0 -f tests/payment-db/41_session_a.sql
+```
+
+The completion helper checks the actual session login against the fixture
+owner. `payment_db_test_settler` is a worker login and has no schema/table
+access, so using it for 41/42 fails with `permission denied for schema
+payment_db_test`; that is an invocation identity mismatch, not a missing
+migration grant. Continue to use actual worker logins for the worker and race
+cases that explicitly test worker identity. Never substitute `SET ROLE` for
+those dedicated-login checks.
