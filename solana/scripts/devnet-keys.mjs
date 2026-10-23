@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 
 /** AGENT_RULES 2b: keys live in a per-task subfolder and are not reused by a later task unless its prompt re-cites the exception. */
-export const TASK_ID = 'd3';
+export const TASK_ID = 'd4';
 export const KEY_DIR = `C:\\Users\\Family\\flexsoar-devnet-keys\\${TASK_ID}`;
 /** Role and ceremony names. The governance and upgrade multisigs use DIFFERENT keys for the same three "people" (founder amendment (c)). */
 export const KEY_NAMES = ['deployer', 'program', 'issuer', 'inventory', 'receiver', 'authenticator', 'reviewer', 'release', 'reconciler', 'guardian',

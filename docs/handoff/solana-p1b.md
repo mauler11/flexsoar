@@ -213,20 +213,29 @@ means do not continue until resolved.
 
 0. **Build and pin.** Reproduce the `.so` (hash in section 9). Run `cargo test --locked --lib`, then
    `FLEXSOAR_MOCK_VAULT_SO=<mock_vault.so> bash solana/tests/run-local-v2.sh <so>`; all groups must pass.
-1. **Keys.** Deployer `D` (about 10 devnet SOL); eight distinct role keys; native ceremony keys `founder_hw`, `friend_hw`,
+1. **Keys.** Deployer `D` (about 10 devnet SOL; see the step 4 budget); eight distinct role keys; native ceremony keys `founder_hw`, `friend_hw`,
    `ceremony_key` (throwaway); the Squads **governance** multisig (2-of-3) and a **separate** Squads **upgrade** multisig (different
    members). Record the governance vault PDA `GV` and the upgrade vault PDA `UV`.
 2. **Manifest.** Write the manifest (section 5): devnet genesis hash, program id, devnet USDC mint, `domain` = genesis hash.
    Have a second person read it against the sources of each value.
-3. **Program id inventory (A2).** Run the init script with `--dry-run` first; it inventories the program id and **STOPs if the
+3. **Program id inventory (A2), BEFORE deploy (D3/D4: do NOT run `init-v2 --dry-run` here; it requires an already deployed program whose
+   upgrade authority is the bootstrap key, so it refuses by design).** Use direct reads through the genesis guard: `getAccountInfo(programId)` must be
+   null, `getProgramAccounts(programId)` must be empty, `getAccountInfo(config PDA)` must be null (D3: `devnet-d3-steps.mjs preflight`). The `--dry-run`
+   belongs after step 4 (deployed, authority `D`). **STOP if the
    program owns any account** (any V2 config, card or sale). In that case deploy under a new program id (new keypair, `declare_id!`,
    `Anchor.toml`, rebuild, new hash) and re-run. Never reuse a program id that holds funds.
-4. **Deploy with a buffer.** `solana program write-buffer`, then `solana program deploy --buffer <BUFFER> --program-id <keypair>
+4. **Deploy with a buffer.** Budget about **9 SOL peak** for `--max-len 700000` (about 4.87 SOL programdata rent plus about 3.99 SOL buffer rent
+   held until the deploy consumes it; about 3.6 SOL net after the buffer is closed), so fund the deployer with margin from the official faucet only.
+   `solana program write-buffer`, then `solana program deploy --buffer <BUFFER> --program-id <keypair>
    --upgrade-authority D.json --max-len 700000 --url devnet`. `solana program dump` and compare the first bytes to the `.so`.
 5. **Initialize.** Dry run again (the program now exists and the authority is `D`), then the real run with `--keypair D.json`. **STOP**
    unless the script prints `verified: true` (it has read the config back and every field matches). Read config offsets yourself:
    length 819, `layout_version` 1, funding paused, caps 0.
-6. **Ceremony, funding paused, caps 0:**
+6. **Ceremony, funding paused, caps 0.** (D3/D4 corrections: build EVERY Squads transaction from `multisig.instructions.*` and send it with your own
+   sender that waits for the recorded status (`solana/scripts/devnet-squads.mjs`); do NOT use `multisig.rpc.vaultTransactionCreate`, which failed from
+   this client in D3. Compare multisig members as a SET: on-chain order is sorted by key. The **time lock is a founder decision**: record the value in the
+   manifest; default **24 h (86,400 s) for mainnet upgrade multisigs**; D4 proved on devnet that a 120 s lock refuses early execution with Squads
+   `TimeLockNotReleased` 6021 and allows it afterwards.)
    a. `set_release_delay(86400)` signed by two native governors (native governance still works).
    b. Verify the Squads multisig off chain (section 4 checklist) and record it.
    c. `propose_governance_vault(GV, <Squads program id>, policy)` signed by `founder_hw` + `friend_hw`. Read the pending slot back.
@@ -238,7 +247,9 @@ means do not continue until resolved.
    with accounts `[config (w), GV (s), GV (s)]`. If it fails, **STOP**: the fallback is a program change, not a workaround.
 8. **Hand over the upgrade authority** (only now): `solana program set-upgrade-authority <ID> --new-upgrade-authority <UV>
    --skip-new-upgrade-authority-signer-check -k D.json --url devnet`; confirm with `solana program show`. Later upgrades follow the
-   LAYOUT RULE and go through the upgrade multisig.
+   LAYOUT RULE and go through the upgrade multisig. **Proven procedure (D4, `devnet-d4.mjs upgrade`):** `write-buffer` with `D`; `solana program
+   set-buffer-authority <BUFFER> --new-buffer-authority <UV>`; a 2-of-3 Squads vault transaction on the upgrade multisig executes the loader `Upgrade`
+   instruction (accounts: programdata w, program w, buffer w, spill w, rent, clock, UV signer); then dump and compare the first bytes to the `.so` hash.
 9. **Pre-funding gate.** With the database in the intended mode, run `checkFundingGate`; it must report no failures before any
    funding-enable approval.
 10. **Privy proof** (section 7) before any seller flow is trusted; then the P1 rehearsal checklist of the earlier runbook.
