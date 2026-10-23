@@ -23,6 +23,11 @@ export type SolanaWalletDetection =
   | { status: 'missing'; seen: string[] }
   | { status: 'found'; wallet: SolanaProofWallet; address: string };
 
+/** A Solana wallet that can also sign and broadcast a transaction (wallet-standard `solana:signAndSendTransaction`, no `address` argument). */
+export interface SolanaSendingWallet extends SolanaProofWallet {
+  signAndSendTransaction: (input: { chain: string; transaction: Uint8Array }) => Promise<unknown>;
+}
+
 export interface DetectionInput {
   /** usePrivy().ready */
   privyReady: boolean;
@@ -32,6 +37,8 @@ export interface DetectionInput {
   authenticated: boolean;
   /** useWallets().wallets from "@privy-io/react-auth/solana" */
   wallets: readonly unknown[];
+  /** When set, only the wallet with exactly this address counts (a user can hold several Solana wallets). */
+  address?: string;
 }
 
 function isSolanaAddress(value: unknown): value is string {
@@ -47,6 +54,11 @@ export function isSolanaProofWallet(candidate: unknown): candidate is SolanaProo
   return isSolanaAddress(record['address']) && typeof record['signMessage'] === 'function';
 }
 
+/** A detected Solana wallet that can also sign and send a transaction. */
+export function isSolanaSendingWallet(candidate: unknown): candidate is SolanaSendingWallet {
+  return isSolanaProofWallet(candidate) && typeof (candidate as unknown as Record<string, unknown>)['signAndSendTransaction'] === 'function';
+}
+
 /** Short diagnostic for a wallet the list returned but we did not accept: chain/address, never anything secret. */
 export function describeWallet(candidate: unknown): string {
   if (typeof candidate !== 'object' || candidate === null) return 'unknown';
@@ -60,7 +72,9 @@ export function detectSolanaWallet(input: DetectionInput): SolanaWalletDetection
   if (!input.privyReady || !input.walletsReady) return { status: 'waiting' };
   if (!input.authenticated) return { status: 'signed-out' };
   for (const candidate of input.wallets) {
-    if (isSolanaProofWallet(candidate)) return { status: 'found', wallet: candidate, address: candidate.address };
+    if (!isSolanaProofWallet(candidate)) continue;
+    if (input.address !== undefined && candidate.address !== input.address) continue;
+    return { status: 'found', wallet: candidate, address: candidate.address };
   }
   return { status: 'missing', seen: input.wallets.map(describeWallet) };
 }

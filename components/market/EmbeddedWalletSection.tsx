@@ -16,11 +16,16 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { usePrivy, useWallets } from "@privy-io/react-auth";
-import { useCreateWallet as useCreateSolanaWallet } from "@privy-io/react-auth/solana";
+import { usePrivy } from "@privy-io/react-auth";
+// The SOLANA hooks: the package root's useWallets() returns Ethereum wallets only (see lib/solana/privy-wallet-detect.ts).
+import {
+  useCreateWallet as useCreateSolanaWallet,
+  useWallets as useSolanaWallets,
+} from "@privy-io/react-auth/solana";
 import { Button } from "@/components/ui/Button";
 import { LinkWalletButton } from "./LinkWalletButton";
-import { extractSignatureBytes, firstSolanaWallet } from "@/lib/solana/privy";
+import { extractSignatureBytes } from "@/lib/solana/privy";
+import { detectSolanaWallet } from "@/lib/solana/privy-wallet-detect";
 
 export function EmbeddedWalletSection() {
   if (!process.env.NEXT_PUBLIC_PRIVY_APP_ID) return null;
@@ -29,15 +34,16 @@ export function EmbeddedWalletSection() {
 
 function EmbeddedWalletSectionInner() {
   const { ready, authenticated, login, logout } = usePrivy();
-  const { wallets } = useWallets();
+  const { ready: walletsReady, wallets } = useSolanaWallets();
+  const detection = detectSolanaWallet({ privyReady: ready, walletsReady, authenticated, wallets });
 
-  if (!ready) {
+  if (detection.status === "waiting") {
     return (
       <p className="text-[11px] text-muted">Preparing embedded wallets…</p>
     );
   }
 
-  if (!authenticated) {
+  if (detection.status === "signed-out") {
     return (
       <div className="flex flex-col gap-2 rounded-xl border border-line bg-background p-3">
         <span className="text-xs font-semibold">FlexSoar wallet</span>
@@ -52,8 +58,7 @@ function EmbeddedWalletSectionInner() {
     );
   }
 
-  const embedded = firstSolanaWallet(wallets);
-  if (!embedded) {
+  if (detection.status === "missing") {
     return (
       <div className="flex flex-col gap-2 rounded-xl border border-line bg-background p-3">
         <p className="text-[11px] leading-snug text-muted">
@@ -72,6 +77,7 @@ function EmbeddedWalletSectionInner() {
     );
   }
 
+  const embedded = detection.wallet;
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-line bg-background p-3">
       <span className="text-xs font-semibold">FlexSoar wallet</span>
@@ -83,7 +89,7 @@ function EmbeddedWalletSectionInner() {
         externalSigner={{
           address: embedded.address,
           signMessage: async (message: Uint8Array) => {
-            const raw = await embedded.signMessage({ message, address: embedded.address });
+            const raw = await embedded.signMessage({ message });
             const bytes = extractSignatureBytes(raw);
             if (!bytes || bytes.length !== 64) {
               throw new Error("embedded wallet returned an unusable signature");
@@ -94,29 +100,6 @@ function EmbeddedWalletSectionInner() {
       />
     </div>
   );
-}
-
-/**
- * One-line session inventory for the stuck case: what Privy actually
- * returned (chain + client type + truncated address), so a mismatch
- * between dashboard truth and session truth is visible without devtools.
- * Unknown shapes render as `unknown` — never throws on new wallet kinds.
- */
-function describeSessionWallet(candidate: unknown): string {
-  if (typeof candidate !== "object" || candidate === null) return "unknown";
-  const record = candidate as Record<string, unknown>;
-  const chain = typeof record["chainType"] === "string" ? record["chainType"] : "?";
-  const kind =
-    typeof record["walletClientType"] === "string"
-      ? record["walletClientType"]
-      : typeof record["connectorType"] === "string"
-        ? record["connectorType"]
-        : "?";
-  const address =
-    typeof record["address"] === "string" && record["address"].length > 10
-      ? `${record["address"].slice(0, 4)}…${record["address"].slice(-4)}`
-      : "?";
-  return `${chain}/${kind}/${address}`;
 }
 
 /**
@@ -201,12 +184,13 @@ function EmbeddedLinkButtonInner({
 }) {
   const router = useRouter();
   const { ready, authenticated, login } = usePrivy();
-  const { wallets } = useWallets();
+  const { ready: walletsReady, wallets } = useSolanaWallets();
+  const detection = detectSolanaWallet({ privyReady: ready, walletsReady, authenticated, wallets });
 
-  if (!ready) {
+  if (detection.status === "waiting") {
     return <p className="text-[11px] text-muted">Preparing wallet…</p>;
   }
-  if (!authenticated) {
+  if (detection.status === "signed-out") {
     return (
       <div className="flex flex-col gap-2">
         <Button type="button" variant="secondary" size="lg" onClick={() => login()} className="py-3 text-base">
@@ -220,8 +204,7 @@ function EmbeddedLinkButtonInner({
       </div>
     );
   }
-  const embedded = firstSolanaWallet(wallets);
-  if (!embedded) {
+  if (detection.status === "missing") {
     return (
       <div className="flex flex-col gap-2">
         <p className="text-[11px] text-muted">
@@ -229,11 +212,12 @@ function EmbeddedLinkButtonInner({
         </p>
         <CreateWalletButton />
         <p className="font-mono text-[10px] text-muted">
-          session wallets: {wallets.length === 0 ? "none" : wallets.map(describeSessionWallet).join(" · ")}
+          session wallets: {detection.seen.length === 0 ? "none" : detection.seen.join(" · ")}
         </p>
       </div>
     );
   }
+  const embedded = detection.wallet;
   return (
     <LinkWalletButton
       cta={cta}
@@ -241,7 +225,7 @@ function EmbeddedLinkButtonInner({
       externalSigner={{
         address: embedded.address,
         signMessage: async (message: Uint8Array) => {
-          const raw = await embedded.signMessage({ message, address: embedded.address });
+          const raw = await embedded.signMessage({ message });
           const bytes = extractSignatureBytes(raw);
           if (!bytes || bytes.length !== 64) {
             throw new Error("embedded wallet returned an unusable signature");

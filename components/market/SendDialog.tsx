@@ -19,14 +19,21 @@
 
 import { useState } from "react";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
-import { useWallets } from "@privy-io/react-auth";
+import { usePrivy } from "@privy-io/react-auth";
+// The SOLANA hook: the package root's useWallets() returns Ethereum wallets only (see lib/solana/privy-wallet-detect.ts).
+import { useWallets } from "@privy-io/react-auth/solana";
 import { Button } from "@/components/ui/Button";
 import { Banner } from "@/components/market/Banner";
 import { FundingPausedNotice, fundingAvailable } from "@/components/market/FundingOptions";
 import { base58Encode } from "@/lib/solana/base58";
 import { decodeAddress } from "@/lib/solana/base58";
 import { associatedTokenAddress } from "@/lib/solana/sdk";
-import { SOLANA_CHAIN, extractSignatureBytes, walletForAddress } from "@/lib/solana/privy";
+import { SOLANA_CHAIN, extractSignatureBytes } from "@/lib/solana/privy";
+import {
+  detectSolanaWallet,
+  isSolanaSendingWallet,
+  type SolanaWalletDetection,
+} from "@/lib/solana/privy-wallet-detect";
 import { buildUsdcTransferIx } from "@/lib/solana/transfers";
 import { formatUsdc } from "@/lib/solana/balances";
 
@@ -78,8 +85,16 @@ function PrivySendDialogInner(props: {
   usdcUnits: number;
   onClose: () => void;
 }) {
-  const { wallets } = useWallets();
-  return <SendDialogInner {...props} privyWallets={wallets} />;
+  const { ready, authenticated } = usePrivy();
+  const { ready: walletsReady, wallets } = useWallets();
+  const detection = detectSolanaWallet({
+    privyReady: ready,
+    walletsReady,
+    authenticated,
+    wallets,
+    address: props.walletAddress,
+  });
+  return <SendDialogInner {...props} detection={detection} />;
 }
 
 function SendDialogInner({
@@ -87,13 +102,13 @@ function SendDialogInner({
   usdcMint,
   usdcUnits,
   onClose,
-  privyWallets,
+  detection,
 }: {
   walletAddress: string;
   usdcMint: string;
   usdcUnits: number;
   onClose: () => void;
-  privyWallets: readonly unknown[];
+  detection: SolanaWalletDetection;
 }) {
   const [dest, setDest] = useState("");
   const [amount, setAmount] = useState("");
@@ -121,6 +136,15 @@ function SendDialogInner({
       setError(`Insufficient balance — you hold ${formatUsdc(usdcUnits)} USDC.`);
       return;
     }
+    if (detection.status === "waiting") {
+      setError("Your wallet is still loading — try again in a moment.");
+      return;
+    }
+    if (detection.status !== "found" || !isSolanaSendingWallet(detection.wallet)) {
+      setError("Sign in to your FlexSoar wallet first, then retry.");
+      return;
+    }
+    const embedded = detection.wallet;
     setBusy(true);
     try {
       const chain = chainForMint(usdcMint);
@@ -149,14 +173,9 @@ function SendDialogInner({
         }),
       );
 
-      const embedded = walletForAddress(privyWallets, walletAddress);
-      if (!embedded) {
-        throw new Error("Sign in to your FlexSoar wallet first, then retry.");
-      }
       const raw = await embedded.signAndSendTransaction({
         chain: SOLANA_CHAIN,
         transaction: tx.serialize({ requireAllSignatures: false, verifySignatures: false }),
-        address: embedded.address,
       });
       const sigBytes = extractSignatureBytes(raw);
       if (!sigBytes) throw new Error("wallet returned no usable signature");
@@ -240,11 +259,11 @@ function SendDialogInner({
       )}
       <Button
         type="button"
-        disabled={busy}
+        disabled={busy || detection.status === "waiting"}
         onClick={send}
         className="w-full py-3.5 text-lg"
       >
-        {busy ? "Sending…" : "Send"}
+        {busy ? "Sending…" : detection.status === "waiting" ? "Preparing wallet…" : "Send"}
       </Button>
       <p className="text-[11px] text-muted">
         USDC only — SOL stays for fees. Your wallet signs; FlexSoar never
