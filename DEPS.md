@@ -130,10 +130,9 @@ Environment variables (`.env.local` + Vercel; never commit):
   (own test mint, created 2026-09-15 via `solana/scripts/mint-test-usdc.mjs`;
   mint authority = deployer keypair; buyer funded with 1000 test-USDC);
   mainnet `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`.
-- `SOLANA_PROGRAM_ID` — devnet `CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF`
-  (deployed 2026-09-14, upgrade authority = deployer keypair).
-  Config PDA `BA63u3E7ShsiqdDhDrgkKmXLhtXe6YjLYfPgZGuN6jKC`
-  (initialized 2026-09-14, admin = treasury = deployer wallet on devnet).
+- `SOLANA_PROGRAM_ID` — devnet `HRqab2EMDcJKfkc4J88sxc4GVZyq5m3gNU43WMsa5Ve1` (build B; fresh id, D3 rehearsal target; not live until the rehearsal log says it deployed).
+  **Do NOT use `CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF`: retired, authority not held** (an older 2026-09-14 devnet program whose upgrade authority is another key;
+  its legacy config PDA `BA63u3E7ShsiqdDhDrgkKmXLhtXe6YjLYfPgZGuN6jKC` belongs to it, not to build B).
 - `SOLANA_TREASURY` — FlexSoar USDC fee sink (multisig on mainnet).
 - `SOLANA_QUOTE_SECRET` — random 32+ bytes; signs price quotes.
 - `SOLANA_MAX_TRADE_UNITS` — optional, defaults to 500000000 (500 USDC,

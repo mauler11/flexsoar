@@ -219,7 +219,7 @@ settings) before and after.
 
 Nothing below has been run. Use a devnet-only deployer and role keys unless you are deliberately rehearsing the real ceremony.
 
-0. **Is the program id free on devnet?** `solana program show CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF --url devnet` and
+0. **Is the program id free on devnet?** `solana program show CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF --url devnet` (**historical: this id is retired, authority not held**; D3 uses `HRqab2EMDcJKfkc4J88sxc4GVZyq5m3gNU43WMsa5Ve1`) and
    `solana account <config PDA ["config-v2"]> --url devnet`. If a v2 config exists, **STOP**: the account layouts changed and
    there is no close instruction. Generate a new program keypair, set it in `declare_id!`, `Anchor.toml`, and rebuild (the hash
    below then changes). You must hold the program keypair for the id you deploy.

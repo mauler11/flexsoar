@@ -3,7 +3,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-flexsoar_settlement = "CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF"
+flexsoar_settlement = "HRqab2EMDcJKfkc4J88sxc4GVZyq5m3gNU43WMsa5Ve1"
 
 [programs.devnet]
 flexsoar_settlement = "HRqab2EMDcJKfkc4J88sxc4GVZyq5m3gNU43WMsa5Ve1"
@@ -22,4 +22,4 @@ members = ["programs/*"]
 resolver = "2"
 
 [workspace.metadata.anchor]
-address = "CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF"
+address = "HRqab2EMDcJKfkc4J88sxc4GVZyq5m3gNU43WMsa5Ve1"

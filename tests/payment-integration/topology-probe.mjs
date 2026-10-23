@@ -16,7 +16,7 @@ assert.equal(createHash('sha256').update(readFileSync('/tools/program.so')).dige
 const runRoot=mkdtempSync('/state/probe-');const state=name=>join(runRoot,name);
 if(existsSync(state('validator-ledger')))throw new Error('Never reset/reuse a prior ledger');
 for(const port of [18899,18900,18901])await new Promise((ok,bad)=>{const s=net.createServer();s.once('error',bad);s.listen(port,'127.0.0.1',()=>s.close(ok));});
-const rpc='http://127.0.0.1:18899',program='CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF';
+const rpc='http://127.0.0.1:18899',program=readFileSync(new URL('../../solana/programs/flexsoar-settlement/src/lib.rs',import.meta.url),'utf8').match(/declare_id!\("([1-9A-HJ-NP-Za-km-z]+)"\)/)[1];
 const bootstrap=Keypair.generate(); // Ephemeral, never saved; no operational key files.
 writeFileSync(state('validator-config.json'),JSON.stringify({json_rpc_url:rpc,websocket_url:'ws://127.0.0.1:18900',keypair_path:state('unused-wallet-does-not-exist.json'),commitment:'finalized'}),{flag:'wx'});
 const log=openSync(state('validator-process.log'),'wx');

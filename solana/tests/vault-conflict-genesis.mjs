@@ -21,19 +21,22 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
 const meta=(pubkey,isSigner=false,isWritable=false)=>({pubkey,isSigner,isWritable});
 const url='http://127.0.0.1:18899';
 let checks=0;
-for(let seat=0;seat<3;seat++){
+// noPending=true is the R4-1 isolation case: the ACTIVE vault is the only conflict and no proposal exists, so deleting the
+// R3-01 guard in rotate_governance is the only way this fixture's rotation can succeed.
+for(const [seat,noPending] of [[0,false],[1,false],[2,false],[0,true]]){
   const root=mkdtempSync(join(tmpdir(),'flexsoar-d2-genesis-'));
   const payer=Keypair.generate(),controller=Keypair.generate().publicKey,otherController=Keypair.generate().publicKey;
   const vault=id=>PublicKey.findProgramAddressSync([Buffer.from('mock-vault')],id)[0];
   const active=vault(controller),pending=vault(otherController);
   const members=Array.from({length:3},()=>Keypair.generate().publicKey);
-  const badMembers=[...members];badMembers[seat]=pending;badMembers[(seat+1)%3]=active;
+  const badMembers=[...members];
+  if(noPending)badMembers[seat]=active;else{badMembers[seat]=pending;badMembers[(seat+1)%3]=active;}
   const data=Buffer.alloc(819);hash('account:ConfigV2').copy(data,0,0,8);
   for(let i=0;i<8;i++)Keypair.generate().publicKey.toBuffer().copy(data,136+32*i);
   badMembers.forEach((k,i)=>k.toBuffer().copy(data,392+32*i));
   active.toBuffer().copy(data,488);hash('active-policy').copy(data,520);
   data.writeBigUInt64LE(1n,552);data[560]=1;
-  pending.toBuffer().copy(data,594);otherController.toBuffer().copy(data,626);hash('pending-policy').copy(data,658);
+  if(!noPending){pending.toBuffer().copy(data,594);otherController.toBuffer().copy(data,626);hash('pending-policy').copy(data,658);}
   data[690]=1;data.writeBigUInt64LE(1n,691);
   const fixture=join(root,'config.json'),localConfig=join(root,'validator-config.json');
   writeFileSync(fixture,JSON.stringify({pubkey:config.toBase58(),account:{lamports:100_000_000,data:[data.toString('base64'),'base64'],owner:program.toBase58(),executable:false,rentEpoch:0,space:data.length}}));
@@ -73,6 +76,16 @@ for(let seat=0;seat<3;seat++){
     const revision=Buffer.alloc(8);revision.writeBigUInt64LE(1n);
     const accept=()=>via(otherController,'accept_governance_vault',[meta(config,false,true),meta(pending,true),meta(SYSVAR_INSTRUCTIONS_PUBKEY)],revision);
     const rotate=keys=>via(controller,'rotate_governance',[meta(config,false,true),meta(active,true),meta(active,true)],Buffer.concat(keys.map(k=>k.toBuffer())));
+    if(noPending){
+      // R4-1: active vault only, nothing pending. Only the R3-01 guard can refuse this rotation.
+      assert.deepEqual(await send(rotate(badMembers)),{InstructionError:[0,{Custom:6017}]});assert.deepEqual(await read(),data);checks++;
+      assert.equal(await send(rotate(members)),null);
+      assert.deepEqual((await read()).subarray(392,488),Buffer.concat(members.map(k=>k.toBuffer())));checks++;
+      console.log(`D2 genesis no pending proposal: active vault retained in seat ${seat} 6017, clean rotation PASS`);continue;
+    }
+    // R4-1: pending vault ABSENT from the list, active vault present: isolates the R3-01 guard from the pending-vault check.
+    { const retain=[...members];retain[seat]=active;
+      assert.deepEqual(await send(rotate(retain)),{InstructionError:[0,{Custom:6017}]});assert.deepEqual(await read(),data);checks++; }
     // Correct signer, direct controller CPI and current revision: only the key conflict rejects acceptance.
     assert.deepEqual(await send(accept()),{InstructionError:[0,{Custom:6017}]});assert.deepEqual(await read(),data);checks++;
     // An already-overlapping active vault cannot REMAIN in the dormant list through a rotation.

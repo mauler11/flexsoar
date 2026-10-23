@@ -53,7 +53,8 @@ const roleNames=['issuer','inventory','receiver','authenticator','reviewer','rel
 const openTemplateBuyer=buyers[0].publicKey;
 const roles=Object.fromEntries(roleNames.map(n=>[n,generate(n)])),gov=[generate('governor0'),generate('governor1'),generate('governor2')];
 if(!resume)writeFileSync(state('EPHEMERAL-LOCAL-ONLY-keys.json'),JSON.stringify(Object.fromEntries(Object.entries({bootstrap,mint,treasury,seller,buyer0:buyers[0],buyer1:buyers[1],...roles,governor0:gov[0],governor1:gov[1],governor2:gov[2]}).map(([k,v])=>[k,Array.from(v.secretKey)]))),{flag:'wx',mode:0o600});
-const program='CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF',token=new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),ataProgram=new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
+// Program id comes from the source under test (declare_id!), as in solana/tests/local-v2.mjs; never a hard-coded retired id.
+const program=readFileSync(new URL('../../solana/programs/flexsoar-settlement/src/lib.rs',import.meta.url),'utf8').match(/declare_id!\("([1-9A-HJ-NP-Za-km-z]+)"\)/)[1],token=new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),ataProgram=new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
 const config=v2Addresses(program,hash('unused'),hash('unused')).config;
 const ata=owner=>PublicKey.findProgramAddressSync([owner.toBuffer(),token.toBuffer(),mint.publicKey.toBuffer()],ataProgram)[0];
 const meta=(pubkey,isSigner=false,isWritable=false)=>({pubkey,isSigner,isWritable});

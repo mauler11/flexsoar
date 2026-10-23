@@ -3,6 +3,7 @@
  * BPF LDDW program-ID immediates) must reproduce B byte for byte, with every differing byte mapped. `pass` / exit code follow it.
  * SUPERSEDED strict condition (only complete contiguous 32-byte occurrences differ) is still computed and reported as
  * `strictPass`; it fails for real builds because LLVM folds Pubkey comparisons into LDDW immediates.
+ * It additionally requires B to contain NO old-id encoding and A NO new-id encoding (raw or LDDW slice), including unchanged ones.
  * Builds are never patched. Output includes every differing offset (zero-based).
  */
 import assert from 'node:assert/strict';
@@ -35,6 +36,20 @@ function textSection(elf){
   throw new Error('Missing .text');
 }
 const section=textSection(a);assert.deepEqual(textSection(b),section);
+// R4-2: count ANY encoding of an id left in a file: raw 32-byte occurrences plus LDDW immediates equal to one of its four 8-byte slices.
+// B must carry no old-id encoding and A no new-id encoding, even where both files agree (an unchanged stale encoding is not a "difference").
+function lddwSliceHits(elf,idBytes){
+  const hits=[];
+  for(let offset=section.offset;offset+16<=section.offset+section.size;offset+=8){
+    if(elf[offset]!==0x18 || !elf.subarray(offset+8,offset+12).equals(Buffer.alloc(4)))continue;
+    const immediate=Buffer.concat([elf.subarray(offset+4,offset+8),elf.subarray(offset+12,offset+16)]);
+    for(let k=0;k<32;k+=8)if(immediate.equals(idBytes.subarray(k,k+8)))hits.push({instructionOffset:offset,idByteStart:k});
+  }
+  return hits;
+}
+const staleOldInB={raw:occurrences(b,oldBytes),lddw:lddwSliceHits(b,oldBytes)};
+const staleNewInA={raw:occurrences(a,newBytes),lddw:lddwSliceHits(a,newBytes)};
+const noStaleEncodings=staleOldInB.raw.length===0 && staleOldInB.lddw.length===0 && staleNewInA.raw.length===0 && staleNewInA.lddw.length===0;
 const encodedIdLoads=[],encodedByteMap=new Map();
 for(let offset=section.offset;offset+16<=section.offset+section.size;offset+=8){
   if(a[offset]!==0x18 || b[offset]!==0x18 || !a.subarray(offset,offset+4).equals(b.subarray(offset,offset+4)) ||
@@ -60,7 +75,7 @@ const strictPass=a.length===b.length && differences.length>0 && matchingOccurren
 const encodedNormalized=Buffer.from(normalized);
 for(const [offset,{idByteIndex}]of encodedByteMap)encodedNormalized[offset]=newBytes[idByteIndex];
 const accepted=a.length===b.length && differences.length>0 && matchingOccurrences.length>0 &&
-  differences.every(d=>d.occurrenceStart!==null || d.encodedIdByte!==null) && encodedNormalized.equals(b);
+  differences.every(d=>d.occurrenceStart!==null || d.encodedIdByte!==null) && encodedNormalized.equals(b) && noStaleEncodings;
 const pass=accepted;
 console.log(JSON.stringify({pass,proof:'encoded-ID normalization (accepted)',strictPass,strictStatus:'superseded by founder decision; kept for the record',offsetConvention:'zero-based file offsets, decimal',
   a:{programId:oldId,size:a.length,sha256:createHash('sha256').update(a).digest('hex'),idOccurrences:oldOccurrences},
@@ -69,5 +84,5 @@ console.log(JSON.stringify({pass,proof:'encoded-ID normalization (accepted)',str
   differingBytes:differences.length,differences,normalizedAEqualsB:normalized.equals(b),
   diagnosticOnly:{explanation:'LDDW immediates are encoded ID fragments, NOT complete contiguous 32-byte ID occurrences. This does not pass the requested strict proof.',
     textSection:section,encodedIdLoads,allDifferencesAreRawOrEncodedIdBytes:differences.every(d=>d.occurrenceStart!==null || d.encodedIdByte!==null),
-    rawAndEncodedNormalizationEqualsB:encodedNormalized.equals(b)}},null,2));
-assert.ok(pass,'Binary changes are not confined to old-ID encodings (raw occurrence and LDDW immediates); inspect the proof output.');
+    rawAndEncodedNormalizationEqualsB:encodedNormalized.equals(b),noStaleEncodings,staleOldInB,staleNewInA}},null,2));
+assert.ok(pass,'Binary changes are not confined to old-ID encodings (raw occurrence and LDDW immediates), or a stale old-ID encoding remains in B; inspect the proof output.');
