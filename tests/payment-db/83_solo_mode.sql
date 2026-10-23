@@ -141,8 +141,9 @@ BEGIN
  PERFORM pg_temp.expect_error(format('SELECT public.fn_payment_v2_propose_governance(''mode'',%L::jsonb)',solo),'PAYMENT_V2_FUNDING_ENABLED');
  PERFORM pg_temp.ok('G1 only an active governor proposes; no mode change while funding is enabled');
  PERFORM pg_temp.act(pg_temp.s('guardian'));
- n:=public.fn_payment_v2_disable_funding();
- PERFORM pg_temp.assert_true(n=7 AND NOT EXISTS(SELECT 1 FROM payment_v2.networks WHERE funding_enabled),'guardian disabled funding on all 7 networks');
+ SELECT count(*) INTO n FROM payment_v2.networks WHERE funding_enabled;
+ PERFORM pg_temp.assert_true(public.fn_payment_v2_disable_funding()=n
+  AND NOT EXISTS(SELECT 1 FROM payment_v2.networks WHERE funding_enabled),'guardian disabled every network that was funding-enabled');
  PERFORM pg_temp.assert_true(public.fn_payment_v2_disable_funding()=0,'disable is idempotent');
  PERFORM pg_temp.ok('G2 a single guardian disables funding everywhere');
  PERFORM pg_temp.act(pg_temp.s('gov1'));

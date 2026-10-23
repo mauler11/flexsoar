@@ -32,4 +32,13 @@ describe('085 executor action fence', () => {
     expect(code).toContain('fn_payment_v2_stage_signed_operation');
     expect(contractErrorCode({ message: 'PAYMENT_V2_EXECUTOR_ACTION_FORBIDDEN' })).toBe('FORBIDDEN');
   });
+
+  it('checks finish lease identity before returning the uniform lease-lost refusal for forbidden actions', () => {
+    const start = code.indexOf("WHEN 'fn_payment_v2_finish_operation(uuid,uuid,text,text,text)' THEN");
+    const end = code.indexOf("WHEN 'fn_payment_v2_operation_context(uuid,uuid)' THEN", start);
+    const finish = code.slice(start, end);
+    expect(finish).toContain("old_fragment:='IF o.id IS NULL OR o.lease_id IS DISTINCT FROM p_lease_id");
+    expect(finish).toContain("RAISE EXCEPTION ''PAYMENT_V2_OPERATION_LEASE_LOST'';END IF;'||E'\\n IF o.action NOT IN");
+    expect(finish).toContain("o.action NOT IN(''execute_outcome'',''acknowledge_claim'') THEN RAISE EXCEPTION ''PAYMENT_V2_OPERATION_LEASE_LOST''");
+  });
 });

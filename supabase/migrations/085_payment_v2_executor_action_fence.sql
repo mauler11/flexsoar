@@ -81,8 +81,8 @@ BEGIN
     old_fragment:='AND (lease_until IS NULL OR lease_until<=clock_timestamp()) ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT p_limit';
     new_fragment:='AND op.action IN(''execute_outcome'',''acknowledge_claim'') AND (lease_until IS NULL OR lease_until<=clock_timestamp()) ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT p_limit';
    WHEN 'fn_payment_v2_finish_operation(uuid,uuid,text,text,text)' THEN
-    old_fragment:='FROM payment_v2.operations WHERE id=p_operation_id FOR UPDATE;'||E'\n IF o.id IS NOT NULL';
-    new_fragment:='FROM payment_v2.operations WHERE id=p_operation_id FOR UPDATE;'||E'\n IF o.id IS NOT NULL AND o.action NOT IN(''execute_outcome'',''acknowledge_claim'') THEN RAISE EXCEPTION ''PAYMENT_V2_EXECUTOR_ACTION_FORBIDDEN'' USING ERRCODE=''42501'';END IF;'||E'\n IF o.id IS NOT NULL';
+    old_fragment:='IF o.id IS NULL OR o.lease_id IS DISTINCT FROM p_lease_id OR o.leased_by<>session_user OR o.lease_until IS NULL OR o.lease_until<=clock_timestamp() OR o.state=''observed'' THEN RAISE EXCEPTION ''PAYMENT_V2_OPERATION_LEASE_LOST'';END IF;'||E'\n IF p_outcome IS NULL';
+    new_fragment:='IF o.id IS NULL OR o.lease_id IS DISTINCT FROM p_lease_id OR o.leased_by<>session_user OR o.lease_until IS NULL OR o.lease_until<=clock_timestamp() OR o.state=''observed'' THEN RAISE EXCEPTION ''PAYMENT_V2_OPERATION_LEASE_LOST'';END IF;'||E'\n IF o.action NOT IN(''execute_outcome'',''acknowledge_claim'') THEN RAISE EXCEPTION ''PAYMENT_V2_OPERATION_LEASE_LOST'';END IF;'||E'\n IF p_outcome IS NULL';
    WHEN 'fn_payment_v2_operation_context(uuid,uuid)' THEN
     old_fragment:='o.lease_until<=clock_timestamp() THEN RAISE EXCEPTION ''PAYMENT_V2_OPERATION_LEASE_LOST'';END IF;'||E'\n SELECT id,listing_id';
     new_fragment:='o.lease_until<=clock_timestamp() THEN RAISE EXCEPTION ''PAYMENT_V2_OPERATION_LEASE_LOST'';END IF;'||E'\n IF o.action NOT IN(''execute_outcome'',''acknowledge_claim'') THEN RAISE EXCEPTION ''PAYMENT_V2_EXECUTOR_ACTION_FORBIDDEN'' USING ERRCODE=''42501'';END IF;'||E'\n SELECT id,listing_id';

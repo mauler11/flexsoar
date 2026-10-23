@@ -103,6 +103,21 @@ BEGIN
   WHERE id IN(SELECT (fx.f->>'sale')::uuid FROM fx WHERE name LIKE 'unsigned-%');
  UPDATE payment_v2.operations SET state='pending',lease_id=NULL,leased_by=NULL,lease_until=NULL
   WHERE action='open_sale' AND sale_id IN(SELECT (fx.f->>'sale')::uuid FROM fx WHERE name LIKE 'unsigned-%');
+ UPDATE payment_v2.operations SET state='observed'
+  WHERE action='open_sale' AND sale_id IN(SELECT (fx.f->>'sale')::uuid FROM fx WHERE name LIKE 'unsigned-%');
+ WITH older AS (
+  SELECT op.sale_id,op.payload,op.payload_digest,op.expected_revision,row_number() OVER(ORDER BY op.id) AS seq
+  FROM payment_v2.operations op
+  WHERE op.action='open_sale' AND op.sale_id IN(SELECT (fx.f->>'sale')::uuid FROM fx WHERE name LIKE 'unsigned-%')
+ )
+ INSERT INTO payment_v2.operations(sale_id,action,payload,payload_digest,expected_revision,ready,state,created_at)
+ SELECT sale_id,'open_sale',payload,payload_digest,expected_revision,true,'pending',
+  clock_timestamp()-interval '2 days'+seq*interval '1 second'
+ FROM older;
+ PERFORM pg_temp.assert_true((SELECT count(*)=20 AND max(op.created_at)<(SELECT signed.created_at FROM payment_v2.operations signed WHERE signed.action='open_sale' AND signed.sale_id=s)
+  FROM payment_v2.operations op WHERE op.action='open_sale' AND op.state='pending'
+   AND op.sale_id IN(SELECT (fx.f->>'sale')::uuid FROM fx WHERE name LIKE 'unsigned-%')),
+  'all twenty unsigned prepared operations are older than the signed eligible operation');
  m:=decode('46534f415256322d4c49535400','hex')||sha256(convert_to('w84-binding','UTF8'))||decode(repeat('00',16),'hex');
  INSERT INTO payment_v2.sale_listings(sale_id,message,signature,signer,binding,min_total_units,expires_at)
  SELECT s,m,decode(repeat('5a',64),'hex'),seller_wallet,substring(m FROM 14 FOR 32),4900000,extract(epoch FROM clock_timestamp())::bigint+7200

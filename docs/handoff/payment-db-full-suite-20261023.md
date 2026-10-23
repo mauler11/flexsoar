@@ -290,3 +290,53 @@ In 082, 084, and 085, `fn_payment_v2_disable_funding` has identical `md5(prosrc)
 ### Cleanup
 
 Dropped all task-created diagnostics (`flexsoar_diag_pre79`, `flexsoar_diag_pre81`, `flexsoar_diag_082base`, `flexsoar_diag_082`, `flexsoar_diag_084`, `flexsoar_diag_085`) and `flexsoar_payment_v2_test`. Dropped the nine disposable `payment_db_test_%` and `payment_db_race_%` logins after revoking their worker-role memberships and dropping owned objects. Final query returned no matching database or login names. The 078 source and pre-existing helper databases were preserved. `postgres` did not have the required cluster authority for role cleanup; cleanup was completed as `supabase_admin` (superuser) inside the isolated container.
+
+## W2-P1-FIX R5b continuation — stopped at G2 (2026-10-23)
+
+### Stop finding
+
+The fresh full-suite target replayed from 078 through 085 successfully. The run stopped at `83_solo_mode.sql`, G2, with `ASSERT: guardian disabled every network that was funding-enabled`. This is the first non-driver suite failure in this run. By instruction, no later full-suite file was run and the assertion was not edited again. The G2 failure remains a finding; this run did not separately capture its RPC return value or post-call rows before the test transaction rolled back. The earlier G2 diagnosis in commit `13b73d5` recorded that the 085 function disabled all 22 enabled rows in the rollback-only probe. The current 83 test combines the mutating RPC and post-call `NOT EXISTS` in one SQL expression; statement snapshot/evaluation ordering may explain the assertion, but this was not verified in this run and must be reviewed before classifying this as a runtime kill-switch failure.
+
+### Required focused proofs completed before the full run
+
+- **R5b-02 old-query proof:** the test used deterministic, distinct `created_at` values for 20 unsigned prepared operations, all older than the later signed operation. In a disposable 078→084 scratch target, the pre-fix queue body from committed migration 084 at `c50feb9` was installed temporarily. `89_wallet_enrollment_views.sql` failed at the intended queue assertion (`issuer queue filters all eligibility predicates before limit`), psql exit 3. A separate fresh 078→084 target using current 084 passed 89 with `T089|SUITE_PASS`.
+- **R5b-01 focused executor proof:** after replaying 085, the real `payment_db_test_executor` login ran 92. Missing random operation UUID, wrong lease for an existing allowed `acknowledge_claim`, valid lease for existing `open_sale`, and valid lease for existing `revoke_sale` all returned the same SQLSTATE/message: `P0001 / PAYMENT_V2_OPERATION_LEASE_LOST`. The issuer queue test and administrator postcondition were not run on the full target before the G2 stop.
+
+### Full-run environment and effective results through the stop
+
+A local snapshot clone was required because Docker Desktop had stale bind mounts on the preserved stopped container. The original container was preserved. The run used clone `733813cfd1b173d984ef248ed6518b921cd37e3c3fdf57c30d51f1c33b290518`, reverified `NetworkMode=none`, no port bindings, `Privileged=false`, running, and loopback-only. Its 078 source was `flexsoar_mig_test_20261021`, verified to have zero networks and no 082 governance table. All migrations and tests used only this isolated clone.
+
+Migrations 079, 080, 081, 081b, 082, 083, 084, 085: **PASS**.
+
+| File / scenario | Identity | Effective result |
+|---|---|---|
+| 03, 04, 05 | `supabase_admin` | PASS |
+| 06 SQL export + offline `make-encoding-vectors.mjs permit` + 07 | `supabase_admin`; wrapper supplied the full comparator JSON to psql | PASS; an initial PowerShell argument-quoting attempt was rejected, then the corrected wrapper passed |
+| 08, 09, 10, 20, 30 | `supabase_admin` | PASS |
+| 35 | `supabase_admin` | PASS |
+| 36 / 37 / 38 / 39 | dedicated issuer / verifier / settler / executor logins | PASS |
+| 40, 40 notifier, 46 | `supabase_admin`, notifier login, `supabase_admin` | PASS |
+| 41 / 42 `race_mode=0` | both independent sessions `supabase_admin` | PASS; B observed waiting on a lock before A committed |
+| 41 / 42 `race_mode=1` | both independent sessions `supabase_admin` | PASS; B observed waiting on a lock before A committed |
+| 45 + offline signed fixture + 47 | `payment_db_test_executor` | PASS; initial wrapper used the wrong nesting for operation id and lease id, then corrected |
+| 50 | `supabase_admin` | PASS |
+| `conflicting_signature` | settler A / verifier B / admin assertion | PASS; lock wait observed |
+| `conflicting_attempt` | settler A / verifier B / admin assertion | PASS; lock wait observed |
+| `release_refund` | verifier A/B; settler consume A/B; admin assertion | PASS; both arbitration and consumption lock waits observed |
+| `refund_release` | verifier A/B; settler consume A/B; admin assertion | PASS; both arbitration and consumption lock waits observed |
+| `funding_cancel` | `supabase_admin` A / settler B / admin assertion | PASS; lock wait observed |
+| `funding_revoke` | settler A / verifier B / admin assertion | PASS; lock wait observed |
+| `revoked_funding` | verifier A/B / admin assertion | PASS; lock wait observed |
+| `rollback` | settler A/B; A rollback then 60 in same session; admin assertion | PASS; lock wait observed |
+| queue `operations`, `outbox` | paired executor / notifier race logins; admin assertion | PASS |
+| `operation_takeover`, `outbox_takeover` | A lease, admin expiry, B takeover, stale original A login, admin assertion | PASS |
+| 70 / 71 | `supabase_admin`; waited 35 seconds | PASS |
+| 83 G2 | `supabase_admin` | **STOP / FAIL:** `ASSERT: guardian disabled every network that was funding-enabled` |
+
+Files after the stop were not run in the full target: 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94. The focused 89 and 92 proofs above are not full-target results. The 80–82 migration-specific cleanup cases were not run on this already-080 target; their documented stage-specific drivers were not run in this task. `PAYMENT_DB_FINAL_ACCEPTANCE_COMPLETE` was not printed. `npm test`, `npx tsc --noEmit`, and `npm run build` were not run after the required stop.
+
+### Hashes, cleanup, and changed files
+
+SHA-256 for 084: `25dfcd88a5a23b47dacc046fd2e6e595271b3431738b86e9f675e12cfb418283` (unchanged). SHA-256 for edited 085: `a10ba3cf0c3b2b4e703cf93c6618e75d9d40984ce60cf45440bbe6190c80b7cf`.
+
+Dropped `flexsoar_payment_v2_test` and revoked/dropped all disposable `payment_db_test_%` and `payment_db_race_%` logins. Final cluster query found no matching test databases or logins. The 078 source and pre-existing helper databases were preserved. No staging, production, or network database was contacted.

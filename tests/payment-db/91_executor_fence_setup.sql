@@ -1,4 +1,4 @@
--- Commits two synthetic open_sale operations for the real-login executor fence test.
+-- Commits synthetic issuer operations and an allowed action for the real-login executor fence test.
 \ir 00_target_guard.sql
 BEGIN;
 \ir 01_fixtures.sql
@@ -8,15 +8,29 @@ GRANT USAGE ON SCHEMA payment_db_executor_fence TO payment_db_test_executor,paym
 GRANT SELECT ON payment_db_executor_fence.cases TO payment_db_test_executor,payment_db_test_issuer,payment_v2_executor,payment_v2_issuer;
 INSERT INTO payment_db_executor_fence.cases VALUES
  ('claim',pg_temp.fixture(0::smallint,600,false),gen_random_uuid(),gen_random_uuid()),
- ('leased',pg_temp.fixture(0::smallint,600,false),gen_random_uuid(),gen_random_uuid());
+ ('leased',pg_temp.fixture(0::smallint,600,false),gen_random_uuid(),gen_random_uuid()),
+ ('allowed_wrong_lease',pg_temp.fixture(1::smallint,600,true),gen_random_uuid(),gen_random_uuid()),
+ ('revoke',pg_temp.fixture(0::smallint,600,false),gen_random_uuid(),gen_random_uuid());
+SELECT public.fn_payment_v2_reconcile_event((f->>'event')::uuid)
+ FROM payment_db_executor_fence.cases WHERE name='allowed_wrong_lease';
 UPDATE payment_v2.sales s SET state='opening'
- FROM payment_db_executor_fence.cases c WHERE s.id=(c.f->>'sale')::uuid;
+ FROM payment_db_executor_fence.cases c WHERE c.name IN('claim','leased','revoke') AND s.id=(c.f->>'sale')::uuid;
 UPDATE payment_v2.operations o SET state='pending',ready=true,lease_id=NULL,leased_by=NULL,worker_id=NULL,lease_until=NULL,available_at=clock_timestamp()-interval '1 minute'
- FROM payment_db_executor_fence.cases c WHERE o.sale_id=(c.f->>'sale')::uuid AND o.action='open_sale';
+ FROM payment_db_executor_fence.cases c WHERE c.name IN('claim','leased','revoke') AND o.sale_id=(c.f->>'sale')::uuid AND o.action='open_sale';
 UPDATE payment_v2.operations o SET lease_id=c.lease_id,leased_by='payment_db_test_executor',worker_id='00000000-0000-0000-0000-000000000991',lease_until=clock_timestamp()+interval '10 minutes',state='leased'
  FROM payment_db_executor_fence.cases c WHERE c.name='leased' AND o.sale_id=(c.f->>'sale')::uuid AND o.action='open_sale';
 UPDATE payment_db_executor_fence.cases c SET operation_id=o.id FROM payment_v2.operations o
- WHERE o.sale_id=(c.f->>'sale')::uuid AND o.action='open_sale';
+ WHERE o.sale_id=(c.f->>'sale')::uuid AND c.name IN('claim','leased') AND o.action='open_sale';
+UPDATE payment_v2.operations o SET lease_id=c.lease_id,leased_by='payment_db_test_executor',worker_id='00000000-0000-0000-0000-000000000991',
+ lease_until=clock_timestamp()+interval '10 minutes',state='leased'
+ FROM payment_db_executor_fence.cases c WHERE c.name='allowed_wrong_lease' AND o.sale_id=(c.f->>'sale')::uuid AND o.action='acknowledge_claim';
+UPDATE payment_db_executor_fence.cases c SET operation_id=o.id FROM payment_v2.operations o
+ WHERE c.name='allowed_wrong_lease' AND o.sale_id=(c.f->>'sale')::uuid AND o.action='acknowledge_claim';
+INSERT INTO payment_v2.operations(id,sale_id,action,payload,payload_digest,expected_revision,ready,state,lease_id,leased_by,worker_id,lease_until)
+ SELECT c.operation_id,(c.f->>'sale')::uuid,'revoke_sale',jsonb_build_object('saleId',c.f->>'sale'),
+  sha256(convert_to(jsonb_build_object('saleId',c.f->>'sale')::text,'UTF8')),0,true,'leased',c.lease_id,
+  'payment_db_test_executor','00000000-0000-0000-0000-000000000991',clock_timestamp()+interval '10 minutes'
+ FROM payment_db_executor_fence.cases c WHERE c.name='revoke';
 INSERT INTO payment_v2.sale_listings(sale_id,message,signature,signer,binding,min_total_units,expires_at)
  SELECT (c.f->>'sale')::uuid,
    decode('46534f415256322d4c49535400','hex')||sha256(convert_to('w2p1-executor-fence','UTF8'))||decode(repeat('00',16),'hex'),
