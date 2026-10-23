@@ -36,7 +36,7 @@ These are gaps I confirmed while reading. Each one adds work that W1 did not lis
 | F8 | **Browser E2E needs credentials the Devnet exception forbids**, and the staging guard forbids the users E2E needs. §2b: "No Privy, Helius, treasury, Supabase or other real credentials". Staging exception: guard fails unless `auth.users` has zero rows. | `AGENT_RULES.md` 2b, staging exception [V]. | Full browser E2E on staging needs a founder amendment (decision D3). A headless E2E on devnet + the isolated container needs none. |
 | F9 | **`integrated.mjs` cannot be the E2E.** It needs a preserved network-none container and pins the old `program.so` hash. | `solana-d3.md` row `integrated.mjs`; P1c section 7 [V]. | Phase 10 writes a new harness. |
 | F10 | **The mainnet binary is a new build.** `declare_id!` is compiled in; the devnet program id's keypair is throwaway. Mainnet needs its own program keypair, so a third build (call it C) with a new hash, plus the D2 byte-proof method and a fresh run of the on-chain suite. | `solana-d2.md` (B = A with only `declare_id!` changed: 713 bytes differ) [V]. | Phase 11. |
-| F11 | **Production database state.** Applied: 059-078 (founder, 2026-10-21) and 080 (founder, 2026-10-22). 079 is a prerequisite of 080 so it is applied; **081, 081b, 082 are container+staging only; 083 is a draft**. | `payment-security.md` 5851, 6663, 6692, 6749 [V for the records; production not re-checked: the runbook's own preflight must confirm]. | The production pipeline in Phase 7 is 081 -> 081b -> 082 -> 083 -> 084. |
+| F11 | **Production database state.** Applied: 059-082. The founder applied and verified 081, 081b and 082 on 2026-10-22. 083 is a draft; 084 is not yet authored. | Founder-confirmed production record for this task; the agent did not query production. | Phase 7 step 1 is DONE. Apply 083 and 084 only after their independent reviews and founder runbooks. |
 | F12 | **Legacy Stripe/payout surface is already removed** (H1) and `settle` is v2-only. W1 gap G7 is mostly closed. | `payment-security.md` H1 section; `app/api` listing shows no `webhooks/stripe*`, no `cron/process-payouts` [V]. | Not a phase. Phase 5 deletes only `internal/solana/reconcile` once workers run. |
 | F13 | **`link-wallet` retains no proof.** It verifies a signed message, writes `users.solana_address` with the service role, and discards the signature. `wallet_accounts.proof_digest` needs a retained proof. | `link-wallet/route.ts:72-75`; `verifyWalletLink` returns only the address [V]. | Enrollment takes a fresh, network-bound proof (Phase 1/3) rather than reusing the link proof. |
 
@@ -213,12 +213,10 @@ Critical path: 0 -> 1 -> 2 -> (3, 4, 5 in parallel) -> 6 -> 8 -> 9 -> 10 -> 11 -
 Order is fixed. Each migration gets: container replay with the full payment-db suite and its own suite; a staging dry run (rolled back),
 apply and re-run refusal; a founder runbook kit in `flexsoar-reviews\prod-runbook-<n>\` with a pinned commit and sha256, checks-diff
 script and a rollback statement, written by IMPL and **read by a REV session before you run it** (the 082 kit is the template).
-1. **Production now (independent of the program work):** 081, then 081b, then 082. 082 only creates the mode table at `separated,3,0`
-   (behaviour unchanged, [V] 082 design); applying early keeps production equal to staging. **Do not switch to `solo` yet** (rule recorded in the 082/P1 sections).
+1. **Production now (independent of the program work): DONE, founder-applied and verified 2026-10-22.** Production has 081, 081b and 082; the prior migrations 059-080 are also applied. 082 created the mode table at `separated,3,0` (behaviour unchanged, [V] 082 design). **Do not switch to `solo` yet** (rule recorded in the 082/P1 sections).
 2. **083 and 084** after Phase 1's REV and after you accept the issuer design: staging first (staging has 082; it has no networks/staff/users, so
    behaviour is proven by the container only), then production **before** the mainnet DB go-live (Phase 13).
-3. Production preflights re-confirm the cluster pin (`system_identifier` 7666007964130682852) and the migration list, because my
-   production state in F11 is from records, not a live check.
+3. Production preflights re-confirm the cluster pin (`system_identifier` 7666007964130682852) and the migration list before a later founder-run apply. The founder-confirmed 059-082 state is not a live check by this agent.
 - **Founder-only.** Running every production file; keeping the pre-apply backup (as on 2026-10-21); the staging guard needs the URI in
   `C:\Users\Family\secrets\flexsoar-staging-db-url.txt` (never printed).
 - **Agent.** IMPL (author + kit), REV (kit + migration), per-task §2 / staging-exception authorization in each prompt.
@@ -343,29 +341,62 @@ governors: you and the friend, each their own `person_id` and a FlexSoar login s
 - Whether a short release delay can be used on devnet to avoid waiting 24 h in Phase 10.
 - Real Squads behaviour with hardware wallets, a time-locked upgrade multisig and a wrapped execution (D3/D4 unverified list).
 
-## 6. Decisions you must make
+## Decisions taken
+
+Recorded for W2-P0P1 by the founder on 2026-10-23:
+
+- **D1:** The issuer role writes `wallet_accounts`, with SQL cross-checks and a canary-only allow-list. Re-review before enrolling other sellers.
+- **D2:** The canary card uses founder SQL plus a reviewed script; an RPC/admin enrollment surface waits until after the canary.
+- **D3:** Run Phase 10a only for now (headless devnet plus the isolated container database). No 10b rule amendment.
+- **D4:** Use a key file on devnet. For the canary, use a Privy server wallet only if the spike proves a program-restricted policy; otherwise use a 0600 key file.
+- **D5:** Quote lifetime is 10 minutes. Canary listing lifetime is 24 hours; revoke and re-sign after expiry or material quote drift. Revisit after the canary.
+- **D6:** Prepare is an explicit seller action.
+- **D7:** The issuer-service allow-list contains the founder and friend user ids only.
+- **D8:** DigitalOcean Singapore, Ubuntu 24.04 LTS, founder-only key SSH, phone-push alerts, founder-only restore.
+- **D9:** Helius (paid if needed) plus a second RPC for cross-checks.
+- **D10:** Add a deliberate, reviewed mainnet mode to `init-v2`.
+- **D14:** Rehearse the 24-hour time-locked upgrade on devnet.
+- **D11 and D13 remain open.**
+
+### F7 design note — issuer-owned `open_sale` submission (design only)
+
+The issuer service owns this path. It reads prepared sales through a narrowly
+granted issuer reader, obtains the stored seller message through
+`listing_for_open`, rebuilds the exact `[ed25519, open_sale]` transaction,
+fee-pays and signs it with the issuer signer, then submits and confirms it.
+The service refuses a missing or mismatched stored listing and never submits a
+bare `open_sale`. A single supervised issuer process handles this queue; chain
+observation and retry use the sale address and transaction signature so a
+restart checks chain state before resubmission. The executor has no issuer
+signer, no issuer RPC grants, and no code path that builds or submits this
+transaction. Its existing generic lease RPC can expose an `open_sale` queue
+row, so Phase 2 must make the executor handler skip that action without
+attempting issuer operations; changing the shared lease RPC is outside this
+design and must be reviewed separately if a stricter queue boundary is needed.
+
+This is a routing and authority design only. It specifies no code or schema
+change beyond Phase 1's additive issuer reader if Phase 2 needs it.
+
+## 6. Decisions still open
 
 **Blocking Phase 1-2 (decide first):**
-- **D1. Who writes `wallet_accounts`.** Recommend the **issuer role** with SQL cross-checks and an allow-list. Alternative: a new sixth role (more migration, transport and grant-matrix work).
-- **D2. Card inventory enrollment for the canary.** Recommend **founder SQL plus a reviewed script** for the one canary card; build the RPC/admin UI after the canary. Alternative: build it before the canary (adds a phase).
-- **D4. Issuer custody.** Recommend: build the signer interface; use a **key file** on devnet; for the canary use the Privy server wallet **only if** the spike confirms program-restricted Solana policy, otherwise a 0600 key file. Rationale: with the seller floor the issuer key cannot under-price, so a file key plus tiny caps is an acceptable first step; confirm with the reviewer.
-- **D7. Canary allow-list.** Recommend an operator-set list of user ids in the issuer service (no schema). Alternative: a DB table (needs a migration) or none (rely on enrollment and caps only).
+- **D1. Who writes `wallet_accounts`.** Decided above.
+- **D2. Card inventory enrollment for the canary.** Decided above.
+- **D4. Issuer custody.** Decided above; retain the signer abstraction and spike requirement.
+- **D7. Canary allow-list.** Decided above.
 
 **Blocking Phase 3-5:**
-- **D5. Quote and listing lifetime, and re-quote rule.** The floor is fixed from the quote at prepare time, so FX drift beyond 2% strands the sale. Recommend a short lifetime for the canary (hours, not days), revoke and re-sign on drift. Needs your number.
-- **D6. When "prepare" happens.** Recommend an explicit seller action on the signing screen, because F3 means it can only succeed while funding is enabled.
-- **D9. Chain RPC provider and archive source** (paid account, keys held by you). Public RPC is unlikely to be enough for the observer.
+- **D5, D6, D9.** Decided above.
 
 **Blocking Phase 8-10:**
-- **D8. Host:** provider, region, OS, who may SSH, the out-of-band alert channel (a phone push is enough), and who else could restore it.
-- **D3. E2E venue.** Recommend **10a first** (devnet + container, no rule changes). For 10b on staging you must amend AGENT_RULES yourself (only `main` edits it): allow a Privy **development** app and staging Supabase keys in the Devnet exception, and relax the staging guard from "zero `auth.users`" to "every `auth.users` row is a marked synthetic test user". Say if you want that, or if 10a is enough.
-- **D12. Production migration timing.** Recommend applying 081, 081b and 082 now (no behaviour change), and 083/084 only after Phase 9.
+- **D8, D3.** Decided above.
+- **D12. Production migration timing.** Production has 059-082 applied; 081/081b/082 were applied and verified by the founder on 2026-10-22. Phase 7 step 1 is done. Apply 083/084 only after independent review and founder approval.
 
 **Blocking Phase 11-14:**
-- **D10. Mainnet `init-v2.mjs` path.** Recommend a deliberate mainnet mode (typed genesis, two-person manifest read, dry run) over doing it with hand-built transactions, subject to review.
-- **D11. People and hardware.** The friend's FlexSoar login (needed for DB governance approvals), hardware wallets for you and the friend, the sealed recovery-key holder and their written procedure, and the program keypair's custody for build C.
-- **D13. Canary numbers.** `max_trade` and `max_escrow` in USDC (W1: smallest listing price, and 3x), the canary card and price, and whether the first buyer and seller are both your accounts.
-- **D14. Time-lock rehearsal.** Confirm the 24 h upgrade multisig lock is rehearsed on devnet in Phase 11 before mainnet (recommended), which adds a day of waiting.
+- **D10. Mainnet `init-v2.mjs` path.** Decided above.
+- **D11. People and hardware. OPEN:** the friend's FlexSoar login (needed for DB governance approvals), hardware wallets for you and the friend, the sealed recovery-key holder and their written procedure, and the program keypair's custody for build C.
+- **D13. Canary numbers. OPEN:** `max_trade` and `max_escrow` in USDC (W1: smallest listing price, and 3x), the canary card and price, and whether the first buyer and seller are both your accounts.
+- **D14. Time-lock rehearsal.** Decided above.
 
 **Already decided and carried forward:** solo mode with the friend as second governor; Squads 2-of-3 governance without a time lock; separate 2-of-3
 upgrade multisig with a 24 h lock; one dedicated host; 24 h release delay; 2% FX tolerance; funding off until the canary.

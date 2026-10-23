@@ -1,5 +1,19 @@
 # Privy `signMessage` proof: how to run it (founder, in a browser)
 
+## Result recorded (founder report, 2026-10-23)
+
+**PROOF PASSED** in Chrome 155 against the Privy production app using a
+throwaway user (since deactivated). Wallet: `2hR2q…xmD7`. All 8 rows passed.
+The exact 61-byte message has SHA-256
+`f7125fc0f364c4134469517178192ce16d44875818d6cd30e5768cdf28de9830`.
+An independent off-page verification confirmed the signature is valid over
+those exact bytes and invalid over both the Solana off-chain-prefixed variant
+and a one-bit-flipped variant. This records the founder-supplied result; the
+copied JSON report was not available in this worktree.
+
+The result supersedes the unrun status below. Keep the original instructions
+and diagnostic background as a reproduction reference.
+
 This runs `docs/handoff/solana-p1b.md` section 7, steps 1-5, against an embedded Privy Solana test wallet. **I have not run it and did not
 use any Privy credential.** The seller flow depends on one fact I cannot establish from here: that Privy's `signMessage` signs the exact
 61 bytes it is given, with no prefix, wrapper or string re-encoding. The program verifies a plain Ed25519 signature over those bytes, so a
