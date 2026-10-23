@@ -6,7 +6,7 @@ skip-lint = false
 flexsoar_settlement = "CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF"
 
 [programs.devnet]
-flexsoar_settlement = "CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF"
+flexsoar_settlement = "HRqab2EMDcJKfkc4J88sxc4GVZyq5m3gNU43WMsa5Ve1"
 
 [provider]
 cluster = "http://127.0.0.1:8899"

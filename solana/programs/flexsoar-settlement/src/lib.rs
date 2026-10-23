@@ -6,7 +6,7 @@ use anchor_lang::solana_program::sysvar::instructions::{load_current_index_check
 use anchor_spl::{token::{self, Mint, Token, TokenAccount, Transfer}, associated_token::get_associated_token_address};
 pub mod protocol;
 pub use protocol::{Permit, Attestation, TAG, listing_message, listing_floor_and_expiry, ed25519_signer_and_message};
-declare_id!("CgvCAabXMe1axVCK81yAtRyNFnLM5oExtvh5K16TDcSF");
+declare_id!("HRqab2EMDcJKfkc4J88sxc4GVZyq5m3gNU43WMsa5Ve1");
 
 #[program]
 pub mod flexsoar_settlement {
