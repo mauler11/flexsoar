@@ -256,3 +256,37 @@ docker exec -e 'PGOPTIONS=-c payment_v2.test_identity=synthetic-payment-v2-only'
 | 80–82 cleanup cases, 84–90, 91–94 | — | NOT RUN after required stop at 83 |
 
 Cleanup dropped `flexsoar_payment_v2_test` and the three derived helper databases, revoked disposable test-role memberships, dropped all `payment_db_test_%` and `payment_db_race_%` roles, and verified no matching database or role names remained. The 078 source and pre-existing helper bases were untouched. `PAYMENT_DB_FINAL_ACCEPTANCE_COMPLETE` was not printed.
+
+## W2-P1-FIX continuation — G2 guardian funding-disable diagnosis (2026-10-23)
+
+### Result and classification
+
+**Classification: (b) TEST ASSUMPTION, not a kill-switch bug.** On each replay (078→082, 078→084, and 078→085), the G2 call disabled every enabled network row. No row remained with `funding_enabled=true`; there was no swallowed error, row-state filter, lock skip, or 084/085 regression. The 83 assertion assumes its seven fixture networks are the only enabled networks and asserts `n=7`. The required suite prefix had already committed 15 enabled synthetic networks before 83 created its seven G2 fixtures, so the actual correct return count was 22.
+
+No test or migration was edited. This note is the only repository change for this diagnosis.
+
+### Reproduction procedure and exact observation
+
+Used verified isolated network-none container `6ef7375a8c4e4516b2edf3a5828c20269962905eac73ca70c1dd9c982f4fff21`. Each target was cloned from the 078 baseline and replayed only through the named migration. The 085 target ran the documented suite prefix through 71, then the exact 83 G2 fixture setup/reconciliation and guardian call in a rollback-only diagnostic probe. The same prefix and probe were run against 082 and 084 control clones. Before the G2 setup, the 085 prefix had 15 enabled networks; G2 added seven (A, B, C, D, E, R, S), making 22.
+
+| Replay | Rows before G2 call | Enabled before | RPC return | Rows after | Enabled after | NOTICE / error |
+|---|---:|---:|---:|---:|---:|---|
+| 078→082 | 22 | 22 | 22 | 22 | 0 | None |
+| 078→084 | 22 | 22 | 22 | 22 | 0 | None |
+| 078→085 | 22 | 22 | 22 | 22 | 0 | None |
+
+The full row snapshots showed the network relation has `id, genesis, program, config, mint, token_program, treasury, treasury_token, issuer, authority_epoch, policy_version, funding_enabled, max_trade_units, max_escrow_units`; there are no pause, outflow, or state columns. All 22 rows on each run had `max_trade_units=50000000` and `max_escrow_units=100000000`. Every listed ID was `funding_enabled=true` before the call and `false` after it.
+
+IDs observed, grouped by replay (the snapshots include all columns above):
+
+- **078→082 (22):** `0da821de-877a-4a05-b806-a5a22d41766f`, `0e479259-96f6-406b-a074-3e427c8e2777`, `1aa35313-b0b7-4c27-a08b-1e82ba87ad9c`, `1e79d080-10d7-4488-a548-4646c96ecdf0`, `1ffc0175-899e-4d14-a177-19f26995cacd`, `3e1b2fbf-219a-4c99-acb4-705e85d23593`, `4e53e7a3-332b-4b27-8408-a58fa4139bd5`, `5284308b-54cc-4422-a932-855f0b8dc1d8`, `530a77d1-536e-482d-a2ab-fbb15c874192`, `55d8caab-2ba7-4fc4-9a63-0e61d4b1e9c2`, `56359cfa-6398-4d3e-9b57-97f1fa208a28`, `71fe199b-2c5d-4e8d-b105-1e192b39c38f`, `76700ba5-a712-4c97-b8c5-52c58f0840b1`, `76b21512-adce-4325-b405-d1ba7f6c3482`, `89da58ab-34e4-4926-b6fe-ce68f380dc53`, `9579b57d-a1aa-4975-9b56-e3e3324f5f83`, `957ddeb7-e92b-4785-bfa1-0de379166d67`, `9aa55bfe-6e13-4a13-b8b9-184c7a505beb`, `a78d41ad-6d34-49bb-974b-48fdebe4c120`, `c96969cd-c2b3-4bc7-8e69-e432f517cf59`, `e5392102-46c2-4e47-99a5-9a8867740e1f`, `fcc659c0-cd45-4a48-8783-a3db4046b9ea`.
+- **078→084 (22):** `040e4076-32cd-4753-8181-bd353565f2ac`, `0acaffbd-8b1e-4cae-a98a-0dbe48be1460`, `1d856f96-d988-447f-8219-54e1d9072093`, `20ea9832-03ce-4a23-ade5-6a8930df9419`, `249f081b-18af-4ccb-ab7c-e3a66eeb8574`, `38a2ec0c-dea4-4cec-85fb-94b68e453ca4`, `3c9aad74-1c6a-4cf6-84cc-1487e7e9f7fb`, `59533be2-77dc-493b-9321-343c8d38076e`, `74aa0ab2-8138-4b0b-ace2-85c90c24c435`, `7b8e894b-9aa4-4ddc-b5a2-56aafb682462`, `7c7ca80c-d277-4c9f-80d4-e4d6e3031ec0`, `84b33d28-d1d0-4d9f-8e5f-24b7de9b6a3e`, `8a5faaa4-141c-47c4-b4cf-1944276d589f`, `8fe067b9-e25c-4d55-a279-3304dda0b192`, `95c9b767-2601-4fba-81bf-87c1e1826c9a`, `95dc87c3-c7dd-4d0c-a95d-152800099a0f`, `a38468c9-598a-419a-8127-69630da26f89`, `a42856fd-489c-4d38-b2b7-59d7e3c2d4f1`, `bb2eeec8-9a58-4877-85b5-69cb90e912c0`, `c99426e7-1ba2-48d8-9e22-f37546518f63`, `ecddbded-5deb-42cf-9884-8f81ad6c86b3`, `fe7bb933-5df7-4752-8f17-41d52f38613f`.
+- **078→085 (22):** `02a6e0b2-ed45-4741-95de-6e85dc625bcf`, `094ef6f5-65c6-400c-b469-52bdc69a1912`, `27e441af-b287-487d-838f-b8c80fa1ec4e`, `2bec2fab-fdb8-41e1-bc13-71dba765491b`, `2c25e539-b74d-4a5d-8ebf-ea527c441a6c`, `3f7d7a2d-b25b-46ca-bf69-40ebd3ad26a4`, `74325f9a-4abe-4e82-8ccd-17f5fc96051d`, `76bd47e0-17f6-48d9-87d5-b408ffaf2572`, `923c7de3-1fd1-42d6-a16f-e245d95d73fa`, `9f33a897-7751-4e2c-af8b-0de5becae187`, `b67594e9-b66c-4635-a525-a5fe7e472c88`, `bdf8e0d6-c497-4855-855f-8a8b326d1251`, `c2ddd1bd-17a9-464e-bd26-ec2808ca2460`, `c7527f34-ec4d-48f5-b3c0-bebb7c7035dd`, `d012f5aa-91d8-4d98-8893-685b4b64179d`, `d25a1daa-c281-4afb-ad92-ea98089ab94c`, `ddd50cf1-1674-4a55-a5da-1babb4cc9a50`, `df6ec6f7-599b-4ca7-afcb-794922939b68`, `f08b2aab-a958-4b3a-9ead-490353dee561`, `fa03b7bc-fe3e-48d2-80ea-6ed1b925314e`, `fad06294-a928-4ae5-be21-7fa796fb9d62`, `fc871a95-4314-4a5c-adc8-68bbda1f0236`.
+
+### Function and migration comparison
+
+In 082, 084, and 085, `fn_payment_v2_disable_funding` has identical `md5(prosrc) = 233706325f97c1d1b4ffffc8e7f1bffa`, owner `payment_v2_owner`, `SECURITY DEFINER`, `search_path=pg_catalog`, and ACL `{payment_v2_owner=X/payment_v2_owner,authenticated=X/payment_v2_owner}`. Its body verifies an active guardian/governor, then runs `UPDATE payment_v2.networks SET funding_enabled=false WHERE funding_enabled`, reads `ROW_COUNT`, and returns it. It has no status predicate or `SKIP LOCKED`; the all-rows update completed on all three versions. The 085 queue-fixture action change did not affect the network count or function.
+
+### Cleanup
+
+Dropped all task-created diagnostics (`flexsoar_diag_pre79`, `flexsoar_diag_pre81`, `flexsoar_diag_082base`, `flexsoar_diag_082`, `flexsoar_diag_084`, `flexsoar_diag_085`) and `flexsoar_payment_v2_test`. Dropped the nine disposable `payment_db_test_%` and `payment_db_race_%` logins after revoking their worker-role memberships and dropping owned objects. Final query returned no matching database or login names. The 078 source and pre-existing helper databases were preserved. `postgres` did not have the required cluster authority for role cleanup; cleanup was completed as `supabase_admin` (superuser) inside the isolated container.
