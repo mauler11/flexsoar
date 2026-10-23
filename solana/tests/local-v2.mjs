@@ -63,6 +63,20 @@ const isInstructionFailure=e=>e instanceof LocalInstructionFailure && Array.isAr
 // a test that claims the actual program rejected a command.
 async function rejectsOnChain(promise){await assert.rejects(promise,isInstructionFailure);}
 function checkRaceLoser(results){for(const r of results)if(r.status==='rejected')assert.ok(isInstructionFailure(r.reason),String(r.reason));}
+// Maps a confirmation attempt onto the harness contract: RESOLVES only when the chain reports no error. Every other outcome rejects.
+// web3.js can reject with the raw chain error instead of returning value.err, so a rejection is checked against the submitted
+// signature's recorded status: a real InstructionError becomes LocalInstructionFailure; anything else (no status, a non-instruction
+// error, a transport failure or timeout) rethrows the ORIGINAL error. The catch block has no path that returns normally.
+async function settle(signature,confirm){
+  let confirmation;
+  try { confirmation=await confirm(); }
+  catch(error){
+    const status=(await connection.getSignatureStatuses([signature])).value[0];
+    if(status?.err && Array.isArray(status.err.InstructionError))throw new LocalInstructionFailure(signature,status.err);
+    throw error;
+  }
+  if(confirmation.value.err)throw new LocalInstructionFailure(signature,confirmation.value.err);
+}
 async function send(instructions,signers=[],tables=[],payer=bootstrap){
   const block=await connection.getLatestBlockhash('confirmed');
   const message=new TransactionMessage({payerKey:payer.publicKey,recentBlockhash:block.blockhash,instructions:[ComputeBudgetProgram.setComputeUnitLimit({units:500000+(nonce++%10000)}),...instructions]}).compileToV0Message(tables);
@@ -70,8 +84,7 @@ async function send(instructions,signers=[],tables=[],payer=bootstrap){
   assert.ok(tx.serialize().length<=1232,'reviewed lookup table must fit packet');
   // Failed commands must execute on our owned validator, not merely preflight.
   const signature=await connection.sendRawTransaction(tx.serialize(),{skipPreflight:true});
-  const confirmation=await connection.confirmTransaction({signature,...block},'confirmed');
-  if(confirmation.value.err)throw new LocalInstructionFailure(signature,confirmation.value.err);
+  await settle(signature,()=>connection.confirmTransaction({signature,...block},'confirmed'));
   for(const name of cuNames)if(instructions.some(i=>i.programId.equals(program)&&i.data.subarray(0,8).equals(disc(name))))cuLog.push({name,signature});
   return signature;
 }
@@ -531,6 +544,37 @@ try {
     vaultChecks='exercised with CPI-signed PDA vaults (mock programs; NOT the Squads program)';
   }
   console.log(`P1 scenarios: ${checks-p1Start} groups passed; vault path: ${vaultChecks}`);
+  // D2 harness self-test: the confirmation-error path must never turn a failure into success. Uses the real validator's status.
+  {
+    const selfStart=checks;
+    const landed=async signature=>{for(let i=0;i<60;i++){if((await connection.getSignatureStatuses([signature])).value[0])return;await pause(250);}throw new Error('self-test tx never landed');};
+    const submit=async(instructions,signers=[],blockhash)=>{
+      const block=await connection.getLatestBlockhash('confirmed');
+      const message=new TransactionMessage({payerKey:bootstrap.publicKey,recentBlockhash:blockhash??block.blockhash,instructions:[ComputeBudgetProgram.setComputeUnitLimit({units:500000+(nonce++%10000)}),...instructions]}).compileToV0Message();
+      const tx=new VersionedTransaction(message);tx.sign([bootstrap,...signers]);
+      return connection.sendRawTransaction(tx.serialize(),{skipPreflight:true});
+    };
+    const rawChainError={InstructionError:[1,{Custom:FAULT.Authority}]}; // thrown as a plain object, as web3.js can
+    const throwing=async()=>{throw rawChainError;};
+    // 1. known-failing instruction (one governor is not governance) + confirmation that THROWS: still fails, with the real chain error.
+    const failing=await submit([ix('set_pause',[meta(config,false,true),meta(gov[0].publicKey,true),meta(gov[0].publicKey,true)],Buffer.from([0,0]))],[gov[0]]);
+    await landed(failing);
+    await rejectsWith(FAULT.Authority,settle(failing,throwing));checks++;
+    // 2. known-failing instruction + confirmation that RESOLVES with the error: unchanged path, still fails.
+    await rejectsWith(FAULT.Authority,settle(failing,async()=>({value:{err:rawChainError}})));checks++;
+    // 3. SUCCESSFUL transaction + throwing confirmation: no failure status exists, so the ORIGINAL error is rethrown, never success.
+    const ok=await submit([]);await landed(ok);
+    await assert.rejects(settle(ok,throwing),e=>e===rawChainError,'a throwing confirmation is never reported as success');checks++;
+    // 4. never-landed transaction (unknown blockhash, dropped by the validator) + throwing confirmation: rethrown, never success.
+    const ghost=await submit([],[],Keypair.generate().publicKey.toBase58());
+    assert.equal((await connection.getSignatureStatuses([ghost])).value[0],null,'ghost tx must not exist on chain');
+    await assert.rejects(settle(ghost,throwing),e=>e===rawChainError);checks++;
+    // 5. a non-instruction error is not reclassified as an instruction failure.
+    await assert.rejects(settle(ok,async()=>{throw new Error('timeout');}),e=>e.message==='timeout'&&!isInstructionFailure(e));checks++;
+    // 6. the only resolving path: confirmation reports no error.
+    assert.equal(await settle(ok,async()=>({value:{err:null}})),undefined);checks++;
+    console.log(`Harness self-test: ${checks-selfStart} confirmation-path groups passed (counted in the total)`);
+  }
   await reportComputeUnits();
   console.log(`LOCAL VALIDATOR ONLY: ${checks} on-chain scenario groups passed; no database integration asserted.`);
   if(mockSo){

@@ -6854,3 +6854,24 @@ Log (outside the repo): `C:\Users\Family\flexsoar-reviews\devnet-20261023\rehear
 - **Also blocked later:** `@sqds/multisig` is not installed (DEPS.md request filed, `2.1.3` unconfirmed against the registry).
 - **Privy proof (not run):** `app/dev/privy-sign-proof` (404 in production, development only; production build checked: no runner code in any
   chunk), logic in `lib/solana/privy-proof.ts` (14 tests), run instructions in `docs/handoff/privy-sign-proof.md`.
+
+## 2026-10-23 - D2 program finalisation: local only, STOP for independent R4
+
+Full report: **`docs/handoff/solana-d2.md`**; exhaustive offsets: **`docs/handoff/solana-d2-byte-proof.json`**.
+This supersedes D1/P1c's documented acceptance of R3-01: the program now excludes the active vault from the dormant native list
+on rotation, using existing `VaultConflict` 6017. Exact-code on-chain regressions cover every seat, both vault slots, proposal,
+acceptance against invalid genesis fixtures, and repair of existing overlaps. Existing assertions are unchanged.
+
+- `48bd02a`: exact task-scoped Devnet-exception limiter, committed separately.
+- `32a15c3`: R3-01 fix and tests (build A, original ID). `f373b4d`: only `declare_id!` and Anchor's devnet entry changed for build B.
+- **B:** `HRqab2EMDcJKfkc4J88sxc4GVZyq5m3gNU43WMsa5Ve1`, **573824 bytes**, SHA-256
+  `61da352f0a316f8a20f0e0690bc659854b00af260761ade1f6538d1da411defc`. No deploy or external network action.
+- **Byte proof ACCEPTED (founder decision):** replacing the raw ID occurrence plus 88 LDDW ID immediates in A reproduces B byte for byte
+  (713 differing bytes, 0 unexplained); 3 controls pass. The earlier strict contiguous-32-byte condition fails (31 of 713 bytes) and is
+  recorded as superseded: LLVM folds Pubkey comparisons into LDDW immediates.
+- Confirmation handling audited: `settle()` cannot turn a failed or never-landed tx into success; a 6-group on-chain self-test was added.
+- On-chain (current harness): **A 204 + 12 genesis, B 204 + 12 genesis** groups passed; peak RSS ~1.64 GB each. `cargo test --lib` 18,
+  `npm test` 763, `tsc` clean, eslint 0 errors. CU: R3-01 guard +21 on `rotate_governance`; B is 3,000 CU lower on config-PDA
+  instructions (bump change). Details in the full D2 report.
+- No account layout, instruction signature or error-code changes; no new exports. R3-02 keeps the documented version-1 baseline.
+- **STOP: independent R4 in a fresh session comes next; no devnet action is authorized by these results.**
