@@ -6887,3 +6887,8 @@ R4-2 stale-encoding proof plus 8 adversarial controls, R4-3 limiter wording and 
 Full report: **`docs/handoff/solana-d4.md`**. Upgrade to the same build B via a 2-of-3 Squads proposal on the upgrade multisig: PASS (dump hash still `61da352f...defc`, slot advanced,
 authority still UV, governance still works, native still 6001). Time lock (120 s, third throwaway multisig): early execute refused with Squads 6021 `TimeLockNotReleased`, execute after the
 lock succeeded. Runbook `solana-p1b.md` section 11 updated per D3. Funding never enabled. Unverified: changed-binary upgrade, locked upgrade multisig, relayer wrapping, `integrated.mjs`.
+
+## 2026-10-23 - PP1: Privy proof page wallet detection
+
+Root cause and fix in `docs/handoff/privy-sign-proof.md` (PP1). Dev page used the Ethereum-only root `useWallets()`; now uses `@privy-io/react-auth/solana` with readiness handling
+(`lib/solana/privy-wallet-detect.ts`, 9 tests). The same pattern in `components/market/EmbeddedWalletSection.tsx` and `SendDialog.tsx` (market lane) likely has the same bug: needs filing with the market track.

@@ -77,3 +77,14 @@ console.log(verify(null, Buffer.from(report.messageHex, 'hex'), key, Buffer.from
 - The logic is `lib/solana/privy-proof.ts`, unit-tested (`tests/solana-privy-proof.test.ts`, 14 tests) with signers that wrap with the
   off-chain prefix, sign the hex or base64 string, coerce through UTF-8, return short signatures, throw, or sign with another key: each is
   stopped at the step this table says. That proves the proof can fail; it proves nothing about Privy itself.
+
+## PP1 - wallet detection fix (2026-10-23)
+
+Symptom: logged in, dashboard shows an SVM embedded wallet, page said "no embedded Solana wallet yet", and "Create" answered "User already has an embedded wallet".
+Root cause: the page took wallets from `useWallets()` of `@privy-io/react-auth` (3.42.0), which returns Ethereum `ConnectedWallet`s only, then filtered with `firstSolanaWallet`
+(`chainType === "solana"`). Solana embedded wallets exist only in `useWallets()` from `@privy-io/react-auth/solana` (`ConnectedStandardSolanaWallet`, which has no `chainType` field), so
+the list never contained the wallet and, even if it had, the filter would have rejected it. Fix: the page now uses the Solana hook and its own `ready` flag, via
+`lib/solana/privy-wallet-detect.ts` (`detectSolanaWallet`: waiting until Privy AND the wallets list are ready, then found/missing), shows the detected address and what the hook returned,
+and offers "Create" (Solana `useCreateWallet`) only in the missing state. `lib/solana/privy-proof.ts` and every verification step are unchanged.
+Not fixed here (other lane): `components/market/EmbeddedWalletSection.tsx` and `components/market/SendDialog.tsx` use the same root `useWallets()` + `firstSolanaWallet` pattern and very likely have
+the same bug in the main app; file with the market track. Unverified: I could not run Privy live, so the fix is proven by the 3.42.0 type definitions and unit tests, not by a login.

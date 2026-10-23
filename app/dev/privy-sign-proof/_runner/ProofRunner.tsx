@@ -8,10 +8,13 @@
 "use client";
 
 import { useState } from "react";
-import { usePrivy, useWallets } from "@privy-io/react-auth";
+import { usePrivy } from "@privy-io/react-auth";
+// The SOLANA hook: the package root's useWallets() returns Ethereum wallets only (see lib/solana/privy-wallet-detect.ts).
+import { useWallets } from "@privy-io/react-auth/solana";
 import { Button } from "@/components/ui/Button";
 import { CreateWalletButton } from "@/components/market/EmbeddedWalletSection";
-import { extractSignatureBytes, firstSolanaWallet } from "@/lib/solana/privy";
+import { extractSignatureBytes } from "@/lib/solana/privy";
+import { detectSolanaWallet } from "@/lib/solana/privy-wallet-detect";
 import { runSignMessageProof, type ProofReport } from "@/lib/solana/privy-proof";
 
 export function ProofRunner() {
@@ -32,11 +35,12 @@ export function ProofRunner() {
 
 function Runner() {
   const { ready, authenticated, login, logout } = usePrivy();
-  const { wallets } = useWallets();
+  const { ready: walletsReady, wallets } = useWallets();
   const [report, setReport] = useState<ProofReport | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
-  const wallet = firstSolanaWallet(wallets);
+  const detection = detectSolanaWallet({ privyReady: ready, walletsReady, authenticated, wallets });
+  const wallet = detection.status === "found" ? detection.wallet : null;
 
   async function run() {
     if (!wallet || busy) return;
@@ -45,7 +49,7 @@ function Runner() {
       setReport(await runSignMessageProof({
         address: wallet.address,
         signMessage: async (message: Uint8Array) => {
-          const raw = await wallet.signMessage({ message, address: wallet.address });
+          const raw = await wallet.signMessage({ message });
           const bytes = extractSignatureBytes(raw);
           if (!bytes) throw new Error("the wallet returned something that is not signature bytes");
           return bytes;
@@ -64,17 +68,18 @@ function Runner() {
         anywhere and signs no transaction. Use a throwaway email and a Privy development app.
       </p>
 
-      {!ready && <p className="text-sm">Preparing Privy…</p>}
-      {ready && !authenticated && <div><Button type="button" variant="secondary" size="md" onClick={() => login()}>Log in (throwaway email)</Button></div>}
-      {ready && authenticated && !wallet && (
+      {detection.status === "waiting" && <p className="text-sm">Preparing Privy and wallets…</p>}
+      {detection.status === "signed-out" && <div><Button type="button" variant="secondary" size="md" onClick={() => login()}>Log in (throwaway email)</Button></div>}
+      {detection.status === "missing" && (
         <div className="flex flex-col gap-2">
-          <p className="text-sm">Logged in, but there is no embedded Solana wallet yet.</p>
+          <p className="text-sm">Logged in and Privy is ready, but this session has no Solana wallet.</p>
+          <p className="font-mono text-xs break-all">Solana hook returned {detection.seen.length} wallet(s){detection.seen.length ? ": " + detection.seen.join(", ") : ""}</p>
           <CreateWalletButton />
         </div>
       )}
-      {ready && authenticated && wallet && (
+      {detection.status === "found" && wallet && (
         <div className="flex flex-col gap-2">
-          <p className="text-sm">Wallet <span className="font-mono">{wallet.address}</span></p>
+          <p className="text-sm">Solana embedded wallet (match this to the Privy dashboard): <span className="font-mono break-all">{detection.address}</span></p>
           <div className="flex gap-3">
             <Button type="button" variant="secondary" size="md" disabled={busy} onClick={run}>{busy ? "Running… approve each prompt" : "Run proof (steps 1-5)"}</Button>
             <button type="button" className="text-sm underline" onClick={() => logout()}>Log out</button>
