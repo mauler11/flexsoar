@@ -18,3 +18,22 @@ Review acted on: `C:\Users\Family\flexsoar-reviews\proposals-20261023\r4\d2-secu
 Checks after Part 0: `npm test` 763 passed / 34 files; `cargo test --locked --offline --lib` 18 passed; `npx tsc --noEmit` clean;
 eslint 0 errors (3 pre-existing unused-variable warnings in `integrated.mjs`). The full 204+12 on-chain suite was NOT re-run (no program or
 `local-v2.mjs` change); only the genesis script (which changed) was run, against B and the scratch build.
+
+## Part 1 - devnet rehearsal: STOPPED at step 4 (no funds)
+
+Log (outside the repo, no keys): `C:\Users\Family\flexsoar-reviews\devnet-20261023\rehearsal-log.md` (section "D3").
+Throwaway keys moved into `C:\Users\Family\flexsoar-devnet-keys\d3\` (23 files, none printed); `devnet-keys.mjs` now uses that per-task folder.
+New scripts (all behind the genesis guard): `solana/scripts/devnet-d3.mjs` (helpers), `solana/scripts/devnet-d3-steps.mjs` (`preflight`, `airdrop`).
+
+| Step | Result |
+|---|---|
+| 3. fresh-id inventory | **PASS, read-only.** `program.json` derives `HRqab2EM...Ve1`; program account absent; 0 accounts owned; config PDA `KZ6sP4yq...fya6` absent; B artifact 573,824 bytes, sha256 `61da352f...defc`. Squads `SQDS4ep6...pCf` is an executable program on devnet (founder amendment: shown before step 6). The init-v2 `--dry-run` cannot run before deploy by design (it requires a deployed program with the bootstrap as authority), so inventory is done directly. |
+| 4. deploy, dump, hash | **NOT RUN.** Deployer has 0 SOL; ~9 SOL needed (700,000-byte max-len programdata rent plus buffer). The devnet faucet returned `Internal error`, then HTTP 429 "reached your airdrop limit today or the faucet has run dry". |
+| 5-9, Squads checklist, `integrated.mjs` | **NOT RUN** (blocked by 4). |
+
+Network actions taken: read-only RPC calls and four faucet requests (2, 1, 1, 2 SOL), all after a devnet genesis check. **Transactions sent: 0. Accounts created: 0.**
+Nothing was weakened; I did not use the web faucet (needs a browser login) or any other funding source, since 2b allows faucet SOL only.
+
+Unblock options for the founder: (a) wait for the faucet limit to reset and re-run `node solana/scripts/devnet-d3-steps.mjs airdrop 2` repeatedly;
+(b) fund deployer `6J88dRi3T5465bcntkrSWyT3o3bfM7Zd2KNMFPgUFoue` with devnet SOL from faucet.solana.com yourself (that is a funding decision for you,
+not an agent action); (c) if less SOL is acceptable, say so in the next prompt, since a smaller `--max-len` departs from the runbook's 700,000.
