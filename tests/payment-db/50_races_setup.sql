@@ -43,11 +43,16 @@ END $prepare$;
 -- Remove other synthetic queue work from eligibility, then create exactly two worker items/jobs.
 UPDATE payment_v2.operations SET ready=false WHERE state<>'observed';
 UPDATE payment_v2.outbox SET available_at=clock_timestamp()+interval '1 day';
-DO $queues$ DECLARE f jsonb;s uuid;e uuid;q1 uuid;q2 uuid;BEGIN
- f:=pg_temp.fixture(0::smallint,3600);PERFORM public.fn_payment_v2_reconcile_event((f->>'event')::uuid);
+DO $queues$ DECLARE f jsonb;s uuid;e uuid;q1 uuid;q2 uuid;ord uuid;rev numeric;payload jsonb;BEGIN
+ f:=pg_temp.fixture(1::smallint,3600);PERFORM public.fn_payment_v2_reconcile_event((f->>'event')::uuid);
  s:=(f->>'sale')::uuid;e:=(f->>'event')::uuid;
- q1:=payment_v2.enqueue(s,'test_lease_only',jsonb_build_object('synthetic',true,'index',1),0);
- q2:=payment_v2.enqueue(s,'test_lease_only',jsonb_build_object('synthetic',true,'index',2),0);
+ SELECT id INTO ord FROM public.orders WHERE payment_v2_attempt_id=(f->>'attempt')::uuid;
+ SELECT decision_revision INTO rev FROM payment_v2.events WHERE id=e;
+ payload:=jsonb_build_object('saleId',s,'eventId',e,'orderId',ord);
+ -- The fixture's own acknowledgement is real; disable it so the two race rows below are the only lease candidates.
+ UPDATE payment_v2.operations SET ready=false WHERE sale_id=s AND action='acknowledge_claim';
+ q1:=payment_v2.enqueue(s,'acknowledge_claim',payload,rev);
+ q2:=payment_v2.enqueue(s,'acknowledge_claim',payload,rev);
  f:=f||jsonb_build_object('operationIds',jsonb_build_array(q1,q2),'outboxIds',(SELECT jsonb_agg(id) FROM payment_v2.outbox WHERE event_id=e));
  INSERT INTO payment_db_races.cases VALUES('operations',f),('outbox',f),('operation_takeover',f),('outbox_takeover',f);
 END $queues$;

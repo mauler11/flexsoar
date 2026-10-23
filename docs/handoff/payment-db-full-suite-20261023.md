@@ -165,3 +165,94 @@ were dropped. All `payment_db_test_%` and `payment_db_race_%` disposable roles
 were removed after revoking their worker memberships. A final catalog query
 returned no matching database or role rows. The source 078 database was left
 untouched.
+
+## Continuation run after executor-action audit — stopped at 083
+
+Run used only container `6ef7375a8c4e4516b2edf3a5828c20269962905eac73ca70c1dd9c982f4fff21`, reverified as `NetworkMode=none`, no port bindings, `Privileged=false`, running, with loopback only. Source `flexsoar_mig_test_20261021` was verified as 078 and left untouched. A fresh chain was built from it through 079–085. An initial helper invocation attempted to reapply 082 to an already-derived helper database and hit 082's expected body-pin refusal; that helper was discarded and rebuilt from 081b. The final target was freshly cloned from the clean 083 helper before applying 084 and 085.
+
+085 action audit result: every production executor action is covered. `execute_outcome` and `acknowledge_claim` are allowed by 085. `open_sale` and `revoke_sale` are issuer operations. Decision actions are staff-submitted and verifier-attested; the verifier marks them observed, so they do not need executor leases. No app or worker code inserts operations directly; enqueue calls are in migrations 060–062/067. The race fixture now uses a genuine direct-sale acknowledgement payload, disables that fixture's original acknowledgement row, then creates two equivalent eligible acknowledgement rows. The race assertions are unchanged.
+
+| Action | Lease / actor role | Allowed by 085 for executor? | Why |
+|---|---|---:|---|
+| `open_sale` | `payment_v2_issuer` (issuer queue/context; no executor lease) | No | 060 enqueues it; 084 exposes the issuer-only open-sale queue and 068 supplies issuer context. |
+| `revoke_sale` | `payment_v2_issuer` context; no separate revoke queue/lease RPC found | No | 062 enqueues it; 068 permits issuer-only revoke context. |
+| `receipt` | Receiver staff; no worker lease | No | 061/067 decision operation is closed by verifier attestation, which marks it observed. |
+| `authentication_pass` | Authenticator staff; no worker lease | No | Same decision/attestation path. |
+| `authentication_fail` | Authenticator staff; no worker lease | No | Same decision/attestation path. |
+| `release` | Release staff; no worker lease | No | Verifier attests the staff instruction; terminal outcome schedules `execute_outcome`. |
+| `refund` | Governor staff; no worker lease | No | Two-governor approval gates the decision; verifier attests it; outcome execution uses `execute_outcome`. |
+| `dispute` | Guardian staff; no worker lease | No | Verifier attests the staff instruction; it is not an executor transaction. |
+| `review_authentication_pass` | Reviewer staff; no worker lease | No | Same decision/attestation path. |
+| `review_authentication_fail` | Reviewer staff; no worker lease | No | Same decision/attestation path. |
+| `resolve_dispute_release` | Governor staff; no worker lease | No | Governance decision is verifier-attested; no executor queue action is generated for it. |
+| `resolve_dispute_refund` | Governor staff; no worker lease | No | Governance decision is verifier-attested; terminal outcome schedules `execute_outcome`. |
+| `execute_outcome` | `payment_v2_executor` | Yes | 061 enqueues the chain outcome after the verifier accepts terminal authorization. |
+| `acknowledge_claim` | `payment_v2_executor` | Yes | 061 enqueues acknowledgement after committed claim reconciliation. |
+
+The run stopped at `83_solo_mode.sql` as required. Stage G2 raised `ASSERT: guardian disabled funding on all 7 networks`; the expected assertion is `n=7 AND NOT EXISTS(SELECT 1 FROM payment_v2.networks WHERE funding_enabled)`. This is not an identity or invocation mismatch. No tests were changed in response. Tests 84 onward were not run and final acceptance was not reached.
+
+### Replay identities and results
+
+Migration command template:
+
+```sh
+docker exec 6ef7375a8c4e4516b2edf3a5828c20269962905eac73ca70c1dd9c982f4fff21 \
+  psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d DATABASE \
+  -f /tmp/w2p1-full/MIGRATION.sql
+```
+
+| Migration | Database | Login | Result |
+|---|---|---|---|
+| 079_review_approval_is_not_authentication.sql | flexsoar_084_pre79 | postgres | PASS |
+| 080_post_079_cleanup.sql | flexsoar_084_pre79 | postgres | PASS |
+| 081_revoke_public_set_card_visibility.sql | flexsoar_084_pre81 | postgres | PASS |
+| 081b_retire_prelaunch_test_item.sql | flexsoar_084_pre81 | postgres | PASS |
+| 082_payment_v2_solo_operator_mode.sql | flexsoar_084_pre81b (fresh clone) | postgres | PASS |
+| 083_payment_v2_seller_listing_floor.sql | flexsoar_084_pre81b | postgres | PASS |
+| 084_payment_v2_wallet_enrollment_and_views.sql | flexsoar_payment_v2_test | postgres | PASS |
+| 085_payment_v2_executor_action_fence.sql | flexsoar_payment_v2_test | postgres | PASS |
+
+Normal single-file test command template:
+
+```sh
+docker exec -e 'PGOPTIONS=-c payment_v2.test_identity=synthetic-payment-v2-only' CONTAINER \
+  psql -X -v ON_ERROR_STOP=1 -v payment_v2_test_ack=ISOLATED_SYNTHETIC_ONLY \
+  -h 127.0.0.1 -U LOGIN -d flexsoar_payment_v2_test -f /tmp/w2p1-current/FILE.sql
+```
+
+| File(s) | Login / command variables | Result |
+|---|---|---|
+| 03_completion_setup.sql, 04_sdk_encoding_vectors.sql, 05_encoding.sql | `supabase_admin`, normal template | PASS |
+| 06_export_encoding_permit.sql | `supabase_admin`, normal template with `-qAt`; offline `node tests/payment-db/make-encoding-vectors.mjs permit` matched actual SQL permit (690 bytes) | PASS |
+| 07_encoding_acceptance.sql | `supabase_admin`; psql include driver set exact `comparison_json` before including 07 | PASS |
+| 08_terms_guard.sql, 09_exact_fee.sql, 10_contracts.sql, 20_outcomes_recovery.sql, 30_permissions.sql | `supabase_admin`, normal template | PASS |
+| 35_workers_setup.sql | `supabase_admin`, normal template | PASS |
+| 36_worker_issuer.sql | `payment_db_test_issuer`, normal template | PASS |
+| 37_worker_verifier.sql | `payment_db_test_verifier`, normal template | PASS |
+| 38_worker_settler.sql | `payment_db_test_settler`, normal template | PASS |
+| 39_worker_executor.sql | `payment_db_test_executor`, normal template | PASS |
+| 40_concurrency_setup.sql | `supabase_admin`, normal template | PASS |
+| 40_worker_notifier.sql | `payment_db_test_notifier`, normal template | PASS |
+| 45_export_synthetic_plan.sql | `payment_db_test_executor`, normal template with `-qAt`; offline `make-signed-fixture.mjs ISOLATED_SYNTHETIC_ONLY` generated a non-broadcastable synthetic envelope in OS temp | PASS |
+| 46_worker_results.sql | `supabase_admin`, normal template | PASS |
+| 47_signed_storage_contract.sql | `payment_db_test_executor`; psql include driver supplied operation id, lease id, and offline envelope | PASS |
+| 41_session_a.sql / 42_session_b.sql, `race_mode=0` | Separate interactive psql backends, both `supabase_admin`; A committed after B showed a transaction lock wait | PASS |
+| 41_session_a.sql / 42_session_b.sql, `race_mode=1` | Separate interactive psql backends, both `supabase_admin`; A committed after B showed a transaction lock wait | PASS |
+| 50_races_setup.sql | `supabase_admin`, normal template; current fixture | PASS |
+| 51_race_a.sql / 52_race_b.sql / 53_race_assert.sql, `conflicting_signature` | A settler / B verifier; assertion `supabase_admin`; `worker_role=payment_v2_settler` / `payment_v2_verifier` | PASS; lock wait observed |
+| Same files, `conflicting_attempt` | A settler / B verifier; assertion `supabase_admin` | PASS; lock wait observed |
+| Same files plus 58/59 terminal consumption, `release_refund` | A/B verifier; two separate settler sessions for 58/59; assertion `supabase_admin` | PASS; lock waits observed |
+| Same files plus 58/59 terminal consumption, `refund_release` | A/B verifier; two separate settler sessions for 58/59; assertion `supabase_admin` | PASS; lock waits observed |
+| Same files, `funding_cancel` | A `supabase_admin`; B settler; assertion `supabase_admin` | PASS; lock wait observed |
+| Same files, `funding_revoke` | A settler / B verifier; assertion `supabase_admin` | PASS; lock wait observed |
+| Same files, `revoked_funding` | A/B verifier; assertion `supabase_admin` | PASS; lock wait observed |
+| Same files plus 60_rollback_ack.sql, `rollback` | A/B settler; A rolled back and ran 60 in same backend; assertion `supabase_admin` | PASS; lock wait observed |
+| 57_prepare_queue_case.sql, 51/52/53, `operations` | 57/53 `supabase_admin`; A/B `payment_db_race_executor_a/b`, `worker_role=payment_v2_executor` | PASS; distinct `acknowledge_claim` leases carried valid sale/event/order payloads |
+| Same queue files, `outbox` | 57/53 `supabase_admin`; A/B `payment_db_race_notifier_a/b`, `worker_role=payment_v2_notifier` | PASS |
+| 57, 51/52, 54, 55, 53, `operation_takeover` | admin setup/expiry/assertion; A/B race executor; stale completion as original executor A | PASS |
+| Same takeover files, `outbox_takeover` | admin setup/expiry/assertion; A/B race notifier; stale completion as original notifier A | PASS |
+| 70_expiry_setup.sql / 71_expiry_relink_recovery.sql | `supabase_admin`; waited 35 seconds between setup and recovery | PASS |
+| 83_solo_mode.sql | `supabase_admin`, normal template | **FAIL at G2:** guardian disabled-funding assertion above |
+| 80–82 cleanup cases, 84–90, 91–94 | — | NOT RUN after required stop at 83 |
+
+Cleanup dropped `flexsoar_payment_v2_test` and the three derived helper databases, revoked disposable test-role memberships, dropped all `payment_db_test_%` and `payment_db_race_%` roles, and verified no matching database or role names remained. The 078 source and pre-existing helper bases were untouched. `PAYMENT_DB_FINAL_ACCEPTANCE_COMPLETE` was not printed.
