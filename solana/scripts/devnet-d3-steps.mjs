@@ -1,6 +1,9 @@
 /** D3 rehearsal steps. usage: node solana/scripts/devnet-d3-steps.mjs <step>. See devnet-d3.mjs for the rules every step runs under. */
 import { PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { TransactionInstruction } from '@solana/web3.js';
+import { initializeV2 } from './init-v2.mjs';
+import { keyPath } from './devnet-keys.mjs';
 import { connection, verify, log, loadKey, pubkeyOf, land, sha256, devnetCli, wslPath, PROGRAM_ID, SQUADS, B_SHA256, B_SIZE, B_SO, LOADER, TOKEN, pause } from './devnet-d3.mjs';
 
 const steps = {
@@ -41,6 +44,67 @@ const steps = {
     const balance = await connection.getBalance(deployer);
     log(`- airdrop ${sol} SOL to deployer \`${deployer.toBase58()}\`: \`${signature}\`; balance now ${balance} lamports`);
     console.log({ signature, balance });
+  },
+
+  /** Step 4: write-buffer, deploy from the buffer at max-len 700000, dump, and require sha256(first 573,824 dumped bytes) == B. */
+  async deploy() {
+    await verify();
+    const dir = process.env.D3_SCRATCH; if (!dir) throw new Error('set D3_SCRATCH to a scratch directory (Windows path)');
+    const fence = '```';
+    const run = async (label, args) => {
+      const r = await devnetCli(args);
+      log(`- cli ${label}: exit ${r.status}\n${fence}\n${(r.stdout + r.stderr).trim().slice(-1500)}\n${fence}`);
+      if (r.status !== 0) throw new Error(`${label} failed: ${r.stderr.trim().slice(-400)}`);
+      return r.stdout;
+    };
+    const key = n => wslPath(keyPath(n));
+    let buffer = process.env.D3_BUFFER ?? null;
+    if (!process.env.D3_SKIP_DEPLOY) {
+    const wb = await run('write-buffer', ['program', 'write-buffer', wslPath(B_SO), '--keypair', key('deployer')]);
+    buffer = (wb.match(/Buffer:\s*(\w{32,44})/) ?? [])[1]; if (!buffer) throw new Error('could not read buffer address');
+    await run('deploy', ['program', 'deploy', '--buffer', buffer, '--program-id', key('program'), '--upgrade-authority', key('deployer'), '--keypair', key('deployer'), '--max-len', '700000']);
+    }
+    const show = await run('program show', ['program', 'show', PROGRAM_ID, '--keypair', key('deployer')]);
+    await run('program dump', ['program', 'dump', PROGRAM_ID, `${wslPath(dir)}/dump.so`, '--keypair', key('deployer')]);
+    const dump = readFileSync(`${dir}\\dump.so`);
+    const head = dump.subarray(0, B_SIZE);
+    const result = { buffer, dumpedBytes: dump.length, firstBytesSha256: sha256(head), expected: B_SHA256, equal: sha256(head) === B_SHA256 };
+    log(`\n### step 4 result\n${fence}json\n${JSON.stringify(result, null, 2)}\n${fence}\n${show.trim()}`);
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.equal) throw new Error('STOP: dumped program does not equal build B');
+  },
+
+  /** Self-created 6-decimal TEST mint (mint authority = deployer, no freeze authority). Never a real or Circle mint. */
+  async mint() {
+    await verify();
+    const mint = loadKey('test_mint'), payer = loadKey('deployer');
+    if (await connection.getAccountInfo(mint.publicKey)) throw new Error('test mint already exists');
+    const rent = await connection.getMinimumBalanceForRentExemption(82);
+    const init = Buffer.concat([Buffer.from([20, 6]), payer.publicKey.toBuffer(), Buffer.from([0])]); // InitializeMint2(decimals 6, authority, no freeze)
+    const { blockhash } = await connection.getLatestBlockhash('confirmed');
+    const tx = new Transaction({ feePayer: payer.publicKey, recentBlockhash: blockhash })
+      .add(SystemProgram.createAccount({ fromPubkey: payer.publicKey, newAccountPubkey: mint.publicKey, lamports: rent, space: 82, programId: TOKEN }),
+        new TransactionInstruction({ programId: TOKEN, keys: [{ pubkey: mint.publicKey, isSigner: false, isWritable: true }], data: init }));
+    tx.sign(payer, mint);
+    await land(tx, 'create test mint');
+    const info = await connection.getAccountInfo(mint.publicKey);
+    if (!info || !info.owner.equals(TOKEN) || info.data[44] !== 6) throw new Error('test mint read-back mismatch');
+    log(`- test mint \`${mint.publicKey.toBase58()}\`: 6 decimals, owner Token program, mint authority deployer, freeze authority none`);
+  },
+
+  /** Step 5: manifest, init dry run (argv[3]==='dry') or real run; real run must print verified:true. */
+  async init() {
+    await verify();
+    const names = ['issuer', 'inventory', 'receiver', 'authenticator', 'reviewer', 'release', 'reconciler', 'guardian'];
+    const manifest = { cluster: 'devnet', genesisHash: await connection.getGenesisHash(), programId: PROGRAM_ID, mint: pubkeyOf('test_mint').toBase58(),
+      domain: await connection.getGenesisHash(), policyDigest: sha256(Buffer.from('d3-rehearsal-policy-v1')), treasury: pubkeyOf('treasury').toBase58(),
+      bootstrap: pubkeyOf('deployer').toBase58(), roles: Object.fromEntries(names.map(n => [n, pubkeyOf(n).toBase58()])),
+      governance: ['native_founder', 'native_friend', 'native_ceremony'].map(n => pubkeyOf(n).toBase58()) };
+    const dry = process.argv[3] === 'dry';
+    const out = await initializeV2({ connection, manifest, bootstrap: dry ? null : loadKey('deployer'), dryRun: dry, commitment: 'finalized' });
+    log(`\n### step 5 init ${dry ? 'dry run' : 'REAL'}\nmanifest (public keys only): \`${JSON.stringify(manifest)}\`\nresult: \`${JSON.stringify(out)}\``);
+    console.log(JSON.stringify(out, null, 2));
+    if (!dry && out.verified !== true) throw new Error('STOP: init did not print verified:true');
   },
 };
 

@@ -6876,8 +6876,8 @@ acceptance against invalid genesis fixtures, and repair of existing overlaps. Ex
 - No account layout, instruction signature or error-code changes; no new exports. R3-02 keeps the documented version-1 baseline.
 - **STOP: independent R4 in a fresh session comes next; no devnet action is authorized by these results.**
 
-## 2026-10-23 - D3: R4 fixes done; devnet rehearsal STOPPED at step 4 (faucet)
+## 2026-10-23 - D3: R4 fixes done; devnet rehearsal complete through step 9
 
 Full report: **`docs/handoff/solana-d3.md`**. Part 0 (commit `c78abe8`): R4-1 guard-isolating genesis cases (fail against a scratch no-guard build, 17 groups pass on B),
 R4-2 stale-encoding proof plus 8 adversarial controls, R4-3 limiter wording and per-task key folder, R4-4 old id retired. B rebuilt: sha256 unchanged
-(`61da352f...defc`, 573,824 bytes). Part 1: step 3 inventory PASS (read-only); step 4 blocked, deployer has 0 SOL and the devnet faucet returned 429. No transaction sent.
+(`61da352f...defc`, 573,824 bytes). Part 1 (resumed after the founder funded the deployer): steps 3-9 PASS on devnet, B dump hash equals B, real Squads accept via direct CPI succeeded, upgrade authority handed to a separate multisig; funding never enabled. integrated.mjs not runnable. See solana-d3.md.
