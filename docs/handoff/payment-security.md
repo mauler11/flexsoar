@@ -6906,3 +6906,9 @@ New findings that reshape W1: nothing writes `payment_v2.wallet_accounts` or `pa
 083's `record_listing` is issuer-role only, so the seller's signature must travel browser -> web route -> issuer service; all chain observers are loopback-only and cap at 500 accounts; the funding gate has no DB reader or caller;
 the mainnet binary is a new build (compiled-in program id); browser E2E on staging conflicts with the Devnet exception (no Privy/Supabase credentials) and the staging guard (zero `auth.users`).
 No code, migration, key or network action. Not verified: Privy server-wallet policy, Supavisor with custom logins, RPC provider limits, production's live migration list, how `open_sale` reaches the issuer key.
+
+## 2026-10-23 - W2-P0P1: migration 084 implementation (awaiting independent review)
+
+Phase 0 proof and founder decisions are recorded in `docs/handoff/privy-sign-proof.md` and `docs/handoff/worker-build-plan.md`. Migration 084 was replayed only inside the verified network-none container. SHA-256: `e8a6bc86f4877a049f8a431c44dd599cb441d41bbc08c70c6221619902e23321`. Replay 079-084 passed; funding-on and reapply refusal checks passed; payment-db suites 83 (18 stages), 88 (6 stages), and 89 (7 stages) passed. `npm test` (792 tests), `npx tsc --noEmit`, and `npm run build` passed.
+
+The full payment-db suite is not verified: `35_workers_setup.sql` refused because the preserved container already has `payment_db_test_issuer`, so remaining worker/concurrency/final acceptance suites were not run. No existing roles were repurposed or dropped. The task-created `flexsoar_payment_v2_test` and replay helper databases were dropped; the preserved source database and container were left intact. No staging, production, or network action occurred. Signature cryptographic validity and ATA existence are not checked by SQL. Independent migration review in a fresh session is the next step; no production application is authorized by this record.

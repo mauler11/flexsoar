@@ -360,22 +360,50 @@ Recorded for W2-P0P1 by the founder on 2026-10-23:
 
 ### F7 design note — issuer-owned `open_sale` submission (design only)
 
-The issuer service owns this path. It reads prepared sales through a narrowly
-granted issuer reader, obtains the stored seller message through
-`listing_for_open`, rebuilds the exact `[ed25519, open_sale]` transaction,
-fee-pays and signs it with the issuer signer, then submits and confirms it.
-The service refuses a missing or mismatched stored listing and never submits a
-bare `open_sale`. A single supervised issuer process handles this queue; chain
-observation and retry use the sale address and transaction signature so a
-restart checks chain state before resubmission. The executor has no issuer
-signer, no issuer RPC grants, and no code path that builds or submits this
-transaction. Its existing generic lease RPC can expose an `open_sale` queue
-row, so Phase 2 must make the executor handler skip that action without
-attempting issuer operations; changing the shared lease RPC is outside this
-design and must be reviewed separately if a stricter queue boundary is needed.
+The issuer service owns this path. Its single supervised process reads
+prepared sales through the narrowly granted issuer queue reader, obtains the
+stored seller message through `listing_for_open`, serializes its own work,
+rebuilds the exact `[ed25519, open_sale]` transaction, fee-pays and signs it
+with the issuer signer, then submits and confirms it. The service refuses a
+missing or mismatched stored listing and never submits a bare `open_sale`.
+After restart it checks the sale address on chain before retrying. The
+executor has no issuer signer or issuer RPC grants and no code path that builds
+or submits this transaction. Its existing generic lease RPC can still return
+the operation row, so the Phase 2 executor handler must skip `open_sale`
+without invoking issuer operations. Before running the executor in production,
+a separately reviewed forward migration must exclude `open_sale` from the
+executor lease function; the no-body-change constraint in 084 leaves that
+fence for a later task.
 
-This is a routing and authority design only. It specifies no code or schema
-change beyond Phase 1's additive issuer reader if Phase 2 needs it.
+This is a routing and authority design only. Phase 1 includes an additive,
+issuer-only queue reader for the signing inputs; the executor lease fence is a
+later reviewed migration.
+
+### W2-P0P1 Phase 1 execution record (2026-10-23)
+
+Migration 084 and its database suite are implemented in the isolated,
+network-none replay container. The migration adds issuer-only wallet
+enrollment and `open_sale` queue readers, a seller-owner-checked listing view,
+and a verifier-only governance projection. It is one transaction with
+self-relative pre/postguards, function-body/owner/ACL checks, exact grants,
+and postguards proving no existing function body changed. SHA-256:
+`e8a6bc86f4877a049f8a431c44dd599cb441d41bbc08c70c6221619902e23321`.
+
+Replay through 084 passed. The funding-on preguard and second-apply guard
+refused as expected. Payment-db suites 83 (18 stages), 88 (6 stages), and 89
+(7 stages) passed. `npm test` passed (792 tests), `npx tsc --noEmit` passed,
+and `npm run build` passed. The broader worker suite did not run: its setup
+refused because `payment_db_test_issuer` already exists in the preserved
+container. The full payment-db acceptance suite, including later concurrency
+and final acceptance suites, therefore remains unverified. The authorized
+`flexsoar_payment_v2_test` database and three replay helper databases were
+dropped after the run. No staging, production, or network action occurred.
+
+Implementation is committed pending the independent migration review in a
+fresh session. The SQL enrollment path checks database identity and immutable
+row conflicts; signature validity and ATA existence remain caller-side
+checks. The F7 executor lease fence remains a separately reviewed future
+migration as described above.
 
 ## 6. Decisions still open
 

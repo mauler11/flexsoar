@@ -153,6 +153,15 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   // raises exactly 'PAYMENT_V2_SIGN_IN' (42501) for a session with no users
   // row or no claims.
   { pattern: /^PAYMENT_V2_SIGN_IN$/, code: 'UNAUTHENTICATED' },
+  // 084 issuer enrollment / seller signing view. The database message remains
+  // visible verbatim; these stable codes let callers distinguish identity,
+  // ownership and state refusals without parsing variable details.
+  { pattern: /^PAYMENT_V2_WALLET_USER_NOT_MY$/, code: 'FORBIDDEN' },
+  { pattern: /^PAYMENT_V2_WALLET_ADDRESS_MISMATCH$/, code: 'NOT_OWNER' },
+  { pattern: /^PAYMENT_V2_WALLET_NETWORK_UNKNOWN$/, code: 'NOT_FOUND' },
+  { pattern: /^PAYMENT_V2_WALLET_(?:MALFORMED|ENROLLMENT_CONFLICT|TOKEN_ACCOUNT_USED)$/, code: 'WRONG_STATUS' },
+  { pattern: /^PAYMENT_V2_LISTING_NOT_YOURS$/, code: 'NOT_OWNER' },
+  { pattern: /^PAYMENT_V2_OPEN_SALE_LIMIT$/, code: 'INVALID_AMOUNT' },
   // fn_submit_listing — 'this account cannot list items' (is_restricted)
   { pattern: /this account cannot list items/i, code: 'RESTRICTED' },
   // fn_submit_listing — cash / either settlement gated behind a completed-
