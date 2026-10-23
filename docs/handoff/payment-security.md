@@ -6953,3 +6953,27 @@ The corrected runner path for `verify-081.sql` is `C:\Users\Family\flexsoar-revi
 The production runbook kit is prepared at `C:\Users\Family\flexsoar-reviews\prod-runbook-083-085\`; it remains unexecuted and production remains founder-only. Its staging evidence manifest SHA-256 is `e6aff425bd78efbf8e2dde36a0a7eb65e03a4d7d219524f93e8530169b796ee1`; `KIT.sha256` SHA-256 is `03caac1854ffa386217e744bdf44477ad7641e858ef1c46a7322f875e478834e`. The per-migration after-state, catalog-diff, and earlier-check allow-lists are populated from the guarded staging evidence. LF exports still match pinned commit `f6c81ee7957b9998f365c7f1beb4f54a6df75f34`. Shell syntax, migration export hashes, staging evidence manifest, and kit checksum validation passed; no production runbook command was run.
 
 The earlier small test-timeout change remains verified by two consecutive plain `npm test` runs: 39 files / 795 tests each.
+
+### P2b-086 — issuer subject reader, HMAC nonces and open-sale lease fence (2026-10-23)
+
+Authored `supabase/migrations/086_payment_v2_issuer_subject_nonce_leases.sql` as one transaction and applied it only inside the verified network-none container `733813cfd1b173d984ef248ed6518b921cd37e3c3fdf57c30d51f1c33b290518`, to disposable `flexsoar_payment_v2_test` and `flexsoar_payment_v2_integration_test` copies of the preserved 078 source. Container remained `NetworkMode=none`, no ports, unprivileged, no mounts, loopback only. No staging, production, or other network database was contacted.
+
+Founder screenshot confirmation recorded 2026-10-23: Supabase signing mode is verified as asymmetric; current key `e3ee4930-ea76-4189-8036-8fa384097de1` is ECC P-256 / ES256. Previous HS256 remains retained for legacy key verification only.
+
+The migration implements per-kind issuer subject nullability and hard refusals, network context from stored rows, owner plus auth identity return, `users.id = auth_id` checks, checked enrollment, and a single-read subject snapshot. It adds open-sale-only immutable terms guarding with a monotonic non-wrapping fencing token, issuer claim/renew/finish RPCs, immutable HMAC key and append-only lifecycle tables, atomic DB-time nonce consumption, expired-only cleanup, RLS, owner/search-path/SECURITY DEFINER assertions, explicit role ACL checks, and pre/post guards proving prior function bodies and attributes were preserved. New SQL refusals map through `lib/db/errors.ts` to existing stable contract categories; original messages remain surfaced verbatim.
+
+SHA-256: 086 `42158d31b3be6a5a542b4f9234bc27137ad24da6579fb5ed815237ada9343d64`.
+
+#### Isolated database evidence
+
+- Fresh 078→086 acceptance copy: migrations 079, 080, 081, 081b, 082, 083, 084, 085 and 086 applied in order. 086 focused suite `tests/payment-db/086_issuer_contract.mjs` printed `T086|PASS`, covering all enumerated nullability/missing/identity cases, duplicate network, concurrent claimers, stale/expired/wrong-login lease, non-open-sale action, token exhaustion, exact send-ack state, key lifecycle and reuse, nonce replay/concurrent consume, retired/unknown kid, and cleanup.
+- Payment-db acceptance files 03–40 passed, including 04/05/07 encoding vectors and actual SQL-vs-TypeScript permit comparison (690 bytes), actual worker login tests, 45/offline synthetic signer/47/46, both 41/42 duplicate modes with observed transactionid lock waits, the eight evidence/funding/rollback races, both 58/59 terminal consumption races with observed waits, queue competition, expired lease takeovers and stale-worker refusals, 70/71 after the required 35-second expiry, 83, 88, 89, and 91–94.
+- 90 committed the explicit final row as `supabase_admin`, suite version 3, 37 required checkpoints, and printed `PAYMENT_DB_FINAL_ACCEPTANCE_COMPLETE` at 2026-10-23 15:48:26 UTC.
+- On the separate integration copy, a synthetic funding-enabled network caused 086 to refuse with `PAYMENT_V2_FUNDING_ENABLED`; read-only catalog checks confirmed the three new tables and fencing column remained absent. After the test network was returned to funding-off, 086 applied; immediate replay refused with `PAYMENT_V2_ISSUER_086_ALREADY_APPLIED` and before/after catalog fingerprints matched. On the acceptance copy, a later replay was also refused at the earlier funding-on guard because the 083 full-suite fixtures had left enabled test networks; no catalog changes resulted.
+- Stage-specific 080/081 and 081b helpers require their pre-migration catalogs and were mistakenly invoked on the already-migrated final-state copy. The 081 and 086 stage assertions therefore failed against the wrong phase; the 084 ACL helper refused because its required `phase` variable was not supplied. These are not counted as passed and were not part of 90's 37 checkpoints. No migration or verifier SQL was edited for those attempts; the required stage-specific drivers remain separate work if desired.
+
+#### Repository gates
+
+After adding the 086 error-mapping unit test: `npm test` passed 40 files / 797 tests; `npx tsc --noEmit` completed with no diagnostics; `npm run build` completed successfully on Next.js 16.3.8. No application service code, key material, deployment, or migration beyond 086 was added.
+
+Next step: independent code review R7. Do not apply this migration outside the authorized isolated container.

@@ -163,6 +163,18 @@ const MESSAGE_RULES: readonly { pattern: RegExp; code: ContractErrorCode }[] = [
   { pattern: /^PAYMENT_V2_LISTING_NOT_YOURS$/, code: 'NOT_OWNER' },
   { pattern: /^PAYMENT_V2_OPEN_SALE_LIMIT$/, code: 'INVALID_AMOUNT' },
   { pattern: /^PAYMENT_V2_EXECUTOR_ACTION_FORBIDDEN$/, code: 'FORBIDDEN' },
+  // 086 issuer subject, HMAC nonce and open-sale fencing RPCs. Keep the SQL
+  // refusal text verbatim while mapping each refusal family to a stable
+  // existing contract category; lib/api/contract.ts is owned by track/data.
+  { pattern: /^PAYMENT_V2_ISSUER_(?:KIND_UNSUPPORTED|NULLABILITY|NONCE_MALFORMED|FINISH_OUTCOME|SIGNATURE_SHAPE)$/, code: 'INVALID_AMOUNT' },
+  { pattern: /^PAYMENT_V2_ISSUER_(?:SUBJECT_MISSING)$/, code: 'NOT_FOUND' },
+  { pattern: /^PAYMENT_V2_ISSUER_(?:IDENTITY_MISMATCH|KEY_OWNER_ONLY|KEY_LIFECYCLE|KEY_INACTIVE|CLEANUP_FORBIDDEN|MIGRATION_ROLE|OWNER_PUBLIC_CREATE|085_REQUIRED|086_ALREADY_APPLIED|PREEXISTING_FUNCTION_CHANGED|FUNCTION_HARDENING|TABLE_HARDENING|ACL_MATRIX|ALLOWED_ROLE_ACL|PUBLIC_EXECUTE|OPERATION_TERMS_GUARD_(?:DRIFT|POSTGUARD))$/, code: 'FORBIDDEN' },
+  { pattern: /^PAYMENT_V2_FUNDING_ENABLED$/, code: 'FORBIDDEN' },
+  { pattern: /^PAYMENT_V2_ISSUER_NONCE_REPLAY$/, code: 'WRONG_STATUS' },
+  { pattern: /^PAYMENT_V2_ISSUER_FENCE_EXHAUSTED$/, code: 'INVALID_AMOUNT' },
+  { pattern: /^PAYMENT_V2_OPERATION_LEASE_LOST$/, code: 'WRONG_STATUS' },
+  { pattern: /^PAYMENT_V2_OPERATION_RESOLUTION_CONFLICT$/, code: 'WRONG_STATUS' },
+  { pattern: /^PAYMENT_V2_(?:OPERATION_IDENTITY_IMMUTABLE|TERMS_IMMUTABLE)$/, code: 'FORBIDDEN' },
   // fn_submit_listing — 'this account cannot list items' (is_restricted)
   { pattern: /this account cannot list items/i, code: 'RESTRICTED' },
   // fn_submit_listing — cash / either settlement gated behind a completed-
