@@ -6,11 +6,35 @@ C=${1:?container}; SRC=${2:?source db}; OUT=${3:?out dir}
 HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(cd "$HERE/../.." && pwd)
 mkdir -p "$OUT"; exec > >(tee "$OUT/run.log") 2>&1
 fail(){ echo "T084_RUN_STOP: $*"; exit 1; }
+ISOLATED=0
+cleanup(){
+ [[ $ISOLATED == 1 ]] || return 0
+ echo "cleanup: dropping task databases and disposable payment_db test logins"
+ for db in flexsoar_payment_v2_test flexsoar_084_pre flexsoar_084_pre81b flexsoar_084_pre81 flexsoar_084_pre79; do
+  adm "DROP DATABASE IF EXISTS $db" >/dev/null || echo "cleanup warning: could not drop $db"
+ done
+ # Remove only memberships held by these disposable test logins. DROP ROLE below
+ # is deliberately RESTRICT (the default); unexpected dependencies remain visible.
+ adm "DO \$cleanup\$ DECLARE r record;g record; BEGIN
+  FOR r IN SELECT oid,rolname FROM pg_roles WHERE rolname LIKE 'payment_db_test_%' OR rolname LIKE 'payment_db_race_%' LOOP
+   FOR g IN SELECT roleid FROM pg_auth_members WHERE member=r.oid LOOP
+    EXECUTE format('REVOKE %I FROM %I',pg_get_userbyid(g.roleid),r.rolname);
+   END LOOP;
+  END LOOP;
+ END \$cleanup\$" >/dev/null || echo "cleanup warning: could not revoke test-login memberships"
+ roles=$(adm "SELECT rolname FROM pg_roles WHERE rolname LIKE 'payment_db_test_%' OR rolname LIKE 'payment_db_race_%' ORDER BY rolname") || roles=""
+ while IFS= read -r role; do
+  [[ -n $role ]] || continue
+  adm "DROP ROLE \"$role\"" >/dev/null || echo "cleanup warning: DROP ROLE refused for $role (dependency retained)"
+ done <<< "$roles"
+}
+trap cleanup EXIT
 
 iso=$(docker inspect "$C" --format '{{.HostConfig.NetworkMode}}|{{json .HostConfig.PortBindings}}|{{.HostConfig.Privileged}}|{{.State.Running}}') || fail inspect
 [[ $iso == 'none|{}|false|true' ]] || fail "container isolation is wrong: $iso"
 links=$(docker exec "$C" ip -o link | wc -l)
 [[ $links == 1 ]] || fail "container has $links network interfaces, expected loopback only"
+ISOLATED=1
 
 T=/tmp/t084; docker exec "$C" sh -c "rm -rf $T && mkdir -p $T"
 for f in 00_target_guard.sql 01_fixtures.sql 83_solo_mode.sql 88_seller_listing_floor.sql 89_wallet_enrollment_views.sql; do
@@ -62,5 +86,4 @@ if [[ $rc != 3 ]] || ! grep -q '084: one or more wallet/view RPCs already exist'
 suite suite_83 83_solo_mode.sql && grep -q '^T083|SUITE_PASS$' "$OUT/suite_83.log" && [[ $(grep -c 'T083|PASS' "$OUT/suite_83.log") == 18 ]] || fail suite_83
 suite suite_88 88_seller_listing_floor.sql && grep -q '^T088|SUITE_PASS$' "$OUT/suite_88.log" && [[ $(grep -c 'T088|PASS' "$OUT/suite_88.log") == 6 ]] || fail suite_88
 suite suite_89 89_wallet_enrollment_views.sql && grep -q '^T089|SUITE_PASS$' "$OUT/suite_89.log" || fail suite_89
-adm "DROP DATABASE IF EXISTS flexsoar_payment_v2_test" >/dev/null
 echo T084_RUN_PASS
