@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readlinkSync } from 'node:fs';
 import { createSignerCore, loadSignerKeyFile } from './core';
 import type { SignRequest, SignerAlert, SignerRuntimeConfig } from './types';
 import { validateSignerPins } from './validator';
@@ -21,9 +21,15 @@ class StdoutAlertSink {
 }
 export async function runSignerWorker(configPath=process.env.ISSUER_SIGNER_CONFIG):Promise<void>{
   if(!configPath)throw new Error('SIGNER_STARTUP_CONFIG_MISSING');
+  const permittedEnv=new Set(['PATH','NODE_ENV','ISSUER_SIGNER_CONFIG','ISSUER_SIGNER_EXPECTED_PUBLIC_KEY','ISSUER_SIGNER_PARENT_NETNS']);
+  if(Object.keys(process.env).some(name=>!permittedEnv.has(name)))throw new Error('SIGNER_ENVIRONMENT_NOT_ISOLATED');
+  const parentNetns=process.env.ISSUER_SIGNER_PARENT_NETNS;
+  const devices=readFileSync('/proc/self/net/dev','utf8').split('\n').slice(2).map(line=>line.split(':')[0]?.trim()).filter(name=>name);
+  if(!parentNetns||readlinkSync('/proc/self/ns/net')===parentNetns||devices.some(name=>name!=='lo'))throw new Error('SIGNER_NETWORK_NAMESPACE_NOT_ISOLATED');
+  if(readFileSync('/proc/net/route','utf8').trim().split('\n').length!==1)throw new Error('SIGNER_NETWORK_ROUTE_PRESENT');
   const config=loadConfig(configPath);validateSignerPins(config.pins);const keypair=loadSignerKeyFile(config);
   const core=createSignerCore(keypair,config.pins,{rateJournalPath:config.rateJournalPath,auditPath:config.auditPath,alertQueuePath:config.alertQueuePath,alerts:new StdoutAlertSink()});
-  process.stdout.write(`${JSON.stringify({ready:true,publicKey:core.publicKey})}\n`);
+  process.stdout.write(`${JSON.stringify({ready:true,publicKey:core.publicKey,isolated:true,noDatabaseEnv:true})}\n`);
   let input='';for await(const chunk of process.stdin){input+=String(chunk);let newline=input.indexOf('\n');while(newline>=0){const line=input.slice(0,newline);input=input.slice(newline+1);let response:unknown;try{response=await core.sign(parseRequest(JSON.parse(line)))}catch(error){response={error:error instanceof Error?error.message:'SIGNER_REQUEST_INVALID'}}process.stdout.write(`${JSON.stringify(response)}\n`);newline=input.indexOf('\n');}}
 }
 if(require.main===module)runSignerWorker().catch(error=>{process.stderr.write(`${error instanceof Error?error.message:'SIGNER_STARTUP_FAILED'}\n`);process.exitCode=1});

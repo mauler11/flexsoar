@@ -7106,3 +7106,40 @@ Test Files 1 passed (1); Tests 1 passed (1); Duration 234.33s
 ```
 
 The same isolated integration now calls `createIssuerDatabase().listingForOpen` through the real dedicated issuer login after recording a listing and checks the returned sale ID, seller wallet, and exact message bytes. This validates the newly whitelisted 083 reader transport. It still does not create the full service-to-validator transaction sequence.
+## P2c-2b WSL signer socket verification (2026-10-25)
+
+The WSL-only socket suite was run with the repository's TypeScript-transpile test runner because WSL's installed dependency tree lacks the Linux optional Rollup/Rolldown binding required to start Vitest; the ordinary Windows Vitest suite separately passes. WSL output: 4/4 tests passed. It proves configured issuer UID + exact process PID acceptance, a different process refusal, rejection for a mismatching SO_PEERCRED UID, unknown/malformed/untyped request refusal, and startup of the real key-file worker with a throwaway key in a rootless user+network namespace. The real worker reached transaction validation and refused the deliberately invalid frame as `SIGNER_TRANSACTION_INVALID`. No key bytes were logged.
+
+WSL has only the `family` OS account and `sudo -n` is unavailable, so the test does not launch a second host UID. The UID refusal test connects as the host issuer UID while the socket is configured for another UID; this verifies the actual SO_PEERCRED comparison branch, but is not evidence from a second OS identity. Process identity refusal is exercised with a second process under the issuer UID. The worker's environment is explicitly built from PATH, config path, expected public key, and parent network namespace only (with NODE_ENV set in the spawner solely for Node's typed environment); the worker rejects unexpected environment names, checks its network namespace differs from the parent, checks only `lo` exists, and checks there are no routes. This is the WSL substitute for a dedicated signer account; no DB URL or DB credentials are provided.
+
+`peer-socket.py` is used because Node's built-in Unix `net.Socket` API does not expose Linux SO_PEERCRED. The small Python process owns the AF_UNIX accept loop, checks kernel-provided UID and PID before forwarding any bytes, and starts the actual TypeScript key-file signer in an isolated network namespace. That is a reasonable narrow Linux boundary here; replacing it requires a native addon or a different process supervisor and adds attack surface/dependency, with no cleaner built-in Node mechanism. The Node worker still parses typed requests and fully validates the transaction before signing.
+
+Build B was verified by SHA-256 `61da352f0a316f8a20f0e0690bc659854b00af260761ade1f6538d1da411defc`. Existing loopback-only harness was rerun through `solana/tests/run-local-v2.sh`: `LOCAL VALIDATOR ONLY: 149 on-chain scenario groups passed; no database integration asserted.` The vault path remained skipped because no mock vault .so was supplied. This is not the requested combined issuer-service/signer/validator E2E.
+
+The combined E2E remains unverified. In the present DB contract, the open-sale submitter's `finish_open_sale` records `submitted` but does not transition `sales.state` to `open`; authorize-attempt requires a verified `opened` lifecycle event through the 068 verifier route. After buy lands, DB settlement likewise requires verifier-produced chain evidence. The requested sequence cannot be honestly demonstrated by directly chaining the current service and submitter calls without adding the lifecycle observation bridge and event ingestion. No schema/migration change is authorized by this task, and I did not fabricate verifier evidence. Consequently below-floor-on-chain, paired-open-only through the issuer submitter, DB/chain state agreement, and killed-lease takeover were not exercised in a combined service flow; prior independent component coverage is not a substitute. Not ready for R9.
+
+Captured WSL socket output (all test-runner lines):
+
+```text
+PASS accepts the configured issuer UID and PID, and refuses a different process
+PASS checks the actual peer UID before forwarding requests
+PASS refuses unknown request kinds, malformed frames and client fields outside the typed schema
+{"type":"signer-refusal","operation":"open-sale-pair","requestId":"socket-test","refusalCode":"SIGNER_TRANSACTION_INVALID"}
+PASS starts the real key-file signer in a private network namespace without DB environment
+WSL socket tests: 4 passed / 4 total
+```
+
+Captured validator completion output:
+
+```text
+P1 scenarios: 47 groups passed; vault path: SKIPPED (no mock vault .so supplied; CPI-signed vault path NOT exercised)
+Harness self-test: 6 confirmation-path groups passed (counted in the total)
+CU configure: n=1 min=8998 max=8998 all=8998
+CU set_pause: n=14 min=7857 max=7865 all=7865,7857,7861,7865,7857,7861,7865,7857,7865,7857,7865,7865,7857,7859
+CU open_sale: n=6 min=49459 max=58459 all=49459,49459,56959,53959,53959,58459
+CU buy_sale: n=5 min=46661 max=55661 all=48161,53794,51161,46661,55661
+CU authorize_release: n=3 min=14122 max=14124 all=14122,14124,14124
+CU set_release_delay: n=6 min=7849 max=7849 all=7849,7849,7849,7849,7849,7849
+CU propose_governance_vault: n=1 min=8314 max=8314 all=8314
+LOCAL VALIDATOR ONLY: 149 on-chain scenario groups passed; no database integration asserted.
+```

@@ -1,5 +1,5 @@
 import { connect, type Socket } from 'node:net';
-import { lstatSync } from 'node:fs';
+import { lstatSync, readlinkSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { SignRequest, SignResponse, SignerRuntimeConfig } from './types';
 
@@ -30,11 +30,15 @@ export class UnixIssuerSigner {
 
 /** Starts the isolated Linux SO_PEERCRED socket front end. It is one-time process
  * setup: failure has no in-process/key-mode fallback. */
-export function startKeyFileSigner(config:SignerRuntimeConfig,paths:{python:string;node:string;workerScript:string;peerSocketScript:string;configFile:string}):ChildProcess{
+export function startKeyFileSigner(config:SignerRuntimeConfig,paths:{python:string;unshare:string;node:string;workerScript:string;peerSocketScript:string;configFile:string}):ChildProcess{
   if(process.platform!=='linux'||config.custodyMode!=='key-file')throw new Error('SIGNER_STARTUP_UNSUPPORTED');
-  if(process.getuid?.()!==0)throw new Error('SIGNER_PRIVILEGE_DROP_REQUIRED');
-  const child=spawn(paths.python,[paths.peerSocketScript,config.socketPath,String(config.allowedPeerUid),String(config.socketGroupGid),paths.node,paths.workerScript],{
-    stdio:['ignore','ignore','inherit'],windowsHide:true,uid:config.signerUid,gid:config.signerGid,env:{...process.env,ISSUER_SIGNER_CONFIG:paths.configFile,ISSUER_SIGNER_EXPECTED_PUBLIC_KEY:config.issuerPublicKey},
+  const issuerUid=process.getuid?.();if(issuerUid===undefined||issuerUid!==config.allowedPeerUid||(issuerUid!==config.signerUid&&issuerUid!==0))throw new Error('SIGNER_IDENTITY_MISMATCH');
+  const signerIdentity=issuerUid===0?{uid:config.signerUid,gid:config.signerGid}:{};
+  const child=spawn(paths.python,[paths.peerSocketScript,config.socketPath,String(config.allowedPeerUid),String(process.pid),String(config.socketGroupGid),paths.unshare,paths.node,paths.workerScript],{
+    // WSL cannot safely switch to a separately provisioned account here. The
+    // worker instead enters a rootless user+network namespace; the socket pins
+    // the host issuer UID and exact issuer PID, with no custody fallback.
+    stdio:['ignore','ignore','inherit'],windowsHide:true,...signerIdentity,env:{PATH:'/usr/bin:/bin',NODE_ENV:'production',ISSUER_SIGNER_CONFIG:paths.configFile,ISSUER_SIGNER_EXPECTED_PUBLIC_KEY:config.issuerPublicKey},
   });
   return child;
 }

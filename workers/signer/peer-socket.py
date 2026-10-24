@@ -24,7 +24,7 @@ class Handler(socketserver.BaseRequestHandler):
     def handle(self):
         try:
             pid, uid, gid = struct.unpack('3i', self.request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize('3i')))
-            if uid != self.server.allowed_uid:
+            if uid != self.server.allowed_uid or pid != self.server.allowed_pid:
                 return
             size = struct.unpack('>I', read_exact(self.request, 4))[0]
             if size < 2 or size > MAX_FRAME:
@@ -55,18 +55,27 @@ class Server(socketserver.ThreadingUnixStreamServer):
 def main():
     if not sys.platform.startswith('linux') or not hasattr(socket, 'SO_PEERCRED'):
         raise RuntimeError('SIGNER_PEER_CREDENTIALS_UNAVAILABLE')
-    if len(sys.argv) != 6:
-        raise RuntimeError('usage: peer-socket.py socket allowed_uid group_gid node worker-script')
-    path, uid, gid, node_path, worker_path = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4], sys.argv[5]
+    if len(sys.argv) != 8:
+        raise RuntimeError('usage: peer-socket.py socket allowed_uid allowed_pid group_gid unshare node worker-script')
+    path, uid, pid, gid, unshare_path, node_path, worker_path = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), sys.argv[5], sys.argv[6], sys.argv[7]
     if os.path.lexists(path):
         raise RuntimeError('SIGNER_SOCKET_PATH_EXISTS')
-    worker = subprocess.Popen([node_path, worker_path], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr, text=True, bufsize=1, close_fds=True, env=os.environ.copy())
+    parent_netns = os.readlink('/proc/self/ns/net')
+    worker_env = {
+        'PATH': '/usr/bin:/bin',
+        'ISSUER_SIGNER_CONFIG': os.environ['ISSUER_SIGNER_CONFIG'],
+        'ISSUER_SIGNER_EXPECTED_PUBLIC_KEY': os.environ['ISSUER_SIGNER_EXPECTED_PUBLIC_KEY'],
+        'ISSUER_SIGNER_PARENT_NETNS': parent_netns,
+    }
+    worker = subprocess.Popen([unshare_path, '--user', '--map-root-user', '--net', '--', node_path, worker_path], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr, text=True, bufsize=1, close_fds=True, env=worker_env)
     ready = json.loads(worker.stdout.readline())
-    if not isinstance(ready, dict) or ready.get('ready') is not True or ready.get('publicKey') != os.environ.get('ISSUER_SIGNER_EXPECTED_PUBLIC_KEY'):
+    startup_ok = isinstance(ready, dict) and ready.get('ready') is True and ready.get('isolated') is True and ready.get('noDatabaseEnv') is True and ready.get('publicKey') == os.environ.get('ISSUER_SIGNER_EXPECTED_PUBLIC_KEY')
+    if not startup_ok:
         worker.terminate()
-        raise RuntimeError('SIGNER_STARTUP_KEY_CHECK_FAILED')
+        raise RuntimeError('SIGNER_STARTUP_CHECK_FAILED:' + str(ready.get('diagnostic') if isinstance(ready, dict) else 'invalid response'))
     server = Server(path, Handler)
     server.allowed_uid = uid
+    server.allowed_pid = pid
     server.worker = worker
     server.worker_lock = threading.Lock()
     os.chown(path, os.getuid(), gid)
