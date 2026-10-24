@@ -92,3 +92,22 @@ WSL socket: 4/4 passed using the WSL TypeScript test runner (Vitest itself canno
 Build B SHA-256: `61da352f0a316f8a20f0e0690bc659854b00af260761ade1f6538d1da411defc`. Existing rootless loopback validator harness: 149 scenario groups passed, with no DB integration asserted and vault path skipped. This is separate from issuer service E2E.
 
 Combined E2E is not complete. The current submitter finish call only records `submitted`; authorize-attempt requires 068 verified lifecycle evidence to transition the DB sale to open, and post-buy agreement requires chain event evidence ingestion. Without those real verifier paths, fabricating the state or bypassing checks would invalidate the requested test. Therefore below-floor on-chain refusal, paired open through the issuer submitter, chain/DB agreement, and killed-lease takeover were not combined or claimed. Stop before R9 review.
+
+## P2c-2c cross-UID and observer integration status (2026-10-25)
+
+WSL now has the founder-provisioned `flexsoar-issuer` account (UID 1002). A Linux test ran the issuer client under UID 1002 and the real key-file signer/socket broker under `family` (UID 1000). The issuer's configured UID + exact PID reached the actual worker, which rejected the deliberately invalid transaction during transaction validation; a separate UID 1000 process was refused at the socket. The test used a generated ephemeral key and emitted no key bytes. This is true distinct-host-UID evidence, unlike the earlier simulated UID mismatch.
+
+The observers are loopback-compatible by construction: `LocalV2Observer` accepts explicit localhost/127.0.0.1/[::1] RPC and verifies finalized funded/direct/released/refunded transactions; opening is checked by the existing `observeAuthorityTransaction`/`inspectAuthorityTransaction` path and retained as 068 lifecycle evidence. The existing integration harness has used those paths, but it is bound to a different older container/build and is not the requested fresh 078?086 + issuer submitter flow.
+
+The requested P2c-2c combined flow was not run. The current `app/api/internal/solana/reconcile` route deliberately returns 503 pending provision/review of dedicated verifier and settler DB connections. The open-sale submitter itself only records `submitted` after send acknowledgement; a separate verifier must observe and persist `opened` lifecycle evidence before authorize-attempt can proceed. There is no current local orchestration in the fresh 078?086 issuer integration that composes the issuer service, signer, submitter, authority verifier, `reconcilePayments`, and buyer authorize/send while retaining those separate DB identities. The program-only Build B harness is not that flow. No DB or chain state was fabricated or bypassed, and no production/devnet access occurred. Remaining: wire and run the real dedicated-login verifier/settler orchestration against a fresh 078?086 DB and Build B loopback validator, including lease-kill recovery and below-floor on-chain refusal.
+
+WSL socket output for this task:
+
+```text
+PASS accepts the configured issuer UID and PID, and refuses a different process
+PASS checks the actual peer UID before forwarding requests
+PASS refuses unknown request kinds, malformed frames and client fields outside the typed schema
+PASS starts the real key-file signer in a private network namespace without DB environment
+PASS accepts the configured flexsoar-issuer UID and refuses a different UID with signer under family UID
+WSL signer tests: 5 passed / 5 total
+```

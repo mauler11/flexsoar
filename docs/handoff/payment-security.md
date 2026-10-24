@@ -7143,3 +7143,9 @@ CU set_release_delay: n=6 min=7849 max=7849 all=7849,7849,7849,7849,7849,7849
 CU propose_governance_vault: n=1 min=8314 max=8314 all=8314
 LOCAL VALIDATOR ONLY: 149 on-chain scenario groups passed; no database integration asserted.
 ```
+
+### P2c-2c WSL cross-UID check and remaining E2E (2026-10-25)
+
+Added and ran a root-gated Linux socket integration test using the provisioned accounts. The issuer client ran as `flexsoar-issuer` UID 1002; the real key-file signer/socket broker ran as `family` UID 1000. The configured issuer reached the worker and received `SIGNER_TRANSACTION_INVALID` for the test's invalid transaction; the different UID was refused. Socket suite output: 5/5 passed. Keys were generated ephemerally and never printed. This verifies actual cross-UID peer credentials.
+
+The combined requested DB/chain flow remains unrun. Existing local observers can read the loopback validator: `LocalV2Observer` handles finalized payment outcomes, and `observeAuthorityTransaction` verifies the expected open instruction for 068 lifecycle evidence. But the current internal reconcile HTTP route is deliberately 503 until dedicated verifier/settler connections are provisioned, and the issuer submitter's send acknowledgement only records `submitted`; a distinct verifier must observe/persist `opened` before authorize-attempt. Existing integrated chain/database harness evidence is from a different container/build and does not satisfy the fresh 078?086 + Build B request. No state was fabricated or bypassed. Remaining work is to compose the actual issuer submitter with dedicated verifier lifecycle observation, `reconcilePayments`/settler, buyer authorization/send, and killed-lease recovery in one guarded fixture. No production/devnet access.
