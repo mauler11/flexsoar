@@ -23,7 +23,7 @@ export function verifyHmac(request: HmacRequest, keys: ReadonlyMap<string, Uint8
 }
 
 // Detect duplicate object keys before JSON.parse; JWT header and payload are security-sensitive.
-function assertNoDuplicateKeys(source: string): void {
+export function assertNoDuplicateJsonKeys(source: string): void {
   let pos = 0;
   const ws = () => { while (/\s/.test(source[pos] ?? '')) pos++; };
   const string = (): string => {
@@ -49,7 +49,7 @@ export async function verifySupabaseJwt(token: string, keys: readonly IssuerJwk[
     const parts = token.split('.'); if (parts.length !== 3) throw new Error();
     const headText = new TextDecoder('utf-8',{fatal:true}).decode(decodeB64Url(parts[0]!));
     const bodyText = new TextDecoder('utf-8',{fatal:true}).decode(decodeB64Url(parts[1]!));
-    assertNoDuplicateKeys(headText); assertNoDuplicateKeys(bodyText);
+    assertNoDuplicateJsonKeys(headText); assertNoDuplicateJsonKeys(bodyText);
     const header = JSON.parse(headText) as Record<string, unknown>; const claims = JSON.parse(bodyText) as Record<string, unknown>;
     if (header.alg !== 'ES256' || header.kid !== pins.kid || header.crit !== undefined || header.b64 !== undefined || Object.keys(header).some(k => !['alg','kid','typ'].includes(k))) throw new Error();
     const kids=keys.map(k=>k.kid).filter((k):k is string=>typeof k==='string');

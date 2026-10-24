@@ -7054,3 +7054,28 @@ Added a local-only, dependency-injected service under `workers/issuer/`. HMAC us
 Issuer unit suite: 9 tests pass, covering HS256 and role confusion, expiration/future `iat`, wrong kid, wrong subject, D7 refusal, nonce replay, HMAC refusal, FX disagreement/staleness/overflow/rounding, proof replay across network/user/wallet/mint, finalized RPC disagreement, and listing owner/state/signature refusals. The isolated DB contract run used a fresh copy of the preserved 078 source in `flexsoar_payment_v2_test`, replayed 079â€“086, and completed the existing 086 issuer contract harness with `T086|PASS`. This exercises the 086 DB RPCs and race/refusal assertions; it does not provide a production DB transport adapter.
 
 The implementation is ready for independent R8 review. The review should specifically assess nonce-write accounting against the requested zero-DB-writes refusal assertion, and confirm the injected DB adapter contract can be connected through the owned `track/data` `lib/db/**` lane without widening this task's file scope.
+
+### P2c-1b continuation (2026-10-24)
+
+Added bytea transport support and the 086 issuer subject reader, checked enrollment wrapper, and nonce consume RPCs to the explicitly authorized issuer allow-list, plus `workers/issuer/database.ts` and adapter unit tests. Added request boundary tests and centralized stable DB error mapping. A fresh disposable `flexsoar_payment_v2_test` clone was replayed from the preserved 078 base through 086; because the committed 35-worker fixture intentionally refuses to recreate existing dedicated logins, its role block was replaced only in a temporary copy with assertions for the existing login/membership. The full 086 issuer contract harness then printed `T086|PASS` under the real `payment_db_test_issuer` login.
+
+P2c-1b is not complete: `fn_payment_v2_record_listing` is an issuer RPC from 083 and is required by the requested concrete adapter and real `prepare â†’ record-listing` integration, but the task's whitelist instruction allows additions only from 084 and 086. I requested clarification and did not expand the whitelist. The requested real-login end-to-end flow and enrollment integration have therefore not been run. Also, required HMAC nonce consumption is a persistent DB write before JWT verification by the task's specified order, so a literal zero-total-DB-write assertion for every later pipeline refusal is incompatible with that order; tests count the required nonce separately from endpoint/business writes. `docs/handoff/issuer-p2c1-coverage.md` remains to be reconciled against the tests actually implemented before review. No commit was made and R8 review has not started.
+
+### P2c-1b founder clarification completion (2026-10-24)
+
+This section supersedes the earlier P2c-1b paragraph above, which said the 083 record-listing route and real-login integration were pending.
+
+Added the concrete issuer DB adapter and precisely scoped `payment_v2_issuer` transport routes needed by the implemented calls. New allow-list routes (and the only route changes in `lib/db/payment-postgres.ts`) are:
+
+- `fn_payment_v2_issuer_subject_context(text,uuid,uuid)` — 086.
+- `fn_payment_v2_issuer_enroll_wallet_checked(uuid,uuid,bytea,bytea,bytea)` — 086 wrapper over the 084 enrollment writer.
+- `fn_payment_v2_consume_issuer_nonce(text,bytea)` — 086.
+- `fn_payment_v2_record_listing(uuid,bytea,bytea)` — 083.
+
+The adapter also calls the already-allowed `fn_payment_v2_prepare_sale(uuid,uuid,jsonb)` and `fn_payment_v2_issuer_context(uuid,text)`. Thus the complete RPC set used by these three endpoints is those six functions; no unrelated whitelist route was added. `authorize-attempt` and the `open_sale` submitter remain fail-closed stubs as specified.
+
+The refusal accounting is explicit: after valid HMAC, the single 086 nonce insert is permitted; tests require exactly one nonce row and unchanged business state across every `payment_v2` table except the nonce table and relevant public rows, with zero signer/sender calls. Bad HMAC refuses before nonce insertion. No real network, credentials, account, or key was used; integration keys are generated ephemerally in process.
+
+The exhaustive matrix is [issuer-p2c1-coverage.md](issuer-p2c1-coverage.md): 37 requirement rows, 19 tested and 18 explicitly deferred with phase/reason. Issuer service and adapter tests passed 28/28. Fresh container integration rebuilt the DB from preserved 078 through 086, ran `086_issuer_contract.mjs` on the fresh fixture, rebuilt again to isolate its fixture mutations, then used the existing dedicated non-superuser `payment_db_test_issuer` login for prepare ? record-listing, immutable prepare retry with FX providers unavailable, fake-RPC enrollment, and one refusal per endpoint. Each refusal added exactly one nonce and left every business-table snapshot unchanged. No staging or production was contacted.
+
+The task is ready to stop for independent R8 review after repository gates and commit. Deferred rows remain later operational, signer, on-chain, or concurrent-race acceptance items; they are not represented as completed by this local service implementation.

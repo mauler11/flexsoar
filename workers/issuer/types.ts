@@ -32,12 +32,13 @@ export interface IssuerConfig {
   hmacKeys: ReadonlyMap<string, Uint8Array>; activeHmacKid: string;
   issuer: string; audience: string; jwksUrl: string; jwtKid: string;
   allowList: ReadonlySet<string>; networkId: string; networkGenesis: string; mint: string;
-  tokenProgram: string; tokenDecimals: number; program: string; saleAddress(ctx: IssuerContext): string;
+  tokenProgram: string; associatedTokenProgram: string; tokenDecimals: number; program: string; networkConfig: string; saleAddress(ctx: IssuerContext): string;
   escrowAddress(ctx: IssuerContext): string;
 }
 
 export interface IssuerDeps {
   db: IssuerDatabase; rpc: readonly [IssuerRpc, IssuerRpc]; fx: readonly [FxProvider, FxProvider];
   jwks: { get(jwksUrl: string): Promise<readonly IssuerJwk[]> };
+  rateLimiter: { take(key:string,limit:number,windowSeconds:number,nowSeconds:number):number|null };
   config: IssuerConfig; nowSeconds(): number;
 }

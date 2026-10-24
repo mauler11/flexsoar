@@ -2,12 +2,13 @@
 
 const MAX = (BigInt('1') << BigInt('256')) - BigInt('1');
 const U64 = (BigInt('1') << BigInt('64')) - BigInt('1');
-function checked(a: bigint, b: bigint): bigint { const x = a * b; if (x > MAX) throw new Error('ISSUER_FX_OVERFLOW'); return x; }
-function add(a: bigint, b: bigint): bigint { const x = a + b; if (x > MAX) throw new Error('ISSUER_FX_OVERFLOW'); return x; }
+function checked(a: bigint, b: bigint): bigint { const zero=BigInt('0');if(a<zero||b<zero||a!==zero&&b>MAX/a)throw new Error('ISSUER_FX_OVERFLOW');return a*b; }
+function add(a: bigint, b: bigint): bigint { const zero=BigInt('0');if(a<zero||b<zero||b>MAX-a)throw new Error('ISSUER_FX_OVERFLOW');return a+b; }
 function positiveDecimal(value: string): bigint { if (!/^[1-9][0-9]*$/.test(value)) throw new Error('ISSUER_FX_INVALID'); const n = BigInt(value); if (n > MAX) throw new Error('ISSUER_FX_OVERFLOW'); return n; }
 export function calculateFx(quotes: readonly [FxQuote, FxQuote], priceCents: string, nowSeconds: number): { total: bigint; snapshot: Record<string, unknown> } {
   if (quotes[0].providerId === quotes[1].providerId) throw new Error('ISSUER_FX_INVALID');
   const parsed = quotes.map(q => {
+    if(typeof q.providerId!=='string'||!q.providerId.trim()||typeof q.quoteId!=='string'||!q.quoteId.trim()||typeof q.observedAt!=='string'||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/.test(q.observedAt))throw new Error('ISSUER_FX_INVALID');
     const n = positiveDecimal(q.numerator), d = positiveDecimal(q.denominator), observed = Date.parse(q.observedAt);
     if (!Number.isFinite(observed)) throw new Error('ISSUER_FX_INVALID');
     const age = nowSeconds - Math.floor(observed / 1000); if (age > 3600 || age < -30) throw new Error('ISSUER_FX_STALE');
