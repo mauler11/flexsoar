@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 import { createSignerCore, loadSignerKeyFile } from './core';
 import type { SignRequest, SignerAlert, SignerRuntimeConfig } from './types';
 import { validateSignerPins } from './validator';
-import { assertCustodyFile, requireOrInitializeRateJournal, verifySignerStorage } from './storage';
+import { assertCustodyFile, readCustodyFile, requireOrInitializeRateJournal, verifySignerStorage } from './storage';
 
 type JsonObject=Record<string,unknown>;
 function object(value:unknown):JsonObject{if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('SIGNER_REQUEST_INVALID');return value as JsonObject}
@@ -23,12 +23,12 @@ function parseRequest(value:unknown):SignRequest{
 function loadConfig(path:string):SignerRuntimeConfig{
   const uid=process.getuid?.();if(uid===undefined)throw new Error('SIGNER_CUSTODY_IDENTITY_UNAVAILABLE');
   try{assertCustodyFile(path,dirname(path),uid)}catch{throw new Error('SIGNER_CONFIG_FILE_PERMISSIONS')}
-  const config=object(JSON.parse(readFileSync(path,'utf8')));
+  const config=object(JSON.parse(readCustodyFile(path,dirname(path))));
   if(config.custodyMode!=='key-file'||typeof config.custodyRoot!=='string'||typeof config.pinsFilePath!=='string'||typeof config.initializationMarkerPath!=='string'||typeof config.secretKeyPath!=='string'||typeof config.issuerPublicKey!=='string'||typeof config.auditPath!=='string'||typeof config.rateJournalPath!=='string'||typeof config.alertQueuePath!=='string'||!Number.isSafeInteger(config.signerUid)||!Number.isSafeInteger(config.signerGid)||!Number.isSafeInteger(config.allowedPeerUid)||!Number.isSafeInteger(config.allowedPeerPid)||Number(config.allowedPeerPid)<1)throw new Error('SIGNER_STARTUP_CONFIG_INVALID');
   assertMappedCustodyIdentity(Number(config.signerUid),Number(config.signerGid));
   verifySignerStorage({custodyRoot:config.custodyRoot,configPath:path,pinsFilePath:config.pinsFilePath,secretKeyPath:config.secretKeyPath,rateJournalPath:config.rateJournalPath,initializationMarkerPath:config.initializationMarkerPath,auditPath:String(config.auditPath),alertQueuePath:String(config.alertQueuePath),uid});
   requireOrInitializeRateJournal(String(config.rateJournalPath),String(config.initializationMarkerPath),String(config.custodyRoot),uid);
-  const pins=object(JSON.parse(readFileSync(config.pinsFilePath,'utf8')));
+  const pins=object(JSON.parse(readCustodyFile(config.pinsFilePath,config.custodyRoot)));
   const result={...config,pins} as unknown as SignerRuntimeConfig;
   if(result.issuerPublicKey!==process.env.ISSUER_SIGNER_EXPECTED_PUBLIC_KEY)throw new Error('SIGNER_STARTUP_PUBLIC_KEY_MISMATCH');
   if(result.signerUid===result.allowedPeerUid&&!(result.devOnly===true&&process.env.ISSUER_SIGNER_DEV_MODE==='1'))throw new Error('SIGNER_SAME_USER_DEV_ONLY');

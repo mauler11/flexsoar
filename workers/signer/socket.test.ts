@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { chmodSync, chownSync, copyFileSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, chownSync, copyFileSync, constants as fsConstants, lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { connect } from 'node:net';
 import { Ed25519Program, Keypair, SYSVAR_INSTRUCTIONS_PUBKEY, SYSVAR_RENT_PUBKEY, SystemProgram } from '@solana/web3.js';
 import { UnixIssuerSigner } from './socket';
-import { verifySignerStorage } from './storage';
+import { openCustodyFile, verifySignerStorage } from './storage';
 import type { OpenSalePairSignRequest, SignRequest } from './types';
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from '@/lib/solana/sdk';
 
@@ -112,6 +112,7 @@ describe('signer Unix peer credentials',()=>{
     for(const path of [config,pins,key,journal])writeFileSync(path,'{}',{mode:0o600});
     const paths={custodyRoot:root,configPath:config,pinsFilePath:pins,secretKeyPath:key,rateJournalPath:journal,initializationMarkerPath:marker};
     expect(()=>verifySignerStorage(paths)).not.toThrow();
+    const link=join(root,'config-link');symlinkSync(config,link);expect(()=>openCustodyFile(link,root,fsConstants.O_RDONLY)).toThrow();
     chmodSync(config,0o644);expect(()=>verifySignerStorage(paths)).toThrow();chmodSync(config,0o600);
     chownSync(config,uid+1,gid);expect(()=>verifySignerStorage(paths)).toThrow();
   });

@@ -1,4 +1,5 @@
 import { VersionedTransaction } from '@solana/web3.js';
+import { performance } from 'node:perf_hooks';
 import { base58Encode } from '@/lib/solana/base58';
 import { decodePermit, encodePermit } from '@/lib/solana/protocol-v2';
 import type { IssuerDatabase, IssuerContext } from './types';
@@ -13,9 +14,11 @@ export interface OpenSaleSender { sendRawTransaction(bytes:Uint8Array):Promise<s
 export interface OpenSalePins extends OpenSalePairPins { networkId:string; saleAddress(permit:Uint8Array):string }
 export interface OpenSaleSubmitterDeps {
   db:IssuerDatabase;rpc:readonly [OpenSaleRpc,OpenSaleRpc];signer:OpenSaleSigner;sender:OpenSaleSender;alerts:SignerAlertSink;pins:OpenSalePins;
-  allowList:ReadonlySet<string>;nowSeconds():number;
+  allowList:ReadonlySet<string>;nowSeconds():number;monotonicNow?():number;
 }
 export interface OpenSaleSubmissionResult { saleId:string;operationId:string;outcome:'submitted'|'already-present'|'unknown'|'refused';code?:string }
+// Migration 086 fn_payment_v2_renew_open_sale_lease fixes each renewal at 90s.
+const OPEN_SALE_LEASE_INTERVAL_MS=90_000;
 const SEND_LEASE_MARGIN_MS=10_000;
 function fail(code:string):never{throw new Error(code)}
 function bytesHex(value:unknown,length:number):Uint8Array{if(typeof value!=='string'||!new RegExp(`^[0-9a-f]{${length*2}}$`).test(value))fail('ISSUER_OPEN_LISTING_MISSING');return Uint8Array.from(Buffer.from(value,'hex'))}
@@ -83,14 +86,14 @@ export async function runOpenSaleSubmitter(deps:OpenSaleSubmitterDeps):Promise<O
       if(currentOwner.ownerId!==owner.ownerId||currentOwner.ownerAuthId!==owner.ownerAuthId||!sameContext(first,current)||current.state!=='opening')fail('ISSUER_OPEN_LEASE_LOST');
       const [beforeSendA,beforeSendB]=await Promise.all([deps.rpc[0].readSale(saleAddress),deps.rpc[1].readSale(saleAddress)]);
       if(!identical(beforeSendA,beforeSendB)||beforeSendA!==null)fail('ISSUER_OPEN_ACCOUNT_CONFLICT');
-      const renewalStarted=Date.now(),renewedUntil=await deps.db.renewOpenSaleLease(operationId,String(lease.leaseId),String(lease.fencingToken));
-      // Compare against the time before the RPC began; this is conservative
-      // across the renewal round trip and does not depend on the issuer clock.
-      const leaseMargin=Date.parse(renewedUntil)-renewalStarted;
+      const monotonicNow=deps.monotonicNow??(()=>performance.now()),renewalStarted=monotonicNow();
+      await deps.db.renewOpenSaleLease(operationId,String(lease.leaseId),String(lease.fencingToken));
+      // The fixed DB lease interval minus monotonic time spent in the renewal
+      // RPC is conservative: it counts the pre-issuance RPC work too.
+      const leaseMargin=OPEN_SALE_LEASE_INTERVAL_MS-(monotonicNow()-renewalStarted);
       if(!Number.isFinite(leaseMargin)||leaseMargin<SEND_LEASE_MARGIN_MS)fail('ISSUER_OPEN_LEASE_LOST');
-      // This commit-to-send window cannot be fenced by Postgres. If the lease
-      // expires after renewal but before/while send, recover by observing the
-      // PDA on both providers; never treat the send acknowledgement as success.
+      // Renewed immediately before send with a monotonic margin; the
+      // commit-to-send gap is covered by chain reconciliation.
       stage='sending';const acknowledged=await deps.sender.sendRawTransaction(signedBytes);
       await finish(deps,lease,'send_ack',acknowledged);results.push({saleId,operationId,outcome:'submitted'});
     }catch(error){

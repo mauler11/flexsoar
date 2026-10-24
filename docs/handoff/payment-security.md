@@ -7187,3 +7187,11 @@ The integration test asserts that the prepared/recorded sale is present in the r
 The combined issuer + verifier/settler lifecycle E2E is explicitly deferred to Phase 5's worker-runtime exit test, per founder direction. No live service, network, or non-ephemeral key was used.
 
 Final verification after the last code change: `npm test` — 43 files passed, 2 skipped; 840 tests passed, 8 skipped (848 total). `npx tsc --noEmit` exited 0. `npm run build` exited 0; Next compiled, typechecked, and generated all 35 static pages.
+
+### P2c-2e R9b closeout
+
+Confirmed directly in migration 086 `fn_payment_v2_renew_open_sale_lease`, line 251: `v_until:=v_now+interval '90 seconds';UPDATE payment_v2.operations SET lease_until=v_until WHERE id=o.id;RETURN v_until;`. This is a fixed 90-second interval, so no migration was needed. The submitter's pre-send margin is fixed interval minus monotonic elapsed time from before the renew RPC through immediately before send. Wall-clock skew does not affect it. The test covers both +10-minute and −10-minute issuer clocks and a simulated slow renew RPC that leaves 9,999 ms, which refuses without a send.
+
+Custody reads and writes use Linux descriptor-relative opens through a signer-owned directory FD, add `O_NOFOLLOW` to file opens, and validate the opened file descriptor's owner/mode/type. Journal atomic replacement, audit/alert append, key/config/pins reads, and initialization-marker handling use these helpers. A symlink vector refuses.
+
+Final-commit provenance evidence will be stored under `docs/handoff/evidence/<code-commit>/`; each integration and WSL transcript starts with the exact HEAD, dirty-tree state and UTC run time. The combined lifecycle E2E remains deferred to Phase 5.
