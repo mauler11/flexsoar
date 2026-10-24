@@ -63,6 +63,10 @@ COMMIT;`;
 function psqlAdmin(sql:string,login='supabase_admin',db=database):string{
   guarded();return docker(['exec',container!,'psql','-X','-q','-A','-t','-v','ON_ERROR_STOP=1','-h','127.0.0.1','-U',login,'-d',db,'-c',sql]);
 }
+function expectIssuerRefusal(sql:string,code:string):void{
+  guarded();const r=spawnSync('docker',['exec','-e','PGOPTIONS=-c payment_v2.test_identity=synthetic-payment-v2-only',container!,'psql','-X','-q','-A','-t','-v','ON_ERROR_STOP=1','-h','127.0.0.1','-U','payment_db_test_issuer','-d',database,'-c',`BEGIN; SET LOCAL ROLE payment_v2_issuer; ${sql}; COMMIT;`],{encoding:'utf8',windowsHide:true});
+  expect(r.status,`${r.stdout??''}${r.stderr??''}`).not.toBe(0);expect(`${r.stdout??''}${r.stderr??''}`).toContain(code);
+}
 
 const rpcSpecs:Record<string,string[]>={
  fn_payment_v2_consume_issuer_nonce:['text','bytea'],
@@ -91,7 +95,7 @@ class DockerIssuerTransport implements PaymentRpc{
 }
 
 describe.skipIf(!container)('issuer real-login container integration',()=>{
-  it('runs prepare → record-listing and fake-RPC enrollment; each endpoint refusal consumes one nonce and changes no business row',async()=>{
+  it('runs DB negative/retry/race cases and prepare → record-listing plus fake-RPC enrollment through the real login',async()=>{
     installFresh078to086();
     const contract=spawnSync(process.execPath,[join(process.cwd(),'tests','payment-db','086_issuer_contract.mjs'),container!],{encoding:'utf8',windowsHide:true,env:{...process.env,PAYMENT_DB_TARGET:database}});
     if(contract.status!==0)throw new Error(`fresh 086 contract suite failed: ${contract.stdout??''}${contract.stderr??''}`);
@@ -103,7 +107,7 @@ describe.skipIf(!container)('issuer real-login container integration',()=>{
     expect(listing).toMatchObject({found:true,ownerId:seller,ownerAuthId:seller,listingStatus:'public',cardStatus:'active',saleFenced:true});
     const jwtPair=generateKeyPairSync('ec',{namedCurve:'prime256v1'}),jwtPublic=jwtPair.publicKey.export({format:'jwk'}),jwtKid='e3ee4930-ea76-4189-8036-8fa384097de1';
     const jwk={...jwtPublic,kid:jwtKid,alg:'ES256',use:'sig',key_ops:['verify']};
-    const now=Math.floor(Date.now()/1000),kid=`p2c1-${Date.now()}`,hmacKey=Buffer.from('ephemeral-local-integration-only-hmac');
+    let now=Math.floor(Date.now()/1000);const kid=`p2c1-${Date.now()}`,hmacKey=Buffer.from('ephemeral-local-integration-only-hmac');
     psqlAdmin(`SET ROLE payment_v2_owner; INSERT INTO payment_v2.issuer_hmac_keys(kid,fingerprint) VALUES('${kid}',sha256(convert_to('${kid}-synthetic-fingerprint','UTF8'))); INSERT INTO payment_v2.issuer_hmac_key_events(kid,event,reason) VALUES('${kid}','staged','local P2c integration fixture'); INSERT INTO payment_v2.issuer_hmac_key_events(kid,event,reason) VALUES('${kid}','activated','local P2c integration fixture'); RESET ROLE;`);
     const sellerKey=generateKeyPairSync('ed25519'),sellerPub=sellerKey.publicKey.export({format:'jwk'}),sellerWalletBytes=Buffer.from(sellerPub.x!,'base64url'),sellerWallet=base58Encode(sellerWalletBytes);
     const mint=String(listing.mint),sellerAta=associatedTokenAddress(sellerWallet,mint),networkGenesis=String(listing.genesis);
@@ -126,22 +130,82 @@ describe.skipIf(!container)('issuer real-login container integration',()=>{
     await refusal('/v1/enroll-wallet',{phase:'challenge',networkGenesis:'wrong-network',wallet:sellerWallet},'ISSUER_NETWORK_MISMATCH');
     await refusal('/v1/prepare-sale',{listingId,requestId:'11111111-1111-4111-8111-111111111111'},'ISSUER_LISTING_UNAVAILABLE');
     psqlAdmin(`SET session_replication_role='replica'; UPDATE payment_v2.sales SET fence=false WHERE listing_id='${listingId}'; UPDATE payment_v2.wallet_accounts SET wallet=decode('${sellerWalletBytes.toString('hex')}','hex'),token_account=decode('${Buffer.from(decodeAddress(sellerAta)).toString('hex')}','hex'),proof_digest=decode('${proofDigest}','hex') WHERE user_id='${seller}' AND network_id='${networkId}'; UPDATE public.users SET solana_address='${sellerWallet}' WHERE id='${seller}'; SET session_replication_role='origin';`);
-    const prepared=await handleIssuerRequest(signedRequest('/v1/prepare-sale',{listingId,requestId:'11111111-1111-4111-8111-111111111111'}).req,deps);
-    expect(prepared.status,JSON.stringify(prepared.body)).toBe(200);const saleBody=prepared.body as Record<string,unknown>,saleId=String(saleBody.saleId);
-    deps.fx=[{quote:async()=>{throw new Error('retry must use stored FX snapshot')}},{quote:async()=>{throw new Error('retry must use stored FX snapshot')}}];
-    const recovered=await handleIssuerRequest(signedRequest('/v1/prepare-sale',{listingId,requestId:'11111111-1111-4111-8111-111111111111'}).req,deps);
-    expect(recovered.status,JSON.stringify(recovered.body)).toBe(200);expect(recovered.body).toEqual(prepared.body);
+    const requestId='11111111-1111-4111-8111-111111111111';
+    let releasePriceRace!:()=>void,priceQuoteStarted!:()=>void;const priceGate=new Promise<void>(resolve=>{releasePriceRace=resolve}),priceStarted=new Promise<void>(resolve=>{priceQuoteStarted=resolve});
+    deps.fx=[{quote:async()=>{priceQuoteStarted();await priceGate;return quote('provider-a','1')}},{quote:async()=>quote('provider-b','1')}];
+    const priceRequest=signedRequest('/v1/prepare-sale',{listingId,requestId:'22222222-2222-4222-8222-222222222222'}),pricePending=handleIssuerRequest(priceRequest.req,deps);
+    await priceStarted;const originalPrice=psql(`SELECT price_cents FROM public.listings WHERE id='${listingId}'`);
+    psqlAdmin(`SET session_replication_role='replica'; UPDATE public.listings SET price_cents=price_cents+1 WHERE id='${listingId}'; SET session_replication_role='origin';`);const changedPriceSnapshot=businessSnapshot();releasePriceRace();
+    const priceRace=await pricePending;expect(priceRace.body.error).toMatchObject({code:'ISSUER_LISTING_STALE'});expect(businessSnapshot()).toBe(changedPriceSnapshot);expectOneNonce(priceRequest.nonceHex);
+    psqlAdmin(`SET session_replication_role='replica'; UPDATE public.listings SET price_cents=${originalPrice} WHERE id='${listingId}'; SET session_replication_role='origin';`);now+=61;
+
+    let quoteCalls=0,releaseSame!:()=>void,releaseDistinct!:()=>void,resolveSameReady!:()=>void,resolveDistinctReady!:()=>void;
+    const sameGate=new Promise<void>(resolve=>{releaseSame=resolve}),distinctGate=new Promise<void>(resolve=>{releaseDistinct=resolve}),sameReady=new Promise<void>(resolve=>{resolveSameReady=resolve}),distinctReady=new Promise<void>(resolve=>{resolveDistinctReady=resolve});
+    const gatedQuote=(providerId:string)=>async()=>{const call=++quoteCalls;if(call===4)resolveSameReady();if(call===6)resolveDistinctReady();await (call<=4?sameGate:distinctGate);const rate=call<=2?'1':call<=4?'2':'3';return quote(providerId,rate)};
+    deps.fx=[{quote:gatedQuote('provider-a')},{quote:gatedQuote('provider-b')}];
+    const sameA=signedRequest('/v1/prepare-sale',{listingId,requestId}),sameB=signedRequest('/v1/prepare-sale',{listingId,requestId});
+    const pendingA=handleIssuerRequest(sameA.req,deps),pendingB=handleIssuerRequest(sameB.req,deps);await sameReady;
+    const distinct=signedRequest('/v1/prepare-sale',{listingId,requestId:'33333333-3333-4333-8333-333333333333'}),pendingDistinct=handleIssuerRequest(distinct.req,deps);await distinctReady;
+    releaseSame();const [prepared,prepared2]=await Promise.all([pendingA,pendingB]);
+    expect(prepared.status,JSON.stringify(prepared.body)).toBe(200);expect(prepared2.status,JSON.stringify(prepared2.body)).toBe(200);expect(prepared2.body).toEqual(prepared.body);
+    const saleBody=prepared.body as Record<string,unknown>,saleId=String(saleBody.saleId),stored=await db.subjectContext('prepare_recovery',requestId,null);
+    expect(stored).toMatchObject({found:true,listingId,saleId});
+    expect(saleBody.quote).toMatchObject({totalMicroUsdc:stored.quoteTotalUnits,validFrom:stored.quoteValidFrom,expiresAt:stored.quoteExpiresAt,fxSnapshot:stored.fxSnapshot});
+    const fencedSnapshot=businessSnapshot();releaseDistinct();const fenceRace=await pendingDistinct;
+    expect(fenceRace.body.error).toMatchObject({code:'ISSUER_LISTING_UNAVAILABLE'});expect(businessSnapshot()).toBe(fencedSnapshot);
+    expectOneNonce(sameA.nonceHex);expectOneNonce(sameB.nonceHex);expectOneNonce(distinct.nonceHex);
+    console.log(`P2C1R8|prepare-same-request|PASS|responses-identical|stored-sale=${saleId}|different-fx-snapshots`);
+    console.log('P2C1R8|prepare-price-race|PASS|ISSUER_LISTING_STALE|no-stale-sale-write');
+    console.log('P2C1R8|prepare-fence-race|PASS|ISSUER_LISTING_UNAVAILABLE|no-second-sale-write');
+
+    now+=61;deps.fx=[{quote:async()=>{throw new Error('retry must use stored FX snapshot')}},{quote:async()=>{throw new Error('retry must use stored FX snapshot')}}];
+    const recoveredCall=signedRequest('/v1/prepare-sale',{listingId,requestId}),recovered=await handleIssuerRequest(recoveredCall.req,deps);
+    expect(recovered.status,JSON.stringify(recovered.body)).toBe(200);expect(recovered.body).toEqual(prepared.body);expectOneNonce(recoveredCall.nonceHex);
     const listingMessage=Buffer.from(String((saleBody.listing as Record<string,unknown>).messageBase64url),'base64url'),badSig={saleId,messageBase64url:listingMessage.toString('base64url'),signatureBase64url:Buffer.alloc(64).toString('base64url')};
     await refusal('/v1/record-listing',badSig,'ISSUER_LISTING_SIGNATURE_INVALID');
     const validSig=cryptoSign(null,listingMessage,sellerKey.privateKey).toString('base64url');
+    const signingContext=db.saleSigningContext.bind(db);let markCancelled!:()=>void;const cancelledAtSigningRead=new Promise<void>(resolve=>{markCancelled=resolve});
+    db.saleSigningContext=async(id)=>{const value=await signingContext(id);psqlAdmin(`SET session_replication_role='replica'; UPDATE payment_v2.sales SET state='cancel_requested' WHERE id='${id}'; SET session_replication_role='origin';`);markCancelled();return value;};
+    const cancelRequest=signedRequest('/v1/record-listing',{saleId,messageBase64url:listingMessage.toString('base64url'),signatureBase64url:validSig}),cancelPending=handleIssuerRequest(cancelRequest.req,deps);
+    // The adapter changes state after the first DB read; the service's final reader must stop 083.
+    await cancelledAtSigningRead;const cancelledSnapshot=businessSnapshot(),cancelled=await cancelPending;
+    expect(cancelled.body.error).toMatchObject({code:'ISSUER_SALE_NOT_OPENING'});expect(businessSnapshot()).toBe(cancelledSnapshot);expectOneNonce(cancelRequest.nonceHex);
+    psqlAdmin(`SET session_replication_role='replica'; UPDATE payment_v2.sales SET state='opening' WHERE id='${saleId}'; SET session_replication_role='origin';`);db.saleSigningContext=signingContext;
+    console.log('P2C1R8|record-cancel-race|PASS|ISSUER_SALE_NOT_OPENING|no-stale-listing-write');
     const recorded=await handleIssuerRequest(signedRequest('/v1/record-listing',{saleId,messageBase64url:listingMessage.toString('base64url'),signatureBase64url:validSig}).req,deps);
     expect(recorded.status,JSON.stringify(recorded.body)).toBe(200);expect(recorded.body).toMatchObject({saleId,recorded:true});
+    const recordedSnapshot=businessSnapshot();await db.recordListing(saleId,listingMessage,new Uint8Array(Buffer.from(validSig,'base64url')));expect(businessSnapshot()).toBe(recordedSnapshot);
+    const conflictSignature=Buffer.alloc(64,0x44),conflictBefore=businessSnapshot();
+    expectIssuerRefusal(`SELECT public.fn_payment_v2_record_listing('${saleId}',decode('${listingMessage.toString('hex')}','hex'),decode('${conflictSignature.toString('hex')}','hex'))`,'PAYMENT_V2_LISTING_CONFLICT');
+    expect(businessSnapshot()).toBe(conflictBefore);console.log('P2C1R8|record-writer-retry|PASS|exact-bytes-idempotent|conflicting-bytes-refused');
     const count=Number(psql(`SELECT count(*) FROM payment_v2.issuer_hmac_nonces WHERE kid='${kid}'`));expect(count).toBe(nonceOrdinal);
     psqlAdmin(`SET session_replication_role='replica'; DELETE FROM payment_v2.wallet_accounts WHERE user_id='${seller}' AND network_id='${networkId}'; SET session_replication_role='origin';`);
     const enrollBody={phase:'complete',networkGenesis,wallet:sellerWallet,mint,tokenAccount:sellerAta,issuedAt:proofNow,signature:proofSig.toString('base64url')};
     const enrolled=await handleIssuerRequest(signedRequest('/v1/enroll-wallet',enrollBody).req,deps);
     expect(enrolled.status,JSON.stringify(enrolled.body)).toBe(200);expect(enrolled.body).toMatchObject({enrolled:true,wallet:sellerWallet,tokenAccount:sellerAta});
     expect(psql(`SELECT count(*) FROM payment_v2.wallet_accounts WHERE user_id='${seller}' AND network_id='${networkId}' AND wallet=decode('${sellerWalletBytes.toString('hex')}','hex') AND proof_digest=decode('${proofDigest}','hex')`)).toBe('1');
-    expect(nonceOrdinal).toBe(7);
-  },180000);
+    expect(nonceOrdinal).toBe(11);
+
+    const tokenAccountBytes=Buffer.from(decodeAddress(sellerAta)),digestBytes=Buffer.from(proofDigest,'hex');
+    const enrollSql=(userId:string,network:string,wallet:Buffer,token:Buffer,digest:Buffer)=>`SELECT public.fn_payment_v2_issuer_enroll_wallet_checked('${userId}','${network}',decode('${wallet.toString('hex')}','hex'),decode('${token.toString('hex')}','hex'),decode('${digest.toString('hex')}','hex'))`;
+    const dbRefusal=(sql:string,code:string)=>{const before=businessSnapshot();expectIssuerRefusal(sql,code);expect(businessSnapshot()).toBe(before);};
+    psqlAdmin(`SET session_replication_role='replica'; UPDATE public.users SET auth_id=NULL WHERE id='${seller}'; SET session_replication_role='origin';`);
+    dbRefusal(enrollSql(seller,networkId,sellerWalletBytes,tokenAccountBytes,digestBytes),'PAYMENT_V2_ISSUER_IDENTITY_MISMATCH');
+    psqlAdmin(`SET session_replication_role='replica'; UPDATE public.users SET auth_id=id WHERE id='${seller}'; SET session_replication_role='origin';`);
+    const otherWallet=Buffer.alloc(32,0x33),otherToken=Buffer.alloc(32,0x34),otherProof=Buffer.alloc(32,0x35);
+    dbRefusal(enrollSql(seller,networkId,otherWallet,otherToken,otherProof),'PAYMENT_V2_WALLET_ADDRESS_MISMATCH');
+    psqlAdmin(`SET session_replication_role='replica'; UPDATE public.users SET country_code='US' WHERE id='${seller}'; SET session_replication_role='origin';`);
+    dbRefusal(enrollSql(seller,networkId,sellerWalletBytes,otherToken,otherProof),'PAYMENT_V2_WALLET_USER_NOT_MY');
+    psqlAdmin(`SET session_replication_role='replica'; UPDATE public.users SET country_code='MY' WHERE id='${seller}'; SET session_replication_role='origin';`);
+    dbRefusal(enrollSql(seller,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',sellerWalletBytes,otherToken,otherProof),'PAYMENT_V2_WALLET_NETWORK_UNKNOWN');
+    dbRefusal(enrollSql(seller,networkId,sellerWalletBytes,otherToken,digestBytes),'PAYMENT_V2_WALLET_ENROLLMENT_CONFLICT');
+    const buyerAddress=psql(`SELECT coalesce(solana_address,'') FROM public.users WHERE id='${ids.buyer}'`),buyerCountry=psql(`SELECT country_code FROM public.users WHERE id='${ids.buyer}'`);
+    psqlAdmin(`SET session_replication_role='replica'; UPDATE public.users SET solana_address='${sellerWallet}',country_code='MY' WHERE id='${ids.buyer}'; SET session_replication_role='origin';`);
+    dbRefusal(enrollSql(ids.buyer,networkId,sellerWalletBytes,tokenAccountBytes,otherProof),'PAYMENT_V2_WALLET_TOKEN_ACCOUNT_USED');
+    psqlAdmin(`SET session_replication_role='replica'; UPDATE public.users SET solana_address=${buyerAddress?`'${buyerAddress}'`:'NULL'},country_code='${buyerCountry}' WHERE id='${ids.buyer}'; SET session_replication_role='origin';`);
+    const exactRetrySnapshot=businessSnapshot();await db.enrollWalletChecked(seller,networkId,sellerWalletBytes,tokenAccountBytes,digestBytes);expect(businessSnapshot()).toBe(exactRetrySnapshot);
+    const changedDigest=digestBytes.slice();changedDigest[0]^=1;
+    dbRefusal(enrollSql(seller,networkId,sellerWalletBytes,tokenAccountBytes,changedDigest),'PAYMENT_V2_WALLET_ENROLLMENT_CONFLICT');
+    console.log('P2C1R8|enrollment-writer|PASS|auth_id|linked-wallet|non-MY|network|duplicate-wallet|duplicate-token|exact-retry|changed-proof-retry');
+  },300000);
 });

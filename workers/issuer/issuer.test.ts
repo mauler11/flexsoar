@@ -287,6 +287,13 @@ describe('issuer endpoint refusal boundaries',()=>{
     cases.push({code:'ISSUER_TOKEN_ACCOUNT_INVALID',rpc:'ata-mint'});
     cases.push({code:'ISSUER_TOKEN_ACCOUNT_INVALID',rpc:'ata-authority'});
     cases.push({code:'ISSUER_TOKEN_ACCOUNT_INVALID',rpc:'ata-frozen'});
+    cases.push({code:'ISSUER_TOKEN_ACCOUNT_INVALID',rpc:'ata-active-delegate'});
+    cases.push({code:'ISSUER_TOKEN_ACCOUNT_INVALID',rpc:'ata-delegate-set-zero-amount'});
+    cases.push({code:'ISSUER_TOKEN_ACCOUNT_INVALID',rpc:'ata-delegated-amount-without-delegate'});
+    cases.push({code:'ISSUER_TOKEN_ACCOUNT_INVALID',rpc:'ata-close-authority'});
+    cases.push({code:'ISSUER_TOKEN_ACCOUNT_INVALID',rpc:'ata-invalid-delegate-option'});
+    cases.push({code:'ISSUER_TOKEN_ACCOUNT_INVALID',rpc:'ata-invalid-native-option'});
+    cases.push({code:'ISSUER_TOKEN_ACCOUNT_INVALID',rpc:'ata-uninitialized'});
     for(const [index,c] of cases.entries()){
       const {d,counters}=deps();d.db.subjectContext=async()=>c.network??networkContext;
       const rpcMode=c.rpc;
@@ -303,6 +310,13 @@ describe('issuer endpoint refusal boundaries',()=>{
         if(rpcMode==='ata-mint'&&address===ata){const data=new Uint8Array(165);data.set(new Uint8Array(32).fill(2),0);data.set(walletBytes,32);data[108]=1;result={...result,data};}
         if(rpcMode==='ata-authority'&&address===ata){const data=new Uint8Array(165);data.set(decodeAddress(mint),0);data.set(new Uint8Array(32).fill(2),32);data[108]=1;result={...result,data};}
         if(rpcMode==='ata-frozen'&&address===ata){const data=tokenAccount.slice();data[108]=2;result={...result,data};}
+        if(rpcMode==='ata-active-delegate'&&address===ata){const data=tokenAccount.slice();data[72]=1;data[76]=9;data[108]=1;data[121]=1;result={...result,data};}
+        if(rpcMode==='ata-delegate-set-zero-amount'&&address===ata){const data=tokenAccount.slice();data[72]=1;data[76]=9;data[108]=1;result={...result,data};}
+        if(rpcMode==='ata-delegated-amount-without-delegate'&&address===ata){const data=tokenAccount.slice();data[108]=1;data[121]=1;result={...result,data};}
+        if(rpcMode==='ata-close-authority'&&address===ata){const data=tokenAccount.slice();data[108]=1;data[129]=1;data[133]=9;result={...result,data};}
+        if(rpcMode==='ata-invalid-delegate-option'&&address===ata){const data=tokenAccount.slice();data[72]=2;data[108]=1;result={...result,data};}
+        if(rpcMode==='ata-invalid-native-option'&&address===ata){const data=tokenAccount.slice();data[108]=1;data[109]=2;result={...result,data};}
+        if(rpcMode==='ata-uninitialized'&&address===ata){const data=tokenAccount.slice();data[108]=0;result={...result,data};}
         return result;
       }});
       d.rpc=[provider(0),provider(1)];

@@ -18,6 +18,18 @@ function strictJson(bytes: Uint8Array): Record<string,unknown> { try { const s =
 function canonicalDecimal(v: unknown): string { if (typeof v !== 'string' || !/^(0|[1-9][0-9]*)$/.test(v)) fail('ISSUER_BAD_REQUEST',400); return v; }
 function b58(value: unknown): Uint8Array { if (typeof value !== 'string') fail('ISSUER_BAD_REQUEST',400); try { const b=decodeAddress(value); if (b.length!==32||base58Encode(b)!==value) fail('ISSUER_BAD_REQUEST',400); return b; } catch { return fail('ISSUER_BAD_REQUEST',400); } }
 function accountEqual(a: Uint8Array,b:Uint8Array):boolean{return a.length===b.length&&a.every((v,i)=>v===b[i]);}
+function u32le(bytes:Uint8Array,offset:number):number{return (bytes[offset]!|bytes[offset+1]!<<8|bytes[offset+2]!<<16|bytes[offset+3]!<<24)>>>0;}
+function u64le(bytes:Uint8Array,offset:number):bigint{let n=BigInt('0');for(let i=7;i>=0;i--)n=(n<<BigInt('8'))|BigInt(bytes[offset+i]!);return n;}
+function coption(bytes:Uint8Array,offset:number,length:number):boolean{
+  const tag=u32le(bytes,offset),value=bytes.subarray(offset+4,offset+4+length);
+  if(tag===0){if(value.some(byte=>byte!==0))fail('ISSUER_TOKEN_ACCOUNT_INVALID');return false;}
+  if(tag===1)return true;
+  return fail('ISSUER_TOKEN_ACCOUNT_INVALID');
+}
+function decodeTokenAccount(bytes:Uint8Array):{amount:bigint;delegate:boolean;native:boolean;delegatedAmount:bigint;closeAuthority:boolean}{
+  if(bytes.length!==165)fail('ISSUER_TOKEN_ACCOUNT_INVALID');
+  return {amount:u64le(bytes,64),delegate:coption(bytes,72,32),native:coption(bytes,109,8),delegatedAmount:u64le(bytes,121),closeAuthority:coption(bytes,129,32)};
+}
 function context(deps: IssuerDeps, ctx: IssuerContext, userId: string, ownerFailure='ISSUER_LISTING_NOT_OWNED',missingFailure='ISSUER_LISTING_NOT_FOUND'): void { if(ctx.found!==true)fail(missingFailure,404);if(ctx.ownerId!==userId||ctx.ownerAuthId!==userId)fail(ownerFailure,403);if(!deps.config.allowList.has(userId))fail('ISSUER_USER_NOT_ALLOWED',403); }
 
 async function pipeline(req: IssuerRequest, deps: IssuerDeps): Promise<string> {
@@ -72,7 +84,10 @@ async function enroll(body:Record<string,unknown>, userId:string, deps:IssuerDep
   const [m1,m2,t1,t2]=await Promise.all([a.account(mint,target),b.account(mint,target),a.account(ata,target),b.account(ata,target)]).catch(()=>fail('ISSUER_RPC_UNAVAILABLE',503));
   const accounts=[m1,m2,t1,t2];if(accounts.some(x=>!x||x.contextSlot<target||x.contextSlot>target+BigInt('32'))||!accountEqual(m1!.data,m2!.data)||!accountEqual(t1!.data,t2!.data))fail('ISSUER_RPC_DISAGREEMENT');
   const ma=m1!,ta=t1!;if(ma.owner!==deps.config.tokenProgram||ma.data.length!==82||ma.data[44]!==deps.config.tokenDecimals||ma.data[45]!==1)fail('ISSUER_MINT_INVALID');
-  if(ta.owner!==deps.config.tokenProgram||ta.data.length!==165||!accountEqual(ta.data.subarray(0,32),mintBytes)||!accountEqual(ta.data.subarray(32,64),walletBytes)||ta.data[108]!==1)fail('ISSUER_TOKEN_ACCOUNT_INVALID');
+  const tokenData=ta.data;
+  if(ta.owner!==deps.config.tokenProgram||tokenData.length!==165||!accountEqual(tokenData.subarray(0,32),mintBytes)||!accountEqual(tokenData.subarray(32,64),walletBytes)||tokenData[108]!==1)fail('ISSUER_TOKEN_ACCOUNT_INVALID');
+  const layout=decodeTokenAccount(tokenData);
+  if(layout.delegate||layout.delegatedAmount!==BigInt('0')||layout.native||layout.closeAuthority)fail('ISSUER_TOKEN_ACCOUNT_INVALID');
   const digest=sha256(new Uint8Array([...message,...signature])); await deps.db.enrollWalletChecked(userId,deps.config.networkId,walletBytes,b58(ata),digest);
   return {enrolled:true,networkGenesis:genesis,wallet,mint,tokenAccount:ata,proofDigest:Buffer.from(digest).toString('hex')};
 }
@@ -80,18 +95,47 @@ async function enroll(body:Record<string,unknown>, userId:string, deps:IssuerDep
 async function prepare(body:Record<string,unknown>, userId:string,deps:IssuerDeps):Promise<Record<string,unknown>>{
   exact(body,['listingId','requestId']);const listingId=String(body.listingId),requestId=String(body.requestId);if(!UUID.test(listingId)||!UUID.test(requestId))fail('ISSUER_BAD_REQUEST',400);
   const recovered=await deps.db.subjectContext('prepare_recovery',requestId,null);
-  if(recovered.found===true){context(deps,recovered,userId);if(recovered.listingId!==listingId)fail('ISSUER_SALE_IDEMPOTENCY_CONFLICT',409);
-    if(BigInt(String(recovered.quoteExpiresAt))<=BigInt(deps.nowSeconds()))fail('ISSUER_QUOTE_EXPIRED',409);
-    return saleResponse(String(recovered.saleId),listingId,String(recovered.quoteTotalUnits),String(recovered.quoteValidFrom),String(recovered.quoteExpiresAt),recovered.fxSnapshot as Record<string,unknown>,recovered,deps,userId);
-  }
+  if(recovered.found===true)return storedSaleResponse(recovered,listingId,userId,deps);
   const ctx=await deps.db.subjectContext('listing',listingId,deps.config.networkId);context(deps,ctx,userId,'ISSUER_LISTING_NOT_OWNED','ISSUER_LISTING_NOT_FOUND');
   if(ctx.networkId!==deps.config.networkId||ctx.genesis!==deps.config.networkGenesis||ctx.program!==deps.config.program||ctx.config!==deps.config.networkConfig||ctx.mint!==deps.config.mint||ctx.tokenProgram!==deps.config.tokenProgram)fail('ISSUER_NETWORK_MISMATCH',403);
   if(ctx.listingStatus!=='public'||ctx.cardStatus!=='active'||ctx.inventoryRegistered!==true||ctx.saleFenced===true)fail('ISSUER_LISTING_UNAVAILABLE',409);
   if(ctx.fundingEnabled!==true)fail('ISSUER_FUNDING_DISABLED',409);
   let q1,q2;try{[q1,q2]=await Promise.all([deps.fx[0].quote(),deps.fx[1].quote()])}catch{fail('ISSUER_FX_UNAVAILABLE',503)}
   let total:bigint,snapshot:Record<string,unknown>;try{({total,snapshot}=calculateFx([q1!,q2!],String(ctx.priceCents),deps.nowSeconds()))}catch(e){const code=(e as Error).message;if(['ISSUER_FX_STALE','ISSUER_FX_DISAGREEMENT','ISSUER_FX_INVALID','ISSUER_FX_OVERFLOW'].includes(code))fail(code);throw e;} const valid=deps.nowSeconds(),expires=valid+600;
+  const raced=await deps.db.subjectContext('prepare_recovery',requestId,null);
+  if(raced.found===true)return storedSaleResponse(raced,listingId,userId,deps);
+  const current=await deps.db.subjectContext('listing',listingId,deps.config.networkId);
+  context(deps,current,userId,'ISSUER_LISTING_NOT_OWNED','ISSUER_LISTING_NOT_FOUND');
+  if(!sameListingSnapshot(ctx,current)){
+    if(current.saleFenced===true){
+      const fencedWinner=await deps.db.subjectContext('prepare_recovery',requestId,null);
+      if(fencedWinner.found===true)return storedSaleResponse(fencedWinner,listingId,userId,deps);
+      fail('ISSUER_LISTING_UNAVAILABLE',409);
+    }
+    fail('ISSUER_LISTING_STALE',409);
+  }
   const terms={id:requestId,saleAddress:deps.config.saleAddress(ctx),escrowAddress:deps.config.escrowAddress(ctx),totalUnits:total.toString(),fxSnapshot:snapshot,validFrom:String(valid),expiresAt:String(expires)};
-  const saleId=await deps.db.prepareSale(listingId,deps.config.networkId,terms);return saleResponse(saleId,listingId,total.toString(),String(valid),String(expires),snapshot,ctx,deps,userId);
+  let saleId:string;
+  try{saleId=await deps.db.prepareSale(listingId,deps.config.networkId,terms);}
+  catch(error){
+    if(!(error instanceof Error)||!error.message.includes('PAYMENT_V2_SALE_IDEMPOTENCY_CONFLICT'))throw error;
+    const winner=await deps.db.subjectContext('prepare_recovery',requestId,null);
+    if(winner.found!==true||winner.listingId!==listingId)fail('ISSUER_SALE_IDEMPOTENCY_CONFLICT',409);
+    return storedSaleResponse(winner,listingId,userId,deps);
+  }
+  const stored=await deps.db.subjectContext('prepare_recovery',requestId,null);
+  if(stored.found!==true||stored.listingId!==listingId||String(stored.saleId)!==saleId)fail('ISSUER_LISTING_STALE',409);
+  return storedSaleResponse(stored,listingId,userId,deps);
+}
+
+const listingSnapshotFields=['ownerId','ownerAuthId','networkId','genesis','program','config','mint','tokenProgram','listingStatus','cardId','cardStatus','priceCents','inventoryRegistered','saleFenced','fundingEnabled'] as const;
+function sameListingSnapshot(before:IssuerContext,after:IssuerContext):boolean{return listingSnapshotFields.every(key=>before[key]===after[key]);}
+async function storedSaleResponse(stored:IssuerContext,listingId:string,userId:string,deps:IssuerDeps):Promise<Record<string,unknown>>{
+  if(stored.found!==true||stored.listingId!==listingId)fail('ISSUER_SALE_IDEMPOTENCY_CONFLICT',409);
+  context(deps,stored,userId);
+  if(BigInt(String(stored.quoteExpiresAt))<=BigInt(deps.nowSeconds()))fail('ISSUER_QUOTE_EXPIRED',409);
+  if(!stored.fxSnapshot||typeof stored.fxSnapshot!=='object'||Array.isArray(stored.fxSnapshot))fail('ISSUER_LISTING_STALE',409);
+  return saleResponse(String(stored.saleId),listingId,String(stored.quoteTotalUnits),String(stored.quoteValidFrom),String(stored.quoteExpiresAt),stored.fxSnapshot as Record<string,unknown>,stored,deps,userId);
 }
 
 async function saleResponse(saleId:string,listingId:string,total:string,validFrom:string,expiresAt:string,snapshot:Record<string,unknown>,ownerContext:IssuerContext,deps:IssuerDeps,userId:string):Promise<Record<string,unknown>>{
@@ -125,6 +169,9 @@ async function record(body:Record<string,unknown>,userId:string,deps:IssuerDeps)
   const preparedAtMs=Date.parse(String(saleContext.preparedAt));if(!Number.isFinite(preparedAtMs))fail('ISSUER_LISTING_STALE',409);
   const preparedAt=BigInt(Math.floor(preparedAtMs/1000));const expiry=decoded.expiresAt;
   if(expiry<=BigInt(deps.nowSeconds())||expiry<BigInt(String(ctx.quoteExpiresAt))||expiry>preparedAt+BigInt('86400'))fail('ISSUER_LISTING_EXPIRED');
+  const current=await deps.db.subjectContext('sale',saleId,null);context(deps,current,userId,'ISSUER_SALE_NOT_OWNED','ISSUER_SALE_NOT_FOUND');
+  if(current.state!=='opening')fail('ISSUER_SALE_NOT_OPENING',409);
+  if(current.listingId!==ctx.listingId||current.ownerId!==ctx.ownerId||current.ownerAuthId!==ctx.ownerAuthId||current.quoteTotalUnits!==ctx.quoteTotalUnits||current.quoteExpiresAt!==ctx.quoteExpiresAt||current.toleranceBps!==ctx.toleranceBps||current.preparedAt!==ctx.preparedAt)fail('ISSUER_LISTING_STALE',409);
   await deps.db.recordListing(saleId,message,signature);return {saleId,recorded:true,listingExpiresAt:expiry.toString(),minTotalMicroUsdc:decoded.minTotal.toString()};
 }
 
