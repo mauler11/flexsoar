@@ -7026,3 +7026,31 @@ The `pg_get_functiondef` hashes are included as a separate diagnostic; that repr
 **Fresh replay limitation.** The requested fresh 078→085 container replay was not run: the Docker Desktop Linux engine is unavailable (`docker ps` failed because its named pipe is absent), and this task prohibits writes. Therefore this note does not claim a byte-for-byte textual diff against a newly replayed database. The staging body dump and the migration's five precise replacement fragments are preserved for independent comparison. Do not proceed with 086 until the requested replay comparison and apply-time/XID question are resolved or explicitly accepted by the reviewer.
 
 **Corrected 086 preflight baseline:** pin the five *post-085* `prosrc` MD5 values in the table above, using `md5(replace(p.prosrc,chr(13),''))`. Do not compare the 086 preflight against `expected-preflight-085.txt`, whose five hashes intentionally describe the pre-085 state.
+
+### S-086 continuation — staging apply and freeze (2026-10-24)
+
+The continuation confirmed diagnosis (a): the preflight compared post-085 staging to the 085 pre-apply body hashes. The correct baseline is the recorded post-085 snapshot `085-post-snapshot-proc.out` from the S-083-085 evidence. Both the 085 guard and the 086 preflight hash `prosrc` using `md5(replace(prosrc,chr(13),''))`; no function-definition wrapper is included. A fresh local replay cloned the preserved 078 source database `flexsoar_mig_test_20261021` into disposable `flexsoar_086_diag_20261024`, applied 079 through 085 in order, and confirmed all five results match current staging:
+
+| Function | POST-085 source and fresh replay/staging MD5 |
+|---|---|
+| `fn_payment_v2_claim_operations(uuid,integer)` | `53e4381a1c739835d607e2bacf763b6a` |
+| `fn_payment_v2_finish_operation(uuid,uuid,text,text)` | `12709ffe86eea5c0b18635f160b52dd7` |
+| `fn_payment_v2_operation_context(uuid,uuid)` | `5b6d232d882c3cfc282462f9c0074e63` |
+| `fn_payment_v2_signed_operation(uuid,uuid)` | `067eb760bd5803d15d154f771c53107b` |
+| `fn_payment_v2_stage_signed_operation(uuid,uuid,jsonb)` | `8677d557218219dc4dff6de455909a09` |
+
+The 086 staging preflight tooling now pins those POST-085 values in `C:\Users\Family\flexsoar-reviews\staging-086\expected-post-085.txt` and compares with the same `prosrc` MD5 expression. No 086 migration or verify SQL content changed for this correction.
+
+The fresh guarded staging preflight passed. The dry run ended in `ROLLBACK`; the single authorized apply ended in `COMMIT`; one rerun was refused with `PAYMENT_V2_ISSUER_086_ALREADY_APPLIED`. Guarded post-apply reads found the expected 086 objects and no unrelated catalog drift. The delta was 38 additions and one intended replacement: three RLS tables, one sequence, indexes, nine functions, fourteen constraints, three policies, three triggers, and the `operations.immutable_terms` trigger replacement. Executor function bodies and metadata stayed at their POST-085 baseline. `verify-081.sql` and `checks-082.sql` output was unchanged. Verify-post changed only expected V3 counts (tables 33→36, sequences 3→4, payment_v2 functions 29→32, public `fn_payment_v2_*` functions 46→52). Network, funding, staff, and decision counts remain zero.
+
+**FREEZE:** migration 086 is applied to flexsoar-staging and must never be edited. Never run it on production from this handoff. Guarded logs and catalog evidence are under `C:\Users\Family\flexsoar-reviews\staging-086\logs\`. The 083-086 production kit at `C:\Users\Family\flexsoar-reviews\prod-runbook-083-086\` is prepared and remains unexecuted. Its staging-evidence manifest SHA-256 is `fd90caa2057484031d98a1f52978a9ec73b4191823e0fbad304845de3eb321a`; `KIT.sha256` is `57d7b4d66dc29606db4ac4af39210e49b0896b4bc380cc8fe9cb463e05d499e6`. The offline kit validation passed. No production command or connection was run.
+
+### P2c-1 issuer service local implementation (2026-10-24)
+
+Added a local-only, dependency-injected service under `workers/issuer/`. HMAC uses the canonical v1 string and active kid, consumes the 086 nonce before JWT verification as explicitly ordered in the task, verifies pinned ES256/JWKS claims, enforces asserted-sub equality and D7, then executes endpoint logic. Nonce consumption is tracked separately from business writes in tests because the requested sequence itself persists the nonce before later JWT refusals.
+
+`enroll-wallet` implements proof verification, ATA derivation, and matching finalized-slot/account checks through two injected RPC providers before the checked 086 writer. `prepare-sale` reads owned listing context, calculates the agreed FX midpoint with checked 256-bit integer arithmetic and ceiling rounding, stores a stable snapshot, and constructs the sale-bound seller message. `record-listing` reads 086 ownership and sale state, obtains committed signing fields through the injected DB interface, recomputes the listing binding, verifies seller signature/floor/expiry, then calls the 083 writer. `authorize-attempt` and the open-sale submitter always refuse. JWKS, DB, FX, and RPC access remain interfaces; tests use local fakes and ephemeral test-only signing keys. There are no HTTP clients, real credentials, live accounts, or signer/sender paths in this lane.
+
+Issuer unit suite: 9 tests pass, covering HS256 and role confusion, expiration/future `iat`, wrong kid, wrong subject, D7 refusal, nonce replay, HMAC refusal, FX disagreement/staleness/overflow/rounding, proof replay across network/user/wallet/mint, finalized RPC disagreement, and listing owner/state/signature refusals. The isolated DB contract run used a fresh copy of the preserved 078 source in `flexsoar_payment_v2_test`, replayed 079–086, and completed the existing 086 issuer contract harness with `T086|PASS`. This exercises the 086 DB RPCs and race/refusal assertions; it does not provide a production DB transport adapter.
+
+The implementation is ready for independent R8 review. The review should specifically assess nonce-write accounting against the requested zero-DB-writes refusal assertion, and confirm the injected DB adapter contract can be connected through the owned `track/data` `lib/db/**` lane without widening this task's file scope.
