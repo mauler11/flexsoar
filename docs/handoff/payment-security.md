@@ -7067,10 +7067,10 @@ This section supersedes the earlier P2c-1b paragraph above, which said the 083 r
 
 Added the concrete issuer DB adapter and precisely scoped `payment_v2_issuer` transport routes needed by the implemented calls. New allow-list routes (and the only route changes in `lib/db/payment-postgres.ts`) are:
 
-- `fn_payment_v2_issuer_subject_context(text,uuid,uuid)` — 086.
-- `fn_payment_v2_issuer_enroll_wallet_checked(uuid,uuid,bytea,bytea,bytea)` — 086 wrapper over the 084 enrollment writer.
-- `fn_payment_v2_consume_issuer_nonce(text,bytea)` — 086.
-- `fn_payment_v2_record_listing(uuid,bytea,bytea)` — 083.
+- `fn_payment_v2_issuer_subject_context(text,uuid,uuid)` ï¿½ 086.
+- `fn_payment_v2_issuer_enroll_wallet_checked(uuid,uuid,bytea,bytea,bytea)` ï¿½ 086 wrapper over the 084 enrollment writer.
+- `fn_payment_v2_consume_issuer_nonce(text,bytea)` ï¿½ 086.
+- `fn_payment_v2_record_listing(uuid,bytea,bytea)` ï¿½ 083.
 
 The adapter also calls the already-allowed `fn_payment_v2_prepare_sale(uuid,uuid,jsonb)` and `fn_payment_v2_issuer_context(uuid,text)`. Thus the complete RPC set used by these three endpoints is those six functions; no unrelated whitelist route was added. `authorize-attempt` and the `open_sale` submitter remain fail-closed stubs as specified.
 
@@ -7086,4 +7086,23 @@ Fixed concurrent prepare idempotency by rereading the 086 `prepare_recovery` row
 
 Enrollment now decodes the canonical 165-byte SPL token account layout, validates COption tags/canonical empty values and Initialized state, and refuses any delegate, nonzero delegated amount, native-account option, or close authority. Unit vectors preserve the candidate wallet as token-account owner while setting active/zero-amount delegate and close authority fields.
 
-The isolated real-login integration now covers checked enrollment negatives/idempotency, 083 exact retry/conflict, prepare listing-price/fence interleavings and record cancellation between DB reads. Its full guarded output is recorded in `issuer-p2c1-coverage.md`. Fresh 078?086 replay and T086 contract tests passed; test output: 1 file passed, 1 test passed, 110.81s. The handoff coverage matrix now has 41 rows: 28 tested and 13 deferred. §11.7 SQL nonce/lease cases were moved to tested rows; only chaos/failover and later submitter/authorization/chain behavior remain deferred in those categories.
+The isolated real-login integration now covers checked enrollment negatives/idempotency, 083 exact retry/conflict, prepare listing-price/fence interleavings and record cancellation between DB reads. Its full guarded output is recorded in `issuer-p2c1-coverage.md`. Fresh 078?086 replay and T086 contract tests passed; test output: 1 file passed, 1 test passed, 110.81s. The handoff coverage matrix now has 41 rows: 28 tested and 13 deferred. ï¿½11.7 SQL nonce/lease cases were moved to tested rows; only chaos/failover and later submitter/authorization/chain behavior remain deferred in those categories.
+
+## P2c-2 continuation (2026-10-25)
+
+`authorize-attempt` now binds its 086 attempt and subject/sale signing snapshots to the immutable 083 listing read for that exact sale. The handler checks sale ID, network, seller identity, generation, listing signature and recomputed binding before the authorize RPC, then re-reads attempt/seller/sale/listing and refuses changed snapshots before calling the signer. This is consistent with the 083 immutability invariant and does not require 087; migration 086 remains untouched/frozen. `fn_payment_v2_listing_for_open(uuid)` is the only new issuer transport allow-list route in this continuation.
+
+P2c-2 TypeScript evidence: `npm test` reports 836 passed, 2 skipped; `npx tsc --noEmit` passes; `npm run build` passes. The two platform skips are Linux Unix-socket tests on the Windows host. The cached validator `.so` first failed with `DeclaredProgramIdMismatch`; it was rebuilt from the checked-out locked source into the existing local cache. The subsequent rootless loopback-only run passed 149 on-chain scenario groups; its output states `no database integration asserted`. It is the independent program harness and does not exercise the issuer HTTP/service path; the requested complete prepare -> record -> open -> authorize -> buyer-sign -> land sequence is not yet verified, so this handoff does not claim R9 readiness.
+Fresh isolated database replay and issuer integration output (guarded with `P2C1_DB_CONTAINER=733813cfd1b1`; schema replayed from 078 through 086):
+
+```text
+P2C1D|prepare-same-request|PASS|both-writers-entered|sql-idempotency-conflict=1|responses-equal-stored-snapshot|stored-sale=11111111-1111-4111-8111-111111111111|different-fx-snapshots
+P2C1R8|prepare-price-race|PASS|ISSUER_LISTING_STALE|no-stale-sale-write
+P2C1R8|prepare-fence-race|PASS|ISSUER_LISTING_UNAVAILABLE|no-second-sale-write
+P2C1R8|record-cancel-race|PASS|ISSUER_SALE_NOT_OPENING|no-stale-listing-write
+P2C1R8|record-writer-retry|PASS|exact-bytes-idempotent|conflicting-bytes-refused
+P2C1R8|enrollment-writer|PASS|auth_id|linked-wallet|non-MY|network|duplicate-wallet|duplicate-token|exact-retry|changed-proof-retry
+Test Files 1 passed (1); Tests 1 passed (1); Duration 234.33s
+```
+
+The same isolated integration now calls `createIssuerDatabase().listingForOpen` through the real dedicated issuer login after recording a listing and checks the returned sale ID, seller wallet, and exact message bytes. This validates the newly whitelisted 083 reader transport. It still does not create the full service-to-validator transaction sequence.

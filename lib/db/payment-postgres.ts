@@ -7,7 +7,7 @@ import type { PaymentRpc } from './payment-v2';
 const execute = promisify(execFile);
 export type PaymentWorkerRole = 'payment_v2_issuer'|'payment_v2_verifier'|'payment_v2_settler'|'payment_v2_executor'|'payment_v2_notifier';
 export interface PaymentPostgresConfig { role:PaymentWorkerRole; host:string; port:number; database:string; login:string; password?:string; sslMode:'verify-full'|'disable'; psqlPath?:string }
-type Parameter = readonly [string,'uuid'|'text'|'integer'|'name'|'boolean'|'jsonb'|'bytea'];
+type Parameter = readonly [string,'uuid'|'text'|'integer'|'bigint'|'name'|'boolean'|'jsonb'|'bytea'];
 const routes:Record<string,{role:PaymentWorkerRole;params:readonly Parameter[]}>={
  fn_payment_v2_prepare_sale:{role:'payment_v2_issuer',params:[['p_listing_id','uuid'],['p_network_id','uuid'],['p_terms','jsonb']]},
  fn_payment_v2_issuer_context:{role:'payment_v2_issuer',params:[['p_sale_id','uuid'],['p_action','text']]},
@@ -16,6 +16,11 @@ const routes:Record<string,{role:PaymentWorkerRole;params:readonly Parameter[]}>
  fn_payment_v2_issuer_enroll_wallet_checked:{role:'payment_v2_issuer',params:[['p_user','uuid'],['p_network','uuid'],['p_wallet','bytea'],['p_token_account','bytea'],['p_proof_digest','bytea']]},
  fn_payment_v2_consume_issuer_nonce:{role:'payment_v2_issuer',params:[['p_kid','text'],['p_nonce','bytea']]},
  fn_payment_v2_record_listing:{role:'payment_v2_issuer',params:[['p_sale','uuid'],['p_message','bytea'],['p_signature','bytea']]},
+ fn_payment_v2_listing_for_open:{role:'payment_v2_issuer',params:[['p_sale','uuid']]},
+ fn_payment_v2_open_sale_queue:{role:'payment_v2_issuer',params:[['p_limit','integer']]},
+ fn_payment_v2_claim_open_sale:{role:'payment_v2_issuer',params:[['p_limit','integer']]},
+ fn_payment_v2_renew_open_sale_lease:{role:'payment_v2_issuer',params:[['p_operation_id','uuid'],['p_lease_id','uuid'],['p_fencing_token','bigint']]},
+ fn_payment_v2_finish_open_sale:{role:'payment_v2_issuer',params:[['p_operation_id','uuid'],['p_lease_id','uuid'],['p_fencing_token','bigint'],['p_outcome','text'],['p_signature','text']]},
  fn_payment_v2_begin_scan:{role:'payment_v2_verifier',params:[['p_genesis','text'],['p_program','text'],['p_limit','integer']]},
  fn_payment_v2_finish_scan:{role:'payment_v2_verifier',params:[['p_lease_id','uuid'],['p_last_address','text'],['p_failures','jsonb']]},
  fn_payment_v2_recovery_binding:{role:'payment_v2_verifier',params:[['p_attempt','text'],['p_genesis','text'],['p_program','text']]},

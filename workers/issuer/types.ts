@@ -8,14 +8,29 @@ export interface IssuerJwk extends JsonWebKey { kid?: string; alg?: string; use?
 
 export interface IssuerDatabase {
   consumeIssuerNonce(kid: string, nonce: Uint8Array): Promise<void>;
-  subjectContext(kind: 'network' | 'listing' | 'sale' | 'prepare_recovery', id: string | null, networkId: string | null): Promise<IssuerContext>;
+  subjectContext(kind: 'network' | 'listing' | 'sale' | 'attempt' | 'prepare_recovery', id: string | null, networkId: string | null): Promise<IssuerContext>;
   saleSigningContext(saleId: string): Promise<IssuerContext>;
+  listingForOpen(saleId: string): Promise<IssuerContext>;
   enrollWalletChecked(userId: string, networkId: string, wallet: Uint8Array, tokenAccount: Uint8Array, proofDigest: Uint8Array): Promise<void>;
   prepareSale(listingId: string, networkId: string, terms: {
     id: string; saleAddress: string; escrowAddress: string; totalUnits: string;
     fxSnapshot: Record<string, unknown>; validFrom: string; expiresAt: string;
   }): Promise<string>;
   recordListing(saleId: string, message: Uint8Array, signature: Uint8Array): Promise<void>;
+  authorizeAttempt(attemptId: string): Promise<string>;
+  openSaleQueue(limit: number): Promise<readonly IssuerContext[]>;
+  claimOpenSale(limit: number): Promise<readonly IssuerContext[]>;
+  renewOpenSaleLease(operationId: string, leaseId: string, fencingToken: string): Promise<void>;
+  finishOpenSale(operationId: string, leaseId: string, fencingToken: string, outcome: 'send_ack'|'send_unknown'|'preexisting_exact_pda'|'conflict'|'retryable_failure', signature: string | null): Promise<void>;
+}
+
+export interface IssuerBlockhash {
+  genesis:string;blockhash:string;blockhashBlockHeight:string;currentBlockHeight:string;currentSlot:string;lastValidBlockHeight:string;
+}
+export interface IssuerBlockhashRpc { latestBlockhash():Promise<IssuerBlockhash> }
+export interface IssuerBuySigner {
+  publicKey:string;
+  signValidated(request:import('@/workers/signer/types').BuySaleSignRequest):Promise<{signedTransactionBase64url:string}>;
 }
 
 export interface RpcAccount { owner: string; data: Uint8Array; contextSlot: bigint }
@@ -40,5 +55,6 @@ export interface IssuerDeps {
   db: IssuerDatabase; rpc: readonly [IssuerRpc, IssuerRpc]; fx: readonly [FxProvider, FxProvider];
   jwks: { get(jwksUrl: string): Promise<readonly IssuerJwk[]> };
   rateLimiter: { take(key:string,limit:number,windowSeconds:number,nowSeconds:number):number|null };
+  authorization?: { signer:IssuerBuySigner; signerPins:import('@/workers/signer/types').SignerPins; rpc:readonly [IssuerBlockhashRpc,IssuerBlockhashRpc] };
   config: IssuerConfig; nowSeconds(): number;
 }

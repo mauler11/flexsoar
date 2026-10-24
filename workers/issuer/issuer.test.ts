@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { createHash, createHmac, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
+import { createHash, createHmac, createPrivateKey, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
+import { AddressLookupTableProgram, Keypair, Ed25519Program, SYSVAR_INSTRUCTIONS_PUBKEY, SYSVAR_RENT_PUBKEY, SystemProgram } from '@solana/web3.js';
 import { calculateFx } from './fx';
 import { handleIssuerRequest } from './service';
 import type { IssuerContext, IssuerDeps, IssuerJwk } from './types';
 import { associatedTokenAddress } from '@/lib/solana/sdk';
 import { base58Encode, decodeAddress } from '@/lib/solana/base58';
 import { encodeListing, listingForSale } from '@/lib/solana/listing-v2';
+import { encodePermit, type PermitV2 } from '@/lib/solana/protocol-v2';
+import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from '@/lib/solana/sdk';
+import { v2Addresses, buyV2Instruction } from '@/lib/solana/v2-sdk';
+import type { SignerPins } from '@/workers/signer/types';
+import { signValidatedTransaction, validateSignerRequest } from '@/workers/signer/validator';
 import { createIssuerRateLimiter } from './rate-limit';
 
 const now = 1_800_000_000;
@@ -29,15 +35,42 @@ function request(token: string, options: { path?: string; userId?: string; nonce
   return { method:'POST',path,secure:true,rawBody:body,headers:{'content-type':'application/json; charset=utf-8','x-flexsoar-kid':kid,'x-flexsoar-timestamp':stamp,'x-flexsoar-nonce':nonce,'x-flexsoar-user':uid,'x-flexsoar-signature':options.badMac?'0'.repeat(64):mac,authorization:`Bearer ${token}`} };
 }
 function deps() {
-  const counters={nonce:0,nonceRows:0,reads:0,writes:0,signer:0,sender:0};
+  const counters={nonce:0,nonceRows:0,reads:0,writes:0,signer:0,sender:0,signerError:''};
   const nonces=new Set<string>();
   const db: IssuerDeps['db']={
     consumeIssuerNonce:async(_kid,nonce)=>{counters.nonce++;const n=Buffer.from(nonce).toString('hex');if(nonces.has(n))throw Error('PAYMENT_V2_ISSUER_NONCE_REPLAY');nonces.add(n);counters.nonceRows=nonces.size}, subjectContext:async()=>{counters.reads++;return {found:true}}, saleSigningContext:async()=>{counters.reads++;return {found:true}},
     enrollWalletChecked:async()=>{counters.writes++}, prepareSale:async()=>{counters.writes++;return '22222222-2222-4222-8222-222222222222'},recordListing:async()=>{counters.writes++},
+    authorizeAttempt:async()=>{counters.writes++;return ''},listingForOpen:async()=>({found:true}),openSaleQueue:async()=>[],claimOpenSale:async()=>[],renewOpenSaleLease:async()=>{},finishOpenSale:async()=>{},
   };
   const d:IssuerDeps={db,rpc:[{genesis:async()=>'',finalizedSlot:async()=>BigInt('1'),account:async()=>null},{genesis:async()=>'',finalizedSlot:async()=>BigInt('1'),account:async()=>null}],fx:[{quote:async()=>{throw Error()}},{quote:async()=>{throw Error()}}],jwks:{get:async()=>[jwk]},rateLimiter:createIssuerRateLimiter(),nowSeconds:()=>now,
     config:{hmacKeys:new Map([['hmac-v1',hmacKey]]),activeHmacKid:'hmac-v1',issuer:'https://issuer.example/auth/v1',audience:'authenticated',jwksUrl:'https://issuer.example/jwks',jwtKid:jwk.kid!,allowList:new Set([user]),networkId:'33333333-3333-4333-8333-333333333333',networkGenesis:'11111111111111111111111111111111',mint:'11111111111111111111111111111111',tokenProgram:'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',associatedTokenProgram:'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',tokenDecimals:6,program:'11111111111111111111111111111111',networkConfig:'11111111111111111111111111111111',saleAddress:()=>'',escrowAddress:()=>''}};
   return { d, counters };
+}
+async function authorizeFixture(options:{wrongBuyer?:boolean;expiredListing?:boolean;belowFloor?:boolean;wrongListingSale?:boolean;wrongListingSeller?:boolean;wrongGeneration?:boolean;wrongBinding?:boolean;dbError?:string}={}){
+  const {d,counters}=deps(),buyerId=user,sellerId='44444444-4444-4444-8444-444444444444',attemptId='55555555-5555-4555-8555-555555555555',saleId='66666666-6666-4666-8666-666666666666',seller=Keypair.generate(),buyer=Keypair.generate(),treasury=Keypair.generate(),issuer=Keypair.generate(),programKey=Keypair.generate().publicKey,genesisKey=Keypair.generate().publicKey,mintKey=Keypair.generate().publicKey;
+  d.config.program=programKey.toBase58();d.config.networkGenesis=genesisKey.toBase58();d.config.mint=mintKey.toBase58();
+  const genesis=genesisKey.toBytes(),program=programKey.toBytes(),mint=mintKey.toBytes(),card=Keypair.generate().publicKey.toBytes(),saleCommitment=Keypair.generate().publicKey.toBytes(),config=v2Addresses(d.config.program,card,saleCommitment).config.toBytes();d.config.networkConfig=base58Encode(config);
+  const buyerToken=decodeAddress(associatedTokenAddress(buyer.publicKey.toBase58(),d.config.mint)),sellerToken=decodeAddress(associatedTokenAddress(seller.publicKey.toBase58(),d.config.mint)),treasuryToken=decodeAddress(associatedTokenAddress(treasury.publicKey.toBase58(),d.config.mint));
+  const total=BigInt('1000000'),validFrom=BigInt(Math.floor(Date.now()/1000)-10),expiresAt=BigInt(now+300);
+  const permit:PermitV2={mode:1,domain:genesis,program,config,saleId:saleCommitment,card,pair:Keypair.generate().publicKey.toBytes(),attempt:new Uint8Array(createHash('sha256').update(Buffer.from(attemptId.replaceAll('-',''),'hex')).digest()),beneficiary:new Uint8Array(createHash('sha256').update(Buffer.from(buyerId.replaceAll('-',''),'hex')).digest()),policy:new Uint8Array(createHash('sha256').update('local-policy').digest()),buyer:buyer.publicKey.toBytes(),seller:seller.publicKey.toBytes(),treasury:treasury.publicKey.toBytes(),mint,tokenProgram:decodeAddress(d.config.tokenProgram),buyerToken,sellerToken,treasuryToken,refundToken:buyerToken,issuer:issuer.publicKey.toBytes(),generation:BigInt('1'),revision:BigInt('1'),custodyVersion:BigInt('1'),authorityEpoch:BigInt('1'),total,net:BigInt('950000'),fee:BigInt('50000'),validFrom,expiresAt};
+  const signing=await encodeListing({domain:genesis,program,card,saleId:saleCommitment,generation:BigInt('1'),minTotal:options.belowFloor?BigInt('1000001'):BigInt('980000'),expiresAt:BigInt(options.expiredListing?now-1:now+600)});
+  const privateKey=createPrivateKey({key:Buffer.concat([Buffer.from('302e020100300506032b657004220420','hex'),Buffer.from(seller.secretKey.subarray(0,32))]),format:'der',type:'pkcs8'}),sellerSignature=cryptoSign(null,Buffer.from(signing),privateKey);
+  const templateHex=Buffer.from(await encodePermit(permit)).toString('hex'),attempt:IssuerContext={found:true,attemptId,ownerId:options.wrongBuyer?sellerId:buyerId,ownerAuthId:options.wrongBuyer?sellerId:buyerId,saleId,networkId:d.config.networkId,state:'initiated',expiresAt:String(expiresAt),permitHex:null};
+  const saleOwner={found:true,saleId,listingId:'77777777-7777-4777-8777-777777777777',ownerId:sellerId,ownerAuthId:sellerId,networkId:d.config.networkId,state:'open',sellerWallet:seller.publicKey.toBase58(),genesis:d.config.networkGenesis,program:d.config.program,saleCommitment:base58Encode(saleCommitment),cardCommitment:base58Encode(card),generation:'1',preparedAt:new Date((now-20)*1000).toISOString()};
+  const sale={...saleOwner,actor:issuer.publicKey.toBase58(),sellerWallet:seller.publicKey.toBase58(),sellerToken:base58Encode(sellerToken),quoteTotalUnits:'1000000',quoteValidFrom:String(validFrom),quoteExpiresAt:String(expiresAt),templateHex};
+  const listing={found:true,saleId,messageHex:Buffer.from(signing).toString('hex'),signatureHex:sellerSignature.toString('hex'),signer:seller.publicKey.toBase58(),minTotalUnits:options.belowFloor?'1000001':'980000',expiresAt:String(options.expiredListing?now-1:now+600)};
+  if(options.wrongListingSale)listing.saleId='88888888-8888-4888-8888-888888888888';
+  if(options.wrongListingSeller)listing.signer=Keypair.generate().publicKey.toBase58();
+  if(options.wrongGeneration)sale.generation='2';
+  if(options.wrongBinding){const bytes=Buffer.from(listing.messageHex,'hex');bytes[20]^=1;listing.messageHex=bytes.toString('hex');}
+  d.config.allowList=new Set([buyerId,sellerId]);
+  d.db.subjectContext=async(kind,id)=>{counters.reads++;if(kind==='attempt')return attempt;if(kind==='sale')return saleOwner;throw new Error(`unexpected subject kind ${kind} ${id??''}`)};
+  d.db.saleSigningContext=async()=>{counters.reads++;return sale};d.db.listingForOpen=async()=>{counters.reads++;return listing};
+  d.db.authorizeAttempt=async()=>{if(options.dbError)throw new Error(options.dbError);counters.writes++;attempt.state='authorized';attempt.permitHex=templateHex;return templateHex};
+  const instruction=await buyV2Instruction(permit),addresses=[...new Set(instruction.keys.filter(meta=>!meta.isSigner).map(meta=>meta.pubkey.toBase58()))],lookupAddress=Keypair.generate().publicKey.toBase58(),addressesSha256=createHash('sha256').update(Buffer.concat(addresses.map(address=>Buffer.from(decodeAddress(address))))).digest('hex');
+  const pins:SignerPins={issuer:issuer.publicKey.toBase58(),program:d.config.program,genesis:d.config.networkGenesis,mint:d.config.mint,tokenProgram:TOKEN_PROGRAM_ID,associatedTokenProgram:ASSOCIATED_TOKEN_PROGRAM_ID,systemProgram:SystemProgram.programId.toBase58(),rentSysvar:SYSVAR_RENT_PUBKEY.toBase58(),instructionsSysvar:SYSVAR_INSTRUCTIONS_PUBKEY.toBase58(),ed25519Program:Ed25519Program.programId.toBase58(),lookupTables:[{address:lookupAddress,owner:AddressLookupTableProgram.programId.toBase58(),addresses,addressesSha256,lastExtendedSlot:'1',deactivationSlot:'18446744073709551615'}],maxBlockhashAge:150,maxFloorToleranceBps:200};
+  d.authorization={signer:{publicKey:pins.issuer,signValidated:async(request)=>{counters.signer++;try{const tx=await validateSignerRequest(request,pins);return {signedTransactionBase64url:signValidatedTransaction(tx,issuer,pins.issuer)}}catch(error){counters.signerError=(error as Error).message;throw error}}},signerPins:pins,rpc:[{latestBlockhash:async()=>({genesis:pins.genesis,blockhash:'11111111111111111111111111111111',blockhashBlockHeight:'100',currentBlockHeight:'100',currentSlot:'100',lastValidBlockHeight:'150'})},{latestBlockhash:async()=>({genesis:pins.genesis,blockhash:'11111111111111111111111111111111',blockhashBlockHeight:'100',currentBlockHeight:'101',currentSlot:'101',lastValidBlockHeight:'150'})}]};
+  return {d,counters,attemptId,templateHex};
 }
 async function reject(token:string,opts:Parameters<typeof request>[1]={}){
   const {d,counters}=deps();const response=await handleIssuerRequest(request(token,opts),d);
@@ -126,12 +159,30 @@ describe('issuer authentication boundary',()=>{
     expect(last).toMatchObject({status:429,headers:{'Retry-After':'60'},body:{error:{code:'ISSUER_RATE_LIMITED',retryable:true}}});
     expect(counters.nonceRows).toBe(11);expect(counters.reads).toBe(0);expect(counters.writes).toBe(0);expect(counters.signer).toBe(0);expect(counters.sender).toBe(0);
   });
-  it('authorize-attempt and open-sale submitter stubs refuse before endpoint DB, signer or sender work',async()=>{
-    for(const [i,path] of ['/v1/authorize-attempt','/internal/open-sale-submit'].entries()){
-      const {d,counters}=deps(),response=await handleIssuerRequest(request(jwt(claims()),{path,nonce:Buffer.alloc(16,30+i).toString('base64url')}),d);
-      expect(response).toMatchObject({status:409,body:{error:{code:'ISSUER_BARE_OPEN_REFUSED'}}});
-      expect(counters.nonceRows).toBe(1);expect(counters.reads).toBe(0);expect(counters.writes).toBe(0);expect(counters.signer).toBe(0);expect(counters.sender).toBe(0);
+  it('refuses authorize attempts below the listing floor, after listing expiry, for the wrong buyer, without an enrolled wallet and after epoch rotation before signer or sender work',async()=>{
+    const vectors:[Parameters<typeof authorizeFixture>[0],string][]=[
+      [{belowFloor:true},'ISSUER_PERMIT_INVALID'],[{expiredListing:true},'ISSUER_ATTEMPT_EXPIRED'],[{wrongBuyer:true},'ISSUER_ATTEMPT_NOT_OWNED'],
+      [{wrongListingSale:true},'ISSUER_SALE_STALE'],[{wrongListingSeller:true},'ISSUER_SALE_STALE'],[{wrongGeneration:true},'ISSUER_LISTING_BINDING_INVALID'],[{wrongBinding:true},'ISSUER_LISTING_BINDING_INVALID'],
+      [{dbError:'PAYMENT_V2_BUYER_WALLET_REQUIRED'},'ISSUER_ATTEMPT_UNAVAILABLE'],[{dbError:'PAYMENT_V2_AUTHORITY_ROTATED'},'ISSUER_AUTHORITY_ROTATED'],
+    ];
+    for(const [index,[options,code]] of vectors.entries()){
+      const fixture=await authorizeFixture(options),response=await handleIssuerRequest(request(jwt(claims()),{body:JSON.stringify({attemptId:fixture.attemptId}),nonce:Buffer.alloc(16,index+100).toString('base64url')}),fixture.d);
+      expect(response).toMatchObject({status:expect.any(Number),body:{error:{code}}});expect(fixture.counters.nonceRows).toBe(1);expect(fixture.counters.signer).toBe(0);expect(fixture.counters.sender).toBe(0);
     }
+  });
+  it('builds and issuer-co-signs the buy transaction from the DB permit and pinned lookup table',async()=>{
+    const fixture=await authorizeFixture(),response=await handleIssuerRequest(request(jwt(claims()),{body:JSON.stringify({attemptId:fixture.attemptId})}),fixture.d);
+    expect(response.status,JSON.stringify(response.body)+` signer=${fixture.counters.signerError}`).toBe(200);expect(response.body).toMatchObject({attemptId:fixture.attemptId,signer:'issuer-partial',recentBlockhash:'11111111111111111111111111111111'});
+    const tx=(await import('@solana/web3.js')).VersionedTransaction.deserialize(Buffer.from(String(response.body.transactionBase64url),'base64url'));
+    expect(tx.signatures[0]!.some(byte=>byte!==0)).toBe(true);expect(tx.signatures[1]!.every(byte=>byte===0)).toBe(true);expect(fixture.counters.signer).toBe(1);expect(fixture.counters.sender).toBe(0);expect(fixture.counters.writes).toBe(1);
+  });
+  it('refuses extra client transaction or ALT fields before issuer reads',async()=>{
+    const {d,counters}=deps(),response=await handleIssuerRequest(request(jwt(claims()),{body:JSON.stringify({attemptId:'55555555-5555-4555-8555-555555555555',transactionBase64url:'forbidden',alt:'forbidden'})}),d);
+    expect(response).toMatchObject({status:400,body:{error:{code:'ISSUER_BAD_REQUEST'}}});expect(counters.nonceRows).toBe(1);expect(counters.reads).toBe(0);expect(counters.writes).toBe(0);expect(counters.signer).toBe(0);expect(counters.sender).toBe(0);
+  });
+  it('keeps only the background open-sale HTTP path refused before database or signer work',async()=>{
+    const {d,counters}=deps(),response=await handleIssuerRequest(request(jwt(claims()),{path:'/internal/open-sale-submit'}),d);
+    expect(response).toMatchObject({status:409,body:{error:{code:'ISSUER_BARE_OPEN_REFUSED'}}});expect(counters.nonceRows).toBe(1);expect(counters.reads).toBe(0);expect(counters.writes).toBe(0);expect(counters.signer).toBe(0);expect(counters.sender).toBe(0);
   });
 });
 

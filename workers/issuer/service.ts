@@ -1,7 +1,11 @@
 ﻿import { associatedTokenAddress } from '@/lib/solana/sdk';
 import { base58Encode, decodeAddress } from '@/lib/solana/base58';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash, createPublicKey, verify as verifySignature } from 'node:crypto';
+import { VersionedTransaction } from '@solana/web3.js';
 import { decodeListingMessage, encodeListing, listingBinding, listingForSale, verifyListingSignature } from '@/lib/solana/listing-v2';
+import { decodePermit, validatePermit, type PermitV2 } from '@/lib/solana/protocol-v2';
+import { buildPinnedBuyTransaction } from '@/workers/signer/validator';
+import type { BuySaleSignRequest } from '@/workers/signer/types';
 import { assertNoDuplicateJsonKeys, decodeB64Url, sha256, verifyHmac, verifySupabaseJwt } from './crypto';
 import { calculateFx } from './fx';
 import type { IssuerContext, IssuerDeps } from './types';
@@ -31,6 +35,93 @@ function decodeTokenAccount(bytes:Uint8Array):{amount:bigint;delegate:boolean;na
   return {amount:u64le(bytes,64),delegate:coption(bytes,72,32),native:coption(bytes,109,8),delegatedAmount:u64le(bytes,121),closeAuthority:coption(bytes,129,32)};
 }
 function context(deps: IssuerDeps, ctx: IssuerContext, userId: string, ownerFailure='ISSUER_LISTING_NOT_OWNED',missingFailure='ISSUER_LISTING_NOT_FOUND'): void { if(ctx.found!==true)fail(missingFailure,404);if(ctx.ownerId!==userId||ctx.ownerAuthId!==userId)fail(ownerFailure,403);if(!deps.config.allowList.has(userId))fail('ISSUER_USER_NOT_ALLOWED',403); }
+
+function hexValue(value:unknown,length:number,code:string):Uint8Array{
+  if(typeof value!=='string'||!new RegExp(`^[0-9a-f]{${length*2}}$`).test(value))fail(code);
+  return Uint8Array.from(Buffer.from(value,'hex'));
+}
+function publicKey(value:Uint8Array):string{return base58Encode(value)}
+function ed25519PublicKey(value:string){return createPublicKey({key:Buffer.concat([Buffer.from('302a300506032b6570032100','hex'),Buffer.from(decodeAddress(value))]),format:'der',type:'spki'});}
+function assertIssuerPartial(encoded:string,unsigned:VersionedTransaction,issuer:string,buyer:string):VersionedTransaction{
+  let signed:VersionedTransaction;try{const bytes=decodeB64Url(encoded);signed=VersionedTransaction.deserialize(Buffer.from(bytes));}catch{fail('ISSUER_TRANSACTION_INVALID')}
+  if(!Buffer.from(signed.message.serialize()).equals(Buffer.from(unsigned.message.serialize())))fail('ISSUER_TRANSACTION_INVALID');
+  const keys=signed.message.staticAccountKeys.slice(0,signed.message.header.numRequiredSignatures);
+  if(keys.length!==2||keys[0]!.toBase58()!==issuer||keys[1]!.toBase58()!==buyer||signed.signatures.length!==2)fail('ISSUER_TRANSACTION_INVALID');
+  const issuerSignature=signed.signatures[0]!,buyerSignature=signed.signatures[1]!;
+  if(issuerSignature.length!==64||issuerSignature.every(byte=>byte===0)||buyerSignature.some(byte=>byte!==0)||!verifySignature(null,Buffer.from(signed.message.serialize()),ed25519PublicKey(issuer),Buffer.from(issuerSignature)))fail('ISSUER_TRANSACTION_INVALID');
+  return signed;
+}
+function sameAttempt(a:IssuerContext,b:IssuerContext):boolean{
+  return ['found','attemptId','ownerId','ownerAuthId','saleId','networkId','expiresAt'].every(field=>a[field]===b[field]);
+}
+function sameSale(a:IssuerContext,b:IssuerContext):boolean{
+  return ['saleId','listingId','ownerId','ownerAuthId','state','genesis','program','saleCommitment','cardCommitment','generation','sellerWallet','quoteTotalUnits','quoteExpiresAt','templateHex'].every(field=>a[field]===b[field]);
+}
+async function validateAuthorizeSnapshot(attemptId:string,sub:string,attempt:IssuerContext,seller:IssuerContext,sale:IssuerContext,listing:IssuerContext,deps:IssuerDeps):Promise<{message:Uint8Array;signature:Uint8Array;template:PermitV2}>{
+  if(attempt.found!==true||attempt.attemptId!==attemptId)fail('ISSUER_ATTEMPT_NOT_FOUND',404);
+  if(attempt.ownerId!==sub||attempt.ownerAuthId!==sub)fail('ISSUER_ATTEMPT_NOT_OWNED',403);
+  if(!deps.config.allowList.has(sub))fail('ISSUER_USER_NOT_ALLOWED',403);
+  if(!['initiated','authorized'].includes(String(attempt.state)))fail('ISSUER_ATTEMPT_UNAVAILABLE',409);
+  if(!UUID.test(String(attempt.saleId))||seller.saleId!==attempt.saleId||sale.saleId!==attempt.saleId||listing.saleId!==attempt.saleId||attempt.networkId!==sale.networkId||seller.networkId!==sale.networkId)fail('ISSUER_SALE_STALE',409);
+  if(seller.found!==true||seller.ownerId!==seller.ownerAuthId||!deps.config.allowList.has(String(seller.ownerId)))fail('ISSUER_USER_NOT_ALLOWED',403);
+  if(seller.listingId!==sale.listingId||seller.sellerWallet!==sale.sellerWallet)fail('ISSUER_SALE_STALE',409);
+  if(seller.state!=='open'||sale.state!=='open')fail('ISSUER_SALE_STALE',409);
+  const message=hexValue(listing.messageHex,61,'ISSUER_LISTING_MESSAGE_MALFORMED');
+  const signature=hexValue(listing.signatureHex,64,'ISSUER_LISTING_MESSAGE_MALFORMED');
+  let decoded:ReturnType<typeof decodeListingMessage>;try{decoded=decodeListingMessage(message)}catch{fail('ISSUER_LISTING_MESSAGE_MALFORMED')}
+  const sellerKey=String(sale.sellerWallet);
+  if(String(listing.signer)!==sellerKey||String(listing.minTotalUnits)!==decoded.minTotal.toString()||String(listing.expiresAt)!==decoded.expiresAt.toString())fail('ISSUER_SALE_STALE',409);
+  const binding=await listingBinding({domain:decodeAddress(String(sale.genesis)),program:decodeAddress(String(sale.program)),card:decodeAddress(String(sale.cardCommitment)),saleId:decodeAddress(String(sale.saleCommitment)),generation:BigInt(String(sale.generation))});
+  if(!Buffer.from(binding).equals(Buffer.from(decoded.binding)))fail('ISSUER_LISTING_BINDING_INVALID');
+  if(!(await verifyListingSignature(decodeAddress(sellerKey),message,signature)))fail('ISSUER_LISTING_SIGNATURE_INVALID');
+  const now=BigInt(deps.nowSeconds()),listingExpiry=decoded.expiresAt,quoteExpiry=BigInt(String(sale.quoteExpiresAt)),attemptExpiry=BigInt(String(attempt.expiresAt));
+  if(listingExpiry<=now||quoteExpiry<=now||attemptExpiry<=now)fail('ISSUER_ATTEMPT_EXPIRED',409);
+  if(listingExpiry<quoteExpiry||attemptExpiry>listingExpiry)fail('ISSUER_SALE_STALE',409);
+  const preparedAt=Date.parse(String(seller.preparedAt));if(!Number.isFinite(preparedAt)||listingExpiry>BigInt(Math.floor(preparedAt/1000))+BigInt('86400'))fail('ISSUER_SALE_STALE',409);
+  let template:PermitV2;try{template=decodePermit(hexValue(sale.templateHex,690,'ISSUER_SALE_STALE'))}catch{fail('ISSUER_SALE_STALE',409)}
+  if(publicKey(template.domain)!==sale.genesis||publicKey(template.program)!==sale.program||publicKey(template.card)!==sale.cardCommitment||publicKey(template.saleId)!==sale.saleCommitment||publicKey(template.seller)!==sellerKey||template.generation!==BigInt(String(sale.generation))||template.total!==BigInt(String(sale.quoteTotalUnits))||template.expiresAt!==quoteExpiry||attemptExpiry!==quoteExpiry)fail('ISSUER_SALE_STALE',409);
+  return {message,signature,template};
+}
+
+async function authorize(body:Record<string,unknown>,sub:string,deps:IssuerDeps):Promise<Record<string,unknown>>{
+  exact(body,['attemptId']);const attemptId=String(body.attemptId);if(!UUID.test(attemptId))fail('ISSUER_BAD_REQUEST',400);
+  const auth=deps.authorization;if(!auth)fail('ISSUER_SIGNER_UNAVAILABLE',503);
+  const pins=auth.signerPins;if(auth.signer.publicKey!==pins.issuer||pins.genesis!==deps.config.networkGenesis||pins.program!==deps.config.program||pins.mint!==deps.config.mint)fail('ISSUER_SIGNER_UNAVAILABLE',503);
+  const attempt=await deps.db.subjectContext('attempt',attemptId,null);
+  if(attempt.found!==true)fail('ISSUER_ATTEMPT_NOT_FOUND',404);
+  if(attempt.ownerId!==sub||attempt.ownerAuthId!==sub)fail('ISSUER_ATTEMPT_NOT_OWNED',403);
+  if(!deps.config.allowList.has(sub))fail('ISSUER_USER_NOT_ALLOWED',403);
+  if(!['initiated','authorized'].includes(String(attempt.state)))fail('ISSUER_ATTEMPT_UNAVAILABLE',409);
+  if(BigInt(String(attempt.expiresAt))<=BigInt(deps.nowSeconds()))fail('ISSUER_ATTEMPT_EXPIRED',409);
+  const saleId=String(attempt.saleId);
+  const [seller,sale,listing]=await Promise.all([deps.db.subjectContext('sale',saleId,null),deps.db.saleSigningContext(saleId),deps.db.listingForOpen(saleId)]);
+  const before=await validateAuthorizeSnapshot(attemptId,sub,attempt,seller,sale,listing,deps);
+  if(sale.genesis!==pins.genesis||sale.program!==pins.program||sale.actor!==pins.issuer||sale.genesis!==deps.config.networkGenesis||sale.program!==deps.config.program)fail('ISSUER_NETWORK_MISMATCH',403);
+  const permitHex=await deps.db.authorizeAttempt(attemptId);
+  const permitBytes=hexValue(permitHex,690,'ISSUER_PERMIT_INVALID');let permit:PermitV2;try{permit=decodePermit(permitBytes);validatePermit(permit,BigInt(deps.nowSeconds()))}catch{fail('ISSUER_PERMIT_INVALID')}
+  const [afterAttempt,afterSeller,afterSale,afterListing]=await Promise.all([deps.db.subjectContext('attempt',attemptId,null),deps.db.subjectContext('sale',saleId,null),deps.db.saleSigningContext(saleId),deps.db.listingForOpen(saleId)]);
+  if(!sameAttempt(attempt,afterAttempt)||afterAttempt.permitHex!==permitHex||afterAttempt.state!=='authorized'||afterSeller.found!==true||afterSeller.saleId!==seller.saleId||afterSeller.listingId!==seller.listingId||afterSeller.networkId!==seller.networkId||afterSeller.ownerId!==seller.ownerId||afterSeller.ownerAuthId!==seller.ownerAuthId||afterSeller.sellerWallet!==seller.sellerWallet||afterSeller.preparedAt!==seller.preparedAt||afterSeller.state!=='open'||!sameSale(sale,afterSale)||afterListing.found!==true||afterListing.saleId!==saleId||afterListing.messageHex!==listing.messageHex||afterListing.signatureHex!==listing.signatureHex||afterListing.signer!==listing.signer||afterListing.minTotalUnits!==listing.minTotalUnits||afterListing.expiresAt!==listing.expiresAt)fail('ISSUER_SALE_STALE',409);
+  const template=before.template;
+  const byteFields=['domain','program','config','saleId','card','pair','policy','seller','treasury','mint','tokenProgram','sellerToken','treasuryToken','refundToken','issuer'] as const;
+  const integerFields=['generation','revision','custodyVersion','authorityEpoch','total','net','fee','validFrom','expiresAt'] as const;
+  if(permit.mode!==template.mode||byteFields.some(field=>!Buffer.from(permit[field]).equals(Buffer.from(template[field])))||integerFields.some(field=>permit[field]!==template[field]))fail('ISSUER_PERMIT_INVALID');
+  const decoded=decodeListingMessage(before.message),binding=await listingBinding({domain:permit.domain,program:permit.program,card:permit.card,saleId:permit.saleId,generation:permit.generation});
+  if(!Buffer.from(decoded.binding).equals(Buffer.from(binding)))fail('ISSUER_LISTING_BINDING_INVALID');
+  if(permit.total<BigInt(String(listing.minTotalUnits))||permit.expiresAt>decoded.expiresAt||permit.expiresAt<BigInt(String(sale.quoteExpiresAt))||permit.expiresAt!==BigInt(String(attempt.expiresAt)))fail('ISSUER_PERMIT_INVALID');
+  const buyer=publicKey(permit.buyer);
+  if(publicKey(permit.buyerToken)!==associatedTokenAddress(buyer,pins.mint)||publicKey(permit.refundToken)!==publicKey(permit.buyerToken)||publicKey(permit.mint)!==pins.mint||publicKey(permit.issuer)!==pins.issuer||publicKey(permit.seller)!==String(listing.signer)||publicKey(permit.sellerToken)!==associatedTokenAddress(String(listing.signer),pins.mint))fail('ISSUER_PERMIT_INVALID');
+  const uuidBytes=Buffer.from(attemptId.replaceAll('-',''),'hex'),expectedAttempt=createHash('sha256').update(uuidBytes).digest(),expectedBeneficiary=createHash('sha256').update(Buffer.from(sub.replaceAll('-',''),'hex')).digest();
+  if(!Buffer.from(permit.attempt).equals(expectedAttempt)||!Buffer.from(permit.beneficiary).equals(expectedBeneficiary))fail('ISSUER_PERMIT_INVALID');
+  const [blockA,blockB]=await Promise.all(auth.rpc.map(provider=>provider.latestBlockhash())).catch(()=>fail('ISSUER_BLOCKHASH_UNAVAILABLE',503));
+  const age=(block:{currentBlockHeight:string;blockhashBlockHeight:string})=>{const current=BigInt(block.currentBlockHeight),issued=BigInt(block.blockhashBlockHeight);if(current<issued||current-issued>BigInt(pins.maxBlockhashAge))fail('ISSUER_BLOCKHASH_UNAVAILABLE',503)};
+  if(blockA!.genesis!==pins.genesis||blockB!.genesis!==pins.genesis||blockA!.blockhash!==blockB!.blockhash||blockA!.blockhashBlockHeight!==blockB!.blockhashBlockHeight||blockA!.lastValidBlockHeight!==blockB!.lastValidBlockHeight||BigInt(blockA!.currentSlot)>BigInt(blockB!.currentSlot)+BigInt('32')||BigInt(blockB!.currentSlot)>BigInt(blockA!.currentSlot)+BigInt('32'))fail('ISSUER_BLOCKHASH_UNAVAILABLE',503);
+  age(blockA!);age(blockB!);
+  let unsigned:VersionedTransaction;try{unsigned=await buildPinnedBuyTransaction(permit,blockA!.blockhash,blockA!.currentSlot,pins)}catch{fail('ISSUER_LOOKUP_TABLE_INVALID')}
+  const signRequest:BuySaleSignRequest={kind:'buy-sale',requestId:attemptId,attemptId,permitSha256:Buffer.from(sha256(permitBytes)).toString('hex'),permitBase64url:Buffer.from(permitBytes).toString('base64url'),blockhash:blockA!.blockhash,currentBlockHeight:blockA!.currentBlockHeight,currentSlot:blockA!.currentSlot,blockhashBlockHeight:blockA!.blockhashBlockHeight,transactionBase64url:Buffer.from(unsigned.serialize()).toString('base64url')};
+  let signed:string;try{signed=(await auth.signer.signValidated(signRequest)).signedTransactionBase64url}catch(error){if((error as Error).message==='SIGNER_TRANSACTION_INVALID')fail('ISSUER_TRANSACTION_INVALID');fail('ISSUER_SIGNER_UNAVAILABLE',503)}
+  const signedTx=assertIssuerPartial(signed,unsigned,pins.issuer,buyer);
+  return {attemptId,permitSha256:signRequest.permitSha256,transactionBase64url:Buffer.from(signedTx.serialize()).toString('base64url'),issuer:pins.issuer,buyer,recentBlockhash:blockA!.blockhash,lastValidBlockHeight:blockA!.lastValidBlockHeight,signer:'issuer-partial'};
+}
 
 async function pipeline(req: IssuerRequest, deps: IssuerDeps): Promise<string> {
   const h=req.headers,header=(name:string):string=>{const value=h[name];if(value!==undefined&&typeof value!=='string')fail('ISSUER_BAD_REQUEST',400);return value??'';};
@@ -178,7 +269,7 @@ async function record(body:Record<string,unknown>,userId:string,deps:IssuerDeps)
 export async function handleIssuerRequest(req:IssuerRequest,deps:IssuerDeps):Promise<IssuerResponse>{
   try{const userId=await pipeline(req,deps),body=strictJson(req.rawBody);let result:Record<string,unknown>;
     applyRateLimit(req.path,body,userId,deps);
-    if(req.path==='/v1/enroll-wallet')result=await enroll(body,userId,deps);else if(req.path==='/v1/prepare-sale')result=await prepare(body,userId,deps);else if(req.path==='/v1/record-listing')result=await record(body,userId,deps);else if(req.path==='/v1/authorize-attempt'||req.path==='/internal/open-sale-submit')fail('ISSUER_BARE_OPEN_REFUSED',409);else fail('ISSUER_BAD_REQUEST',404);
+    if(req.path==='/v1/enroll-wallet')result=await enroll(body,userId,deps);else if(req.path==='/v1/prepare-sale')result=await prepare(body,userId,deps);else if(req.path==='/v1/record-listing')result=await record(body,userId,deps);else if(req.path==='/v1/authorize-attempt')result=await authorize(body,userId,deps);else if(req.path==='/internal/open-sale-submit')fail('ISSUER_BARE_OPEN_REFUSED',409);else fail('ISSUER_BAD_REQUEST',404);
     return {status:200,body:result};
   }catch(e){
     const error=e as Error&{code?:string;status?:number;retryAfter?:number};
@@ -192,14 +283,23 @@ export async function handleIssuerRequest(req:IssuerRequest,deps:IssuerDeps):Pro
       'PAYMENT_V2_NOT_CONFIGURED','PAYMENT_V2_SALE_FENCED','PAYMENT_V2_SELLER_WALLET_REQUIRED','PAYMENT_V2_SALE_IDEMPOTENCY_CONFLICT',
       'PAYMENT_V2_SALE_MISSING','PAYMENT_V2_LISTING_MALFORMED','PAYMENT_V2_LISTING_BINDING','PAYMENT_V2_LISTING_FLOOR_OUT_OF_TOLERANCE',
       'PAYMENT_V2_LISTING_EXPIRY','PAYMENT_V2_LISTING_CONFLICT',
+      'PAYMENT_V2_ATTEMPT_MISSING','PAYMENT_V2_AUTHORIZATION_DISABLED','PAYMENT_V2_AUTHORITY_ROTATED','PAYMENT_V2_BUYER_WALLET_REQUIRED','PAYMENT_V2_BELOW_SELLER_FLOOR','PAYMENT_V2_LISTING_EXPIRED',
+      'PAYMENT_V2_LISTING_MISSING',
     ];
     const dbCode=dbCodes.find(code=>dbText.includes(code));
     const dbResponse=(code:string,status:number)=>({status,body:{error:{code,message:code,retryable:status===503,requestId,...(dbCode?{dbCode}: {})}}});
     if(dbCode==='PAYMENT_DB_OUTCOME_UNKNOWN')return dbResponse('ISSUER_DB_OUTCOME_UNKNOWN',503);
     if(dbCode==='PAYMENT_V2_ISSUER_NONCE_REPLAY')return dbResponse('ISSUER_AUTH_REPLAY',401);
     if(dbCode==='PAYMENT_V2_ISSUER_KEY_INACTIVE'||dbCode==='PAYMENT_V2_ISSUER_KEY_STATE_INVALID')return dbResponse('ISSUER_AUTH_INVALID',401);
-    if(dbCode==='PAYMENT_V2_ISSUER_SUBJECT_MISSING')return dbResponse(req.path==='/v1/enroll-wallet'?'ISSUER_NETWORK_MISMATCH':req.path==='/v1/prepare-sale'?'ISSUER_LISTING_NOT_FOUND':'ISSUER_SALE_NOT_FOUND',req.path==='/v1/record-listing'?404:req.path==='/v1/prepare-sale'?404:403);
+    if(dbCode==='PAYMENT_V2_ISSUER_SUBJECT_MISSING')return dbResponse(req.path==='/v1/enroll-wallet'?'ISSUER_NETWORK_MISMATCH':req.path==='/v1/prepare-sale'?'ISSUER_LISTING_NOT_FOUND':req.path==='/v1/authorize-attempt'?'ISSUER_ATTEMPT_NOT_FOUND':'ISSUER_SALE_NOT_FOUND',req.path==='/v1/record-listing'||req.path==='/v1/prepare-sale'||req.path==='/v1/authorize-attempt'?404:403);
     if(dbCode==='PAYMENT_V2_SALE_MISSING')return dbResponse('ISSUER_SALE_NOT_FOUND',404);
+    if(dbCode==='PAYMENT_V2_ATTEMPT_MISSING')return dbResponse('ISSUER_ATTEMPT_NOT_FOUND',404);
+    if(dbCode==='PAYMENT_V2_LISTING_MISSING')return dbResponse(req.path==='/v1/authorize-attempt'?'ISSUER_SALE_STALE':'ISSUER_LISTING_STALE',409);
+    if(dbCode==='PAYMENT_V2_AUTHORIZATION_DISABLED')return dbResponse('ISSUER_ATTEMPT_UNAVAILABLE',409);
+    if(dbCode==='PAYMENT_V2_AUTHORITY_ROTATED')return dbResponse('ISSUER_AUTHORITY_ROTATED',409);
+    if(dbCode==='PAYMENT_V2_BUYER_WALLET_REQUIRED')return dbResponse('ISSUER_ATTEMPT_UNAVAILABLE',409);
+    if(dbCode==='PAYMENT_V2_BELOW_SELLER_FLOOR')return dbResponse('ISSUER_PERMIT_INVALID',422);
+    if(dbCode==='PAYMENT_V2_LISTING_EXPIRED')return dbResponse('ISSUER_ATTEMPT_EXPIRED',409);
     if(['PAYMENT_V2_WALLET_USER_NOT_MY','PAYMENT_V2_WALLET_ADDRESS_MISMATCH','PAYMENT_V2_ISSUER_IDENTITY_MISMATCH'].includes(dbCode??''))return dbResponse('ISSUER_WALLET_MISMATCH',403);
     if(dbCode==='PAYMENT_V2_WALLET_NETWORK_UNKNOWN')return dbResponse('ISSUER_NETWORK_MISMATCH',403);
     if(dbCode==='PAYMENT_V2_WALLET_MALFORMED')return dbResponse('ISSUER_TOKEN_ACCOUNT_INVALID',422);
