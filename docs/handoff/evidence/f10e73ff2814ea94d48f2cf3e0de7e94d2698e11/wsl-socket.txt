@@ -1,4 +1,4 @@
-﻿HEAD=f10e73ff2814ea94d48f2cf3e0de7e94d2698e11 TREE_DIRTY=true UTC=2026-10-24T17:16:10Z
+HEAD=f10e73ff2814ea94d48f2cf3e0de7e94d2698e11 TREE_DIRTY=true UTC=2026-10-24T17:16:10Z
 PASS accepts the configured issuer UID and PID, and refuses a different process
 PASS checks the actual peer UID before forwarding requests
 PASS refuses unknown request kinds, malformed frames and client fields outside the typed schema
@@ -10,7 +10,7 @@ At line:10 char:428
 +                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     + CategoryInfo          : NotSpecified: ({"type":"signer...CTION_INVALID"}:String) [], RemoteException
     + FullyQualifiedErrorId : NativeCommandError
- 
+
 PASS starts the real key-file signer in a private network namespace without DB environment
 {"type":"signer-refusal","operation":"open-sale-pair","requestId":"socket-test","refusalCode":"SIGNER_TRANSACTION_INVAL
 ID"}
