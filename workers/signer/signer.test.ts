@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createHash, createPrivateKey, sign as cryptoSign } from 'node:crypto';
+import { createHash, createPrivateKey, randomUUID, sign as cryptoSign } from 'node:crypto';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +11,7 @@ import { encodeListing, listingBinding, listingFloor, verifyListingSignature } f
 import { decodePermit, encodePermit, type PermitV2 } from '@/lib/solana/protocol-v2';
 import { buyV2Instruction, v2Addresses } from '@/lib/solana/v2-sdk';
 import { createSignerCore } from './core';
+import { createRateJournalInitializationMarker, requireOrInitializeRateJournal } from './storage';
 import { validateSignerPins, validateSignerRequest } from './validator';
 import { buildOpenSalePair } from '@/workers/issuer/open-sale-pair';
 import { runOpenSaleSubmitter } from '@/workers/issuer/open-sale-submitter';
@@ -24,17 +25,17 @@ function keyBytes(key:PublicKey|Keypair):Uint8Array{return key instanceof Keypai
 function hashAddressList(addresses:readonly string[]):string{return createHash('sha256').update(Buffer.concat(addresses.map(address=>Buffer.from(new PublicKey(address).toBytes())))).digest('hex');}
 async function createFixture(){
   const issuer=Keypair.generate(),seller=Keypair.generate(),buyer=Keypair.generate(),treasury=Keypair.generate(),mint=Keypair.generate().publicKey,program=Keypair.generate().publicKey,domain=Keypair.generate().publicKey;
-  const card=Keypair.generate().publicKey.toBytes(),saleId=Keypair.generate().publicKey.toBytes(),addresses=v2Addresses(program.toBase58(),card,saleId);
+  const card=Keypair.generate().publicKey.toBytes(),saleUuid=randomUUID(),saleId=createHash('sha256').update(Buffer.from(saleUuid.replaceAll('-',''),'hex')).digest(),addresses=v2Addresses(program.toBase58(),card,saleId);
   const attempt=Uint8Array.from(createHash('sha256').update('local-attempt').digest());
   const permit:PermitV2={domain:domain.toBytes(),program:program.toBytes(),config:addresses.config.toBytes(),saleId,card,pair:Keypair.generate().publicKey.toBytes(),attempt,beneficiary:Keypair.generate().publicKey.toBytes(),policy:Keypair.generate().publicKey.toBytes(),buyer:buyer.publicKey.toBytes(),seller:seller.publicKey.toBytes(),treasury:treasury.publicKey.toBytes(),mint:mint.toBytes(),tokenProgram:new PublicKey(TOKEN_PROGRAM_ID).toBytes(),buyerToken:new PublicKey(associatedTokenAddress(buyer.publicKey.toBase58(),mint.toBase58())).toBytes(),sellerToken:new PublicKey(associatedTokenAddress(seller.publicKey.toBase58(),mint.toBase58())).toBytes(),treasuryToken:new PublicKey(associatedTokenAddress(treasury.publicKey.toBase58(),mint.toBase58())).toBytes(),refundToken:Keypair.generate().publicKey.toBytes(),issuer:issuer.publicKey.toBytes(),generation:BigInt('1'),revision:BigInt('1'),custodyVersion:BigInt('1'),authorityEpoch:BigInt('1'),total:BigInt('1000000'),net:BigInt('950000'),fee:BigInt('50000'),validFrom:BigInt(Math.floor(Date.now()/1000)-5),expiresAt:BigInt(Math.floor(Date.now()/1000)+300),mode:1};
   const pins:SignerPins={issuer:issuer.publicKey.toBase58(),program:program.toBase58(),genesis:domain.toBase58(),mint:mint.toBase58(),tokenProgram:TOKEN_PROGRAM_ID,associatedTokenProgram:ASSOCIATED_TOKEN_PROGRAM_ID,systemProgram:SystemProgram.programId.toBase58(),rentSysvar:SYSVAR_RENT_PUBKEY.toBase58(),instructionsSysvar:SYSVAR_INSTRUCTIONS_PUBKEY.toBase58(),ed25519Program:Ed25519Program.programId.toBase58(),lookupTables:[],maxBlockhashAge:150,maxFloorToleranceBps:200};
   const message=await encodeListing({domain:permit.domain,program:permit.program,card:permit.card,saleId:permit.saleId,generation:permit.generation,minTotal:listingFloor(permit.total),expiresAt:permit.expiresAt+BigInt('1000')});
   const privateKey=createPrivateKey({key:Buffer.concat([Buffer.from('302e020100300506032b657004220420','hex'),Buffer.from(seller.secretKey.subarray(0,32))]),format:'der',type:'pkcs8'});
   const sellerSignature=Uint8Array.from(cryptoSign(null,Buffer.from(message),privateKey));
-  return {issuer,seller,buyer,treasury,permit,pins,message,sellerSignature};
+  return {issuer,seller,buyer,treasury,permit,pins,message,sellerSignature,saleUuid};
 }
 const blockhash=Keypair.generate().publicKey.toBase58();
-function openRequest(f:Awaited<ReturnType<typeof createFixture>>,transactionBase64url:string):OpenSalePairSignRequest{return {kind:'open-sale-pair',requestId:'open-test-request',saleId:'11111111-1111-4111-8111-111111111111',permitBase64url:Buffer.from(encodePermit(f.permit)).toString('base64url'),listingMessageBase64url:Buffer.from(f.message).toString('base64url'),sellerSignatureBase64url:Buffer.from(f.sellerSignature).toString('base64url'),blockhash,currentBlockHeight:'100',currentSlot:'100',blockhashBlockHeight:'95',transactionBase64url};}
+function openRequest(f:Awaited<ReturnType<typeof createFixture>>,transactionBase64url:string):OpenSalePairSignRequest{return {kind:'open-sale-pair',requestId:'open-test-request',saleId:f.saleUuid,permitBase64url:Buffer.from(encodePermit(f.permit)).toString('base64url'),listingMessageBase64url:Buffer.from(f.message).toString('base64url'),sellerSignatureBase64url:Buffer.from(f.sellerSignature).toString('base64url'),blockhash,currentBlockHeight:'100',currentSlot:'100',blockhashBlockHeight:'95',transactionBase64url};}
 function openTx(f:Awaited<ReturnType<typeof createFixture>>,mutate?:(instructions:TransactionInstruction[])=>TransactionInstruction[],payer=f.pins.issuer):string{
   const proof=Ed25519Program.createInstructionWithPublicKey({publicKey:f.permit.seller,message:f.message,signature:f.sellerSignature}),pda=v2Addresses(f.pins.program,f.permit.card,f.permit.saleId);
   const keys=[pda.config,pda.card,pda.sale,pda.escrow,new PublicKey(f.pins.mint),new PublicKey(f.pins.issuer),new PublicKey(TOKEN_PROGRAM_ID),SystemProgram.programId,SYSVAR_RENT_PUBKEY,SYSVAR_INSTRUCTIONS_PUBKEY];
@@ -54,7 +55,8 @@ async function buyRequest(f:Awaited<ReturnType<typeof createFixture>>){
   return {pins,request,table};
 }
 function signerCore(f:Awaited<ReturnType<typeof createFixture>>,root=temp(),alerts:SignerAlert[]=[],clock={value:1000}){
-  return createSignerCore(f.issuer,f.pins,{rateJournalPath:join(root,'rate.json'),auditPath:join(root,'audit.jsonl'),alertQueuePath:join(root,'alert-queue.jsonl'),assertOwnedFile:()=>{},clock:{nowSeconds:()=>clock.value},alerts:{deliver:async(event)=>{alerts.push(event)}}});
+  const marker=join(root,'.rate-journal-init');createRateJournalInitializationMarker(marker,root);
+  return createSignerCore(f.issuer,f.pins,{custodyRoot:root,initializationMarkerPath:marker,rateJournalPath:join(root,'rate.json'),auditPath:join(root,'audit.jsonl'),alertQueuePath:join(root,'alert-queue.jsonl'),clock:{nowSeconds:()=>clock.value},alerts:{deliver:async(event)=>{alerts.push(event)}}});
 }
 function expectUnsigned(request:OpenSalePairSignRequest):void{const tx=VersionedTransaction.deserialize(Buffer.from(request.transactionBase64url,'base64url'));expect(tx.signatures.every(sig=>sig.every(byte=>byte===0))).toBe(true);}
 function workerSources(directory:string):string[]{return readdirSync(directory,{withFileTypes:true}).flatMap(entry=>{const path=join(directory,entry.name);return entry.isDirectory()?workerSources(path):/\.(ts|js|py)$/.test(entry.name)&&!entry.name.endsWith('.test.ts')?[path]:[];});}
@@ -84,14 +86,33 @@ describe('key-file issuer signer',()=>{
     bad.push(mutate(ixs=>[ixs[1]!,ixs[0]!]));
     bad.push(mutate(ixs=>[...ixs,new TransactionInstruction({programId:SystemProgram.programId,keys:[],data:Buffer.alloc(0)})]));
     bad.push(openRequest(f,openTx(f,undefined,Keypair.generate().publicKey.toBase58())));
+    bad.push({...openRequest(f,openTx(f)) ,saleId:randomUUID()});
     const alerts:SignerAlert[]=[],core=signerCore(f,temp(),alerts);
     for(const request of bad){expectUnsigned(request);await expect(core.sign(request)).rejects.toThrow();expectUnsigned(request);}
     expect(alerts).toHaveLength(bad.length);
   });
+  it('checks issuer account index 5 flags after canonical message compilation',async()=>{
+    const f=await createFixture(),canonical=openRequest(f,openTx(f)),compiled=await validateSignerRequest(canonical,f.pins),payerIndex=compiled.message.staticAccountKeys.findIndex(key=>key.toBase58()===f.pins.issuer);
+    expect(payerIndex).toBeGreaterThanOrEqual(0);expect(compiled.message.isAccountSigner(payerIndex)).toBe(true);expect(compiled.message.isAccountWritable(payerIndex)).toBe(true);
+    for(const field of ['isSigner','isWritable'] as const){
+      const changed=openRequest(f,openTx(f,ixs=>{ixs[1]!.keys[5]![field]=!ixs[1]!.keys[5]![field];return ixs}));
+      // The payer's signer/writable privileges are global message-header bits;
+      // Solana compilation normalizes this meta back to the same canonical wire transaction.
+      expect(changed.transactionBase64url).toBe(canonical.transactionBase64url);
+      await expect(validateSignerRequest(changed,f.pins)).resolves.toBeDefined();
+    }
+  });
+  it('refuses stale/future/mismatched blockhashes and a prefilled issuer slot',async()=>{
+    const f=await createFixture(),request=openRequest(f,openTx(f));
+    for(const changed of [{currentBlockHeight:'94'},{currentBlockHeight:'246'},{blockhashBlockHeight:'101'},{blockhash:Keypair.generate().publicKey.toBase58()}])await expect(validateSignerRequest({...request,...changed},f.pins)).rejects.toThrow();
+    const tx=VersionedTransaction.deserialize(Buffer.from(request.transactionBase64url,'base64url'));tx.sign([f.issuer]);
+    const prefilled={...request,transactionBase64url:Buffer.from(tx.serialize()).toString('base64url')};
+    await expect(validateSignerRequest(prefilled,f.pins)).rejects.toThrow('SIGNER_PREFILLED_SIGNATURE');
+  });
   it('validates buy permit, ALT owner/address/content/expansion, then signs only issuer while preserving buyer slot',async()=>{
     const f=await createFixture(),built=await buyRequest(f);validateSignerPins(built.pins);
     const tx=await validateSignerRequest(built.request,built.pins);expect(tx.message.version).toBe(0);
-    const root=temp(),alerts:SignerAlert[]=[],core=createSignerCore(f.issuer,built.pins,{rateJournalPath:join(root,'rates.json'),auditPath:join(root,'audit.jsonl'),alertQueuePath:join(root,'alerts.jsonl'),assertOwnedFile:()=>{},alerts:{deliver:async event=>{alerts.push(event)}}});
+    const root=temp(),marker=join(root,'.rate-journal-init'),alerts:SignerAlert[]=[];createRateJournalInitializationMarker(marker,root);const core=createSignerCore(f.issuer,built.pins,{custodyRoot:root,initializationMarkerPath:marker,rateJournalPath:join(root,'rates.json'),auditPath:join(root,'audit.jsonl'),alertQueuePath:join(root,'alerts.jsonl'),alerts:{deliver:async event=>{alerts.push(event)}}});
     const signed=await core.sign(built.request),signedTx=VersionedTransaction.deserialize(Buffer.from(signed.signedTransactionBase64url,'base64url'));
     expect(signedTx.signatures[0]!.some(byte=>byte!==0)).toBe(true);expect(signedTx.signatures[1]!.every(byte=>byte===0)).toBe(true);
     const buyerSignedTx=VersionedTransaction.deserialize(Buffer.from(built.request.transactionBase64url,'base64url'));buyerSignedTx.sign([f.buyer]);
@@ -106,6 +127,16 @@ describe('key-file issuer signer',()=>{
     const alteredMessage=new TransactionMessage({payerKey:f.issuer.publicKey,recentBlockhash:blockhash,instructions:[mutatedInstruction]}).compileToV0Message([built.table]);
     const alteredTx=new VersionedTransaction(alteredMessage),alteredRequest={...built.request,transactionBase64url:Buffer.from(alteredTx.serialize()).toString('base64url')};
     await expect(validateSignerRequest(alteredRequest,built.pins)).rejects.toThrow('SIGNER_TRANSACTION_INVALID');
+    const invalidBuyer=VersionedTransaction.deserialize(Buffer.from(built.request.transactionBase64url,'base64url'));invalidBuyer.sign([f.buyer]);invalidBuyer.signatures[1]![0]^=1;
+    await expect(validateSignerRequest({...built.request,transactionBase64url:Buffer.from(invalidBuyer.serialize()).toString('base64url')},built.pins)).rejects.toThrow('SIGNER_TRANSACTION_INVALID');
+    const reordered=VersionedTransaction.deserialize(Buffer.from(built.request.transactionBase64url,'base64url'));expect(reordered.message.addressTableLookups[0]!.writableIndexes.length).toBeGreaterThan(1);reordered.message.addressTableLookups[0]!.writableIndexes.reverse();
+    await expect(validateSignerRequest({...built.request,transactionBase64url:Buffer.from(reordered.serialize()).toString('base64url')},built.pins)).rejects.toThrow('SIGNER_TRANSACTION_INVALID');
+    const duplicate=VersionedTransaction.deserialize(Buffer.from(built.request.transactionBase64url,'base64url'));duplicate.message.addressTableLookups.push({...duplicate.message.addressTableLookups[0]!});
+    await expect(validateSignerRequest({...built.request,transactionBase64url:Buffer.from(duplicate.serialize()).toString('base64url')},built.pins)).rejects.toThrow('SIGNER_TRANSACTION_INVALID');
+    await expect(validateSignerRequest({...built.request,currentSlot:'0'},built.pins)).rejects.toThrow('SIGNER_LOOKUP_TABLE_INVALID');
+    const notExtended={...built.pins,lookupTables:[{...built.pins.lookupTables[0]!,lastExtendedSlot:'101'}]};await expect(validateSignerRequest(built.request,notExtended)).rejects.toThrow('SIGNER_LOOKUP_TABLE_INVALID');
+    const boundary={...built.pins,lookupTables:[{...built.pins.lookupTables[0]!,lastExtendedSlot:'100'}]};expect((await validateSignerRequest(built.request,boundary)).message.version).toBe(0);
+    const deactivated={...built.pins,lookupTables:[{...built.pins.lookupTables[0]!,deactivationSlot:'100'}]};await expect(validateSignerRequest(built.request,deactivated)).rejects.toThrow('SIGNER_LOOKUP_TABLE_INVALID');
   });
   it('refuses every buy instruction account, flag, data, program, fee-payer and extra-instruction mutation before signing',async()=>{
     const f=await createFixture(),built=await buyRequest(f),original=VersionedTransaction.deserialize(Buffer.from(built.request.transactionBase64url,'base64url'));
@@ -131,27 +162,40 @@ describe('key-file issuer signer',()=>{
     const f=await createFixture(),request=openRequest(f,openTx(f)),root=temp(),alerts:SignerAlert[]=[],clock={value:1000},core=signerCore(f,root,alerts,clock);
     await core.sign(request);await core.sign(request);await expect(core.sign(request)).rejects.toThrow('SIGNER_RATE_LIMITED');expect(alerts.at(-1)?.refusalCode).toBe('SIGNER_RATE_LIMITED');
     const rollback=signerCore(f,temp(),[],clock);await rollback.sign(request);clock.value=900;await expect(rollback.sign(request)).rejects.toThrow('SIGNER_CLOCK_ROLLBACK');
-    const alertRoot=temp(),failed=createSignerCore(f.issuer,f.pins,{rateJournalPath:join(alertRoot,'rate.json'),auditPath:join(alertRoot,'audit.jsonl'),alertQueuePath:join(alertRoot,'queue.jsonl'),assertOwnedFile:()=>{},alerts:{deliver:async()=>{throw Error('alert sink down')}}});
+    const alertRoot=temp(),marker=join(alertRoot,'.rate-journal-init');createRateJournalInitializationMarker(marker,alertRoot);const failed=createSignerCore(f.issuer,f.pins,{custodyRoot:alertRoot,initializationMarkerPath:marker,rateJournalPath:join(alertRoot,'rate.json'),auditPath:join(alertRoot,'audit.jsonl'),alertQueuePath:join(alertRoot,'queue.jsonl'),alerts:{deliver:async()=>{throw Error('alert sink down')}}});
     await expect(failed.sign({...request,transactionBase64url:'bad'})).rejects.toThrow('SIGNER_TRANSACTION_INVALID');expect(readFileSync(join(alertRoot,'queue.jsonl'),'utf8')).toContain('SIGNER_ALERT_DELIVERY_FAILED');await expect(failed.sign(request)).rejects.toThrow('SIGNER_DISABLED');
   });
   it('refuses a corrupted rate journal and alerts without emitting a signature',async()=>{
     const f=await createFixture(),root=temp(),request=openRequest(f,openTx(f)),alerts:SignerAlert[]=[],path=join(root,'rates.json');writeFileSync(path,'not-json');
-    const core=createSignerCore(f.issuer,f.pins,{rateJournalPath:path,auditPath:join(root,'audit.jsonl'),alertQueuePath:join(root,'queue.jsonl'),assertOwnedFile:()=>{},alerts:{deliver:async event=>{alerts.push(event)}}});
+    const core=createSignerCore(f.issuer,f.pins,{custodyRoot:root,initializationMarkerPath:join(root,'.rate-journal-init'),rateJournalPath:path,auditPath:join(root,'audit.jsonl'),alertQueuePath:join(root,'queue.jsonl'),alerts:{deliver:async event=>{alerts.push(event)}}});
     expectUnsigned(request);await expect(core.sign(request)).rejects.toThrow('SIGNER_RATE_JOURNAL_CORRUPT');expectUnsigned(request);expect(alerts[0]?.refusalCode).toBe('SIGNER_RATE_JOURNAL_CORRUPT');
   });
+  it('refuses a missing journal unless a signer-side initialization marker exists',()=>{
+    const root=temp(),journal=join(root,'rate.json'),marker=join(root,'.rate-journal-init');
+    expect(()=>requireOrInitializeRateJournal(journal,marker,root)).toThrow();
+    expect(()=>readFileSync(journal,'utf8')).toThrow();
+    createRateJournalInitializationMarker(marker,root);
+    requireOrInitializeRateJournal(journal,marker,root);
+    expect(JSON.parse(readFileSync(journal,'utf8'))).toMatchObject({lastNow:0,accepted:{'open-sale-pair':[],'buy-sale':[]}});
+  });
   it('uses the 086 fenced claim so two concurrent submitters can send only one paired open transaction',async()=>{
-    const f=await createFixture(),root=temp(),ownerId='11111111-1111-4111-8111-111111111111',saleId='22222222-2222-4222-8222-222222222222',listingId='33333333-3333-4333-8333-333333333333';
+    const f=await createFixture(),root=temp(),ownerId='11111111-1111-4111-8111-111111111111',saleId=f.saleUuid,listingId='33333333-3333-4333-8333-333333333333';
     const context:IssuerContext={found:true,saleId,listingId,ownerId,ownerAuthId:ownerId,state:'opening',genesis:f.pins.genesis,program:f.pins.program,actor:f.pins.issuer,saleCommitment:base58Encode(f.permit.saleId),templateHex:Buffer.from(encodePermit(f.permit)).toString('hex'),quoteTotalUnits:'1000000',quoteExpiresAt:String(f.permit.expiresAt),sellerWallet:base58Encode(f.permit.seller),sellerToken:base58Encode(f.permit.sellerToken),cardCommitment:base58Encode(f.permit.card),generation:'1'};
     const listing={messageHex:Buffer.from(f.message).toString('hex'),signatureHex:Buffer.from(f.sellerSignature).toString('hex'),signerHex:Buffer.from(f.permit.seller).toString('hex'),bindingHex:Buffer.from(await listingBinding({domain:f.permit.domain,program:f.permit.program,card:f.permit.card,saleId:f.permit.saleId,generation:f.permit.generation})).toString('hex'),minTotalUnits:listingFloor(f.permit.total).toString(),expiresAt:String(f.permit.expiresAt+BigInt('1000'))};
     const lease:IssuerContext={found:true,operationId:'44444444-4444-4444-8444-444444444444',saleId,leaseId:'55555555-5555-4555-8555-555555555555',fencingToken:'1',listing,saleCommitment:context.saleCommitment};
     let claimed=false,sendCalls=0;const finished:string[]=[];
-    const db:IssuerDatabase={consumeIssuerNonce:async()=>{},subjectContext:async()=>context,saleSigningContext:async()=>context,listingForOpen:async()=>({found:true,...listing}),enrollWalletChecked:async()=>{},prepareSale:async()=>saleId,recordListing:async()=>{},authorizeAttempt:async()=>'',openSaleQueue:async()=>[context],claimOpenSale:async()=>{if(claimed)return[];claimed=true;return[lease]},renewOpenSaleLease:async()=>{},finishOpenSale:async(_op,_lease,_token,outcome)=>{finished.push(outcome)}};
+    let renewals=0;const db:IssuerDatabase={consumeIssuerNonce:async()=>{},subjectContext:async()=>context,saleSigningContext:async()=>context,listingForOpen:async()=>({found:true,...listing}),enrollWalletChecked:async()=>{},prepareSale:async()=>saleId,recordListing:async()=>{},authorizeAttempt:async()=>'',openSaleQueue:async()=>[context],claimOpenSale:async()=>{if(claimed)return[];claimed=true;return[lease]},renewOpenSaleLease:async()=>{renewals++;return new Date(Date.now()+90_000).toISOString()},finishOpenSale:async(_op,_lease,_token,outcome)=>{finished.push(outcome)}};
     const block={genesis:f.pins.genesis,blockhash,currentBlockHeight:'100',currentSlot:'100',blockhashBlockHeight:'95'};
     const rpc={readSale:async()=>null,latestBlockhash:async()=>block},alerts:SignerAlert[]=[];
-    const core=createSignerCore(f.issuer,f.pins,{rateJournalPath:join(root,'rates.json'),auditPath:join(root,'audit.jsonl'),alertQueuePath:join(root,'alerts.jsonl'),assertOwnedFile:()=>{},alerts:{deliver:async(event:SignerAlert)=>{alerts.push(event)}}});
+    const marker=join(root,'.rate-journal-init');createRateJournalInitializationMarker(marker,root);const core=createSignerCore(f.issuer,f.pins,{custodyRoot:root,initializationMarkerPath:marker,rateJournalPath:join(root,'rates.json'),auditPath:join(root,'audit.jsonl'),alertQueuePath:join(root,'alerts.jsonl'),alerts:{deliver:async(event:SignerAlert)=>{alerts.push(event)}}});
     const signer={publicKey:core.publicKey,signValidated:core.sign};
     const deps={db,rpc:[rpc,rpc] as const,signer,sender:{sendRawTransaction:async()=>{sendCalls++;return base58Encode(new Uint8Array(64).fill(1))}},alerts:{deliver:async(event:SignerAlert)=>{alerts.push(event)}},pins:{...f.pins,networkId:'66666666-6666-4666-8666-666666666666',saleAddress:()=>Keypair.generate().publicKey.toBase58()},allowList:new Set([ownerId]),nowSeconds:()=>Math.floor(Date.now()/1000)};
     const [a,b]=await Promise.all([runOpenSaleSubmitter(deps),runOpenSaleSubmitter(deps)]);
-    expect(sendCalls).toBe(1);expect([...a,...b]).toEqual([{saleId,operationId:String(lease.operationId),outcome:'submitted'}]);expect(finished).toEqual(['send_ack']);expect(alerts).toEqual([]);
+    expect(sendCalls).toBe(1);expect(renewals).toBe(3);expect([...a,...b]).toEqual([{saleId,operationId:String(lease.operationId),outcome:'submitted'}]);expect(finished).toEqual(['send_ack']);expect(alerts).toEqual([]);
+    const shortRoot=temp(),shortMarker=join(shortRoot,'.rate-journal-init');createRateJournalInitializationMarker(shortMarker,shortRoot);const shortCore=createSignerCore(f.issuer,f.pins,{custodyRoot:shortRoot,initializationMarkerPath:shortMarker,rateJournalPath:join(shortRoot,'rates.json'),auditPath:join(shortRoot,'audit.jsonl'),alertQueuePath:join(shortRoot,'alerts.jsonl'),alerts:{deliver:async()=>{}}});
+    const shortLease={...lease,fencingToken:'2'};let shortRenewals=0,shortSends=0,shortSigns=0;
+    const shortDb:IssuerDatabase={...db,claimOpenSale:async()=>[shortLease],renewOpenSaleLease:async()=>{shortRenewals++;return new Date(Date.now()+(shortRenewals===3?5_000:90_000)).toISOString()},finishOpenSale:async()=>{}};
+    const shortDeps={...deps,db:shortDb,signer:{publicKey:shortCore.publicKey,signValidated:async(request:OpenSalePairSignRequest)=>{shortSigns++;return shortCore.sign(request)}},sender:{sendRawTransaction:async()=>{shortSends++;return base58Encode(new Uint8Array(64).fill(2))}}};
+    const shortResult=await runOpenSaleSubmitter(shortDeps);expect(shortRenewals).toBe(3);expect(shortSigns).toBe(1);expect(shortSends).toBe(0);expect(shortResult[0]).toMatchObject({outcome:'refused',code:'ISSUER_OPEN_LEASE_LOST'});
   });
 });

@@ -40,7 +40,7 @@ function deps() {
   const db: IssuerDeps['db']={
     consumeIssuerNonce:async(_kid,nonce)=>{counters.nonce++;const n=Buffer.from(nonce).toString('hex');if(nonces.has(n))throw Error('PAYMENT_V2_ISSUER_NONCE_REPLAY');nonces.add(n);counters.nonceRows=nonces.size}, subjectContext:async()=>{counters.reads++;return {found:true}}, saleSigningContext:async()=>{counters.reads++;return {found:true}},
     enrollWalletChecked:async()=>{counters.writes++}, prepareSale:async()=>{counters.writes++;return '22222222-2222-4222-8222-222222222222'},recordListing:async()=>{counters.writes++},
-    authorizeAttempt:async()=>{counters.writes++;return ''},listingForOpen:async()=>({found:true}),openSaleQueue:async()=>[],claimOpenSale:async()=>[],renewOpenSaleLease:async()=>{},finishOpenSale:async()=>{},
+    authorizeAttempt:async()=>{counters.writes++;return ''},listingForOpen:async()=>({found:true}),openSaleQueue:async()=>[],claimOpenSale:async()=>[],renewOpenSaleLease:async()=>new Date(now*1000+90_000).toISOString(),finishOpenSale:async()=>{},
   };
   const d:IssuerDeps={db,rpc:[{genesis:async()=>'',finalizedSlot:async()=>BigInt('1'),account:async()=>null},{genesis:async()=>'',finalizedSlot:async()=>BigInt('1'),account:async()=>null}],fx:[{quote:async()=>{throw Error()}},{quote:async()=>{throw Error()}}],jwks:{get:async()=>[jwk]},rateLimiter:createIssuerRateLimiter(),nowSeconds:()=>now,
     config:{hmacKeys:new Map([['hmac-v1',hmacKey]]),activeHmacKid:'hmac-v1',issuer:'https://issuer.example/auth/v1',audience:'authenticated',jwksUrl:'https://issuer.example/jwks',jwtKid:jwk.kid!,allowList:new Set([user]),networkId:'33333333-3333-4333-8333-333333333333',networkGenesis:'11111111111111111111111111111111',mint:'11111111111111111111111111111111',tokenProgram:'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',associatedTokenProgram:'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',tokenDecimals:6,program:'11111111111111111111111111111111',networkConfig:'11111111111111111111111111111111',saleAddress:()=>'',escrowAddress:()=>''}};
@@ -70,7 +70,7 @@ async function authorizeFixture(options:{wrongBuyer?:boolean;expiredListing?:boo
   const instruction=await buyV2Instruction(permit),addresses=[...new Set(instruction.keys.filter(meta=>!meta.isSigner).map(meta=>meta.pubkey.toBase58()))],lookupAddress=Keypair.generate().publicKey.toBase58(),addressesSha256=createHash('sha256').update(Buffer.concat(addresses.map(address=>Buffer.from(decodeAddress(address))))).digest('hex');
   const pins:SignerPins={issuer:issuer.publicKey.toBase58(),program:d.config.program,genesis:d.config.networkGenesis,mint:d.config.mint,tokenProgram:TOKEN_PROGRAM_ID,associatedTokenProgram:ASSOCIATED_TOKEN_PROGRAM_ID,systemProgram:SystemProgram.programId.toBase58(),rentSysvar:SYSVAR_RENT_PUBKEY.toBase58(),instructionsSysvar:SYSVAR_INSTRUCTIONS_PUBKEY.toBase58(),ed25519Program:Ed25519Program.programId.toBase58(),lookupTables:[{address:lookupAddress,owner:AddressLookupTableProgram.programId.toBase58(),addresses,addressesSha256,lastExtendedSlot:'1',deactivationSlot:'18446744073709551615'}],maxBlockhashAge:150,maxFloorToleranceBps:200};
   d.authorization={signer:{publicKey:pins.issuer,signValidated:async(request)=>{counters.signer++;try{const tx=await validateSignerRequest(request,pins);return {signedTransactionBase64url:signValidatedTransaction(tx,issuer,pins.issuer)}}catch(error){counters.signerError=(error as Error).message;throw error}}},signerPins:pins,rpc:[{latestBlockhash:async()=>({genesis:pins.genesis,blockhash:'11111111111111111111111111111111',blockhashBlockHeight:'100',currentBlockHeight:'100',currentSlot:'100',lastValidBlockHeight:'150'})},{latestBlockhash:async()=>({genesis:pins.genesis,blockhash:'11111111111111111111111111111111',blockhashBlockHeight:'100',currentBlockHeight:'101',currentSlot:'101',lastValidBlockHeight:'150'})}]};
-  return {d,counters,attemptId,templateHex};
+  return {d,counters,attemptId,templateHex,saleOwner,sale};
 }
 async function reject(token:string,opts:Parameters<typeof request>[1]={}){
   const {d,counters}=deps();const response=await handleIssuerRequest(request(token,opts),d);
@@ -175,6 +175,12 @@ describe('issuer authentication boundary',()=>{
     expect(response.status,JSON.stringify(response.body)+` signer=${fixture.counters.signerError}`).toBe(200);expect(response.body).toMatchObject({attemptId:fixture.attemptId,signer:'issuer-partial',recentBlockhash:'11111111111111111111111111111111'});
     const tx=(await import('@solana/web3.js')).VersionedTransaction.deserialize(Buffer.from(String(response.body.transactionBase64url),'base64url'));
     expect(tx.signatures[0]!.some(byte=>byte!==0)).toBe(true);expect(tx.signatures[1]!.every(byte=>byte===0)).toBe(true);expect(fixture.counters.signer).toBe(1);expect(fixture.counters.sender).toBe(0);expect(fixture.counters.writes).toBe(1);
+  });
+  it('defines a cancellation racing after the final read by finalized chain order',async()=>{
+    const fixture=await authorizeFixture(),signer=fixture.d.authorization!.signer,original=signer.signValidated.bind(signer);
+    fixture.d.authorization!.signer={...signer,async signValidated(request){fixture.saleOwner.state='cancel_requested';fixture.sale.state='cancel_requested';return original(request)}};
+    const response=await handleIssuerRequest(request(jwt(claims()),{body:JSON.stringify({attemptId:fixture.attemptId})}),fixture.d);
+    expect(response.status,JSON.stringify(response.body)).toBe(200);expect(fixture.saleOwner.state).toBe('cancel_requested');expect(fixture.counters.signer).toBe(1);expect(fixture.counters.writes).toBe(1);expect(fixture.counters.nonceRows).toBe(1);expect(fixture.counters.sender).toBe(0);
   });
   it('refuses extra client transaction or ALT fields before issuer reads',async()=>{
     const {d,counters}=deps(),response=await handleIssuerRequest(request(jwt(claims()),{body:JSON.stringify({attemptId:'55555555-5555-4555-8555-555555555555',transactionBase64url:'forbidden',alt:'forbidden'})}),d);

@@ -7149,3 +7149,41 @@ LOCAL VALIDATOR ONLY: 149 on-chain scenario groups passed; no database integrati
 Added and ran a root-gated Linux socket integration test using the provisioned accounts. The issuer client ran as `flexsoar-issuer` UID 1002; the real key-file signer/socket broker ran as `family` UID 1000. The configured issuer reached the worker and received `SIGNER_TRANSACTION_INVALID` for the test's invalid transaction; the different UID was refused. Socket suite output: 5/5 passed. Keys were generated ephemerally and never printed. This verifies actual cross-UID peer credentials.
 
 The combined requested DB/chain flow remains unrun. Existing local observers can read the loopback validator: `LocalV2Observer` handles finalized payment outcomes, and `observeAuthorityTransaction` verifies the expected open instruction for 068 lifecycle evidence. But the current internal reconcile HTTP route is deliberately 503 until dedicated verifier/settler connections are provisioned, and the issuer submitter's send acknowledgement only records `submitted`; a distinct verifier must observe/persist `opened` before authorize-attempt. Existing integrated chain/database harness evidence is from a different container/build and does not satisfy the fresh 078?086 + Build B request. No state was fabricated or bypassed. Remaining work is to compose the actual issuer submitter with dedicated verifier lifecycle observation, `reconcilePayments`/settler, buyer authorization/send, and killed-lease recovery in one guarded fixture. No production/devnet access.
+
+### P2c-2d R9 fixes and local evidence (2026-10-25)
+
+Implemented distinct signer/issuer OS identity enforcement. The signer verifies its mapped UID/GID, custody root (0700), config/pins/key/journal/audit/alert file custody (0600), and safe ancestors at startup. The rate journal cannot be silently recreated: a signer-owned explicit init marker is required. Same-UID mode is labeled DEV-ONLY and requires both a config dev flag and process flag. The WSL test ran issuer as `flexsoar-issuer` UID 1002 and signer/socket broker as `family` UID 1000. Configured UID/PID connected; another UID was refused. As `flexsoar-issuer`, read/replace/unlink attempts against key, config, pins and journal, plus custody-root traversal, returned `EACCES`; journal bytes remained unchanged. No injected ownership assertion is used.
+
+WSL socket suite output:
+
+```text
+PASS accepts the configured issuer UID and PID, and refuses a different process
+PASS checks the actual peer UID before forwarding requests
+PASS refuses unknown request kinds, malformed frames and client fields outside the typed schema
+PASS closes a partial frame after the bounded socket read timeout
+PASS starts the real key-file signer in a private network namespace without DB environment
+PASS accepts the configured flexsoar-issuer UID and refuses a different UID with signer under family UID
+PASS checks real config ownership and 0600 mode at signer startup
+WSL socket tests: 7 passed / 7 total; 0 skipped; 0 failed
+```
+
+The authorize endpoint now performs a final attempt/sale/listing/owner reread immediately before its signer call. Defined race semantics: cancellation takes effect only once confirmed on chain; a buy landing first is valid at the seller-signed floor. A cancellation occurring after the final DB read cannot be atomically ordered against signing/broadcast; chain confirmation order decides. This text is in `issuer-service-design.md`. **Market-track follow-up:** seller UI should say, “Cancellation is pending until confirmed on chain. A purchase may complete first at your signed floor.” This track did not edit `app/(market)/**` because that path is market-owned.
+
+The open-sale submitter now renews immediately before `sendRawTransaction`, and refuses to send unless the returned lease has at least a 10-second conservative margin from before the renewal round trip. Unit coverage proves a short margin refuses with zero send calls. Residual: the lease can expire after renewal and before/during broadcast; unknown outcomes are reconciled from the exact PDA through both providers, and send acknowledgement remains `submitted` only.
+
+Signer validation coverage includes stale/future/mismatched blockhashes, prefilled issuer signature refusal, invalid buyer signature, ALT reorder/duplicate/extension/deactivation boundaries, sale UUID commitment equality, and account/flag/program/data/proof mutations. For open instruction account index 5, signer and writable are transaction-global fee-payer privileges; the test toggles the instruction metas and verifies compilation yields the identical canonical message with both privileges present. A missing journal without init marker refuses; init marker creates it. Linux tests inspect actual file owner/mode and prove config ownership/mode failures from the filesystem without an injected assertion hook.
+
+Guarded isolated container integration (`P2C1_DB_CONTAINER=733813cfd1b173d984ef248ed6518b921cd37e3c3fdf57c30d51f1c33b290518`; network `none`, no ports, non-privileged, no mounts) replayed fresh 078→086 and passed with the dedicated issuer login. Two independent issuer DB clients concurrently called real 086 claim RPCs for the recorded sale; exactly one obtained its lease/fencing token, then the winner renewed and finished using real 086 RPCs. Captured output:
+
+```text
+Test Files  1 passed (1)
+Tests       1 passed (1)
+Start       00:55:18
+Duration    117.66s (transform 168ms, setup 0ms, import 315ms, tests 117.18s, environment 0ms)
+```
+
+The integration test asserts that the prepared/recorded sale is present in the real 084 queue, exactly one of two parallel 086 claims contains that sale, and the winning fencing token is positive; that client then successfully renews and finishes through the real lease RPCs. The run does not print sale identifiers or keys.
+
+The combined issuer + verifier/settler lifecycle E2E is explicitly deferred to Phase 5's worker-runtime exit test, per founder direction. No live service, network, or non-ephemeral key was used.
+
+Final verification after the last code change: `npm test` — 43 files passed, 2 skipped; 840 tests passed, 8 skipped (848 total). `npx tsc --noEmit` exited 0. `npm run build` exited 0; Next compiled, typechecked, and generated all 35 static pages.

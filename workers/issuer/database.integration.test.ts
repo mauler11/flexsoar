@@ -76,6 +76,10 @@ const rpcSpecs:Record<string,string[]>={
  fn_payment_v2_issuer_context:['uuid','text'],
  fn_payment_v2_record_listing:['uuid','bytea','bytea'],
  fn_payment_v2_listing_for_open:['uuid'],
+ fn_payment_v2_open_sale_queue:['integer'],
+ fn_payment_v2_claim_open_sale:['integer'],
+ fn_payment_v2_renew_open_sale_lease:['uuid','uuid','bigint'],
+ fn_payment_v2_finish_open_sale:['uuid','uuid','bigint','text','text'],
 };
 function sqlArg(value:unknown,type:string):string{
   if(value===null)return `NULL::${type}`;
@@ -86,7 +90,7 @@ function sqlArg(value:unknown,type:string):string{
 class DockerIssuerTransport implements PaymentRpc{
   async rpc(name:string,args:Record<string,unknown>):Promise<{data:unknown;error:{message:string;code?:string}|null}>{
     const types=rpcSpecs[name];if(!types)throw new Error(`integration transport refused unlisted RPC ${name}`);
-    const keys={fn_payment_v2_consume_issuer_nonce:['p_kid','p_nonce'],fn_payment_v2_issuer_subject_context:['p_kind','p_subject_id','p_network_id'],fn_payment_v2_issuer_enroll_wallet_checked:['p_user','p_network','p_wallet','p_token_account','p_proof_digest'],fn_payment_v2_prepare_sale:['p_listing_id','p_network_id','p_terms'],fn_payment_v2_issuer_context:['p_sale_id','p_action'],fn_payment_v2_record_listing:['p_sale','p_message','p_signature'],fn_payment_v2_listing_for_open:['p_sale']}[name]!;
+    const keys={fn_payment_v2_consume_issuer_nonce:['p_kid','p_nonce'],fn_payment_v2_issuer_subject_context:['p_kind','p_subject_id','p_network_id'],fn_payment_v2_issuer_enroll_wallet_checked:['p_user','p_network','p_wallet','p_token_account','p_proof_digest'],fn_payment_v2_prepare_sale:['p_listing_id','p_network_id','p_terms'],fn_payment_v2_issuer_context:['p_sale_id','p_action'],fn_payment_v2_record_listing:['p_sale','p_message','p_signature'],fn_payment_v2_listing_for_open:['p_sale'],fn_payment_v2_open_sale_queue:['p_limit'],fn_payment_v2_claim_open_sale:['p_limit'],fn_payment_v2_renew_open_sale_lease:['p_operation_id','p_lease_id','p_fencing_token'],fn_payment_v2_finish_open_sale:['p_operation_id','p_lease_id','p_fencing_token','p_outcome','p_signature']}[name]!;
     const argv=keys.map((key,i)=>sqlArg(args[key],types[i]!)).join(',');
     try{
       const out=docker(['exec','-e','PGOPTIONS=-c payment_v2.test_identity=synthetic-payment-v2-only',container!,'psql','-X','-q','-A','-t','-v','ON_ERROR_STOP=1','-h','127.0.0.1','-U','payment_db_test_issuer','-d',database,'-c',`BEGIN; SET LOCAL ROLE payment_v2_issuer; SELECT public.fn_payment_v2_worker_identity('payment_v2_issuer'); SELECT jsonb_build_object('value',public.${name}(${argv}))::text; COMMIT;`]);
@@ -191,6 +195,15 @@ describe.skipIf(!container)('issuer real-login container integration',()=>{
     expect(recorded.status,JSON.stringify(recorded.body)).toBe(200);expect(recorded.body).toMatchObject({saleId,recorded:true});
     const openListing=await db.listingForOpen(saleId);expect(openListing).toMatchObject({found:true,saleId,signer:sellerWallet,messageHex:listingMessage.toString('hex')});
     const recordedSnapshot=businessSnapshot();await db.recordListing(saleId,listingMessage,new Uint8Array(Buffer.from(validSig,'base64url')));expect(businessSnapshot()).toBe(recordedSnapshot);
+    const submitterA=createIssuerDatabase(new DockerIssuerTransport()),submitterB=createIssuerDatabase(new DockerIssuerTransport());
+    const candidates=await submitterA.openSaleQueue(20);expect(candidates.some(row=>row.saleId===saleId)).toBe(true);
+    const [claimsA,claimsB]=await Promise.all([submitterA.claimOpenSale(20),submitterB.claimOpenSale(20)]);
+    const targetClaims=[...claimsA,...claimsB].filter(row=>row.saleId===saleId);
+    expect(targetClaims).toHaveLength(1);expect(BigInt(String(targetClaims[0]!.fencingToken))).toBeGreaterThan(BigInt('0'));
+    const won=claimsA.some(row=>row.saleId===saleId)?{db:submitterA,row:claimsA.find(row=>row.saleId===saleId)!}:{db:submitterB,row:claimsB.find(row=>row.saleId===saleId)!};
+    const leaseUntil=await won.db.renewOpenSaleLease(String(won.row.operationId),String(won.row.leaseId),String(won.row.fencingToken));expect(Date.parse(leaseUntil)).toBeGreaterThan(Date.now());
+    await won.db.finishOpenSale(String(won.row.operationId),String(won.row.leaseId),String(won.row.fencingToken),'retryable_failure',null);
+    console.log(`P2C2D|086-two-client-submit-race|PASS|clients=2|claim-count=${targetClaims.length}|positive-fencing-token|renew-finish=real-086-rpcs`);
     const conflictSignature=Buffer.alloc(64,0x44),conflictBefore=businessSnapshot();
     expectIssuerRefusal(`SELECT public.fn_payment_v2_record_listing('${saleId}',decode('${listingMessage.toString('hex')}','hex'),decode('${conflictSignature.toString('hex')}','hex'))`,'PAYMENT_V2_LISTING_CONFLICT');
     expect(businessSnapshot()).toBe(conflictBefore);console.log('P2C1R8|record-writer-retry|PASS|exact-bytes-idempotent|conflicting-bytes-refused');

@@ -41,9 +41,13 @@ export interface SignerClock {
 
 export interface SignerRuntimeConfig {
   custodyMode: 'key-file';
+  custodyRoot: string;
+  pinsFilePath: string;
+  initializationMarkerPath: string;
   secretKeyPath: string;
   issuerPublicKey: string;
   allowedPeerUid: number;
+  allowedPeerPid: number;
   signerUid: number;
   signerGid: number;
   socketGroupGid: number;
@@ -52,6 +56,8 @@ export interface SignerRuntimeConfig {
   auditPath: string;
   alertQueuePath: string;
   pins: SignerPins;
+  /** Same-UID custody is only for local development and requires both this pin and the process flag. */
+  devOnly?: true;
 }
 
 export interface OpenSalePairSignRequest {

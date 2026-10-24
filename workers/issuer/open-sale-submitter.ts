@@ -16,6 +16,7 @@ export interface OpenSaleSubmitterDeps {
   allowList:ReadonlySet<string>;nowSeconds():number;
 }
 export interface OpenSaleSubmissionResult { saleId:string;operationId:string;outcome:'submitted'|'already-present'|'unknown'|'refused';code?:string }
+const SEND_LEASE_MARGIN_MS=10_000;
 function fail(code:string):never{throw new Error(code)}
 function bytesHex(value:unknown,length:number):Uint8Array{if(typeof value!=='string'||!new RegExp(`^[0-9a-f]{${length*2}}$`).test(value))fail('ISSUER_OPEN_LISTING_MISSING');return Uint8Array.from(Buffer.from(value,'hex'))}
 function identical(a:OpenSaleChainState|null,b:OpenSaleChainState|null):boolean{
@@ -82,6 +83,14 @@ export async function runOpenSaleSubmitter(deps:OpenSaleSubmitterDeps):Promise<O
       if(currentOwner.ownerId!==owner.ownerId||currentOwner.ownerAuthId!==owner.ownerAuthId||!sameContext(first,current)||current.state!=='opening')fail('ISSUER_OPEN_LEASE_LOST');
       const [beforeSendA,beforeSendB]=await Promise.all([deps.rpc[0].readSale(saleAddress),deps.rpc[1].readSale(saleAddress)]);
       if(!identical(beforeSendA,beforeSendB)||beforeSendA!==null)fail('ISSUER_OPEN_ACCOUNT_CONFLICT');
+      const renewalStarted=Date.now(),renewedUntil=await deps.db.renewOpenSaleLease(operationId,String(lease.leaseId),String(lease.fencingToken));
+      // Compare against the time before the RPC began; this is conservative
+      // across the renewal round trip and does not depend on the issuer clock.
+      const leaseMargin=Date.parse(renewedUntil)-renewalStarted;
+      if(!Number.isFinite(leaseMargin)||leaseMargin<SEND_LEASE_MARGIN_MS)fail('ISSUER_OPEN_LEASE_LOST');
+      // This commit-to-send window cannot be fenced by Postgres. If the lease
+      // expires after renewal but before/while send, recover by observing the
+      // PDA on both providers; never treat the send acknowledgement as success.
       stage='sending';const acknowledged=await deps.sender.sendRawTransaction(signedBytes);
       await finish(deps,lease,'send_ack',acknowledged);results.push({saleId,operationId,outcome:'submitted'});
     }catch(error){

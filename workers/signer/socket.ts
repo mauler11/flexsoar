@@ -1,5 +1,5 @@
 import { connect, type Socket } from 'node:net';
-import { lstatSync, readlinkSync } from 'node:fs';
+import { lstatSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { SignRequest, SignResponse, SignerRuntimeConfig } from './types';
 
@@ -28,17 +28,19 @@ export class UnixIssuerSigner {
   health():Promise<{ok:true}|{ok:false;code:'SIGNER_UNAVAILABLE'}>{return new Promise(resolveHealth=>{try{socketStat(this.socketPath,this.signerUid);connect(this.socketPath).once('connect',function(this:Socket){this.destroy();resolveHealth({ok:true})}).once('error',()=>resolveHealth({ok:false,code:'SIGNER_UNAVAILABLE'}))}catch{resolveHealth({ok:false,code:'SIGNER_UNAVAILABLE'})}})}
 }
 
-/** Starts the isolated Linux SO_PEERCRED socket front end. It is one-time process
- * setup: failure has no in-process/key-mode fallback. */
+/** Starts the isolated socket front end from the signer-owned process. Production
+ * issuers only connect with UnixIssuerSigner; they never launch or own custody files. */
 export function startKeyFileSigner(config:SignerRuntimeConfig,paths:{python:string;unshare:string;node:string;workerScript:string;peerSocketScript:string;configFile:string}):ChildProcess{
   if(process.platform!=='linux'||config.custodyMode!=='key-file')throw new Error('SIGNER_STARTUP_UNSUPPORTED');
-  const issuerUid=process.getuid?.();if(issuerUid===undefined||issuerUid!==config.allowedPeerUid||(issuerUid!==config.signerUid&&issuerUid!==0))throw new Error('SIGNER_IDENTITY_MISMATCH');
-  const signerIdentity=issuerUid===0?{uid:config.signerUid,gid:config.signerGid}:{};
-  const child=spawn(paths.python,[paths.peerSocketScript,config.socketPath,String(config.allowedPeerUid),String(process.pid),String(config.socketGroupGid),paths.unshare,paths.node,paths.workerScript],{
-    // WSL cannot safely switch to a separately provisioned account here. The
-    // worker instead enters a rootless user+network namespace; the socket pins
-    // the host issuer UID and exact issuer PID, with no custody fallback.
-    stdio:['ignore','ignore','inherit'],windowsHide:true,...signerIdentity,env:{PATH:'/usr/bin:/bin',NODE_ENV:'production',ISSUER_SIGNER_CONFIG:paths.configFile,ISSUER_SIGNER_EXPECTED_PUBLIC_KEY:config.issuerPublicKey},
+  const signerUid=process.getuid?.();if(signerUid===undefined||signerUid!==config.signerUid)throw new Error('SIGNER_IDENTITY_MISMATCH');
+  // Founder-approved residual: same-UID development collapses process and
+  // custody isolation. It is refused by default and is never production mode.
+  if(config.allowedPeerUid===config.signerUid&&!(config.devOnly===true&&process.env.FLEXSOAR_SIGNER_DEV_MODE==='1'))throw new Error('SIGNER_SAME_USER_DEV_ONLY');
+  if(!Number.isSafeInteger(config.allowedPeerPid)||config.allowedPeerPid<1)throw new Error('SIGNER_PEER_IDENTITY_INVALID');
+  const env:{PATH:string;NODE_ENV:'production';ISSUER_SIGNER_CONFIG:string;ISSUER_SIGNER_EXPECTED_PUBLIC_KEY:string;ISSUER_SIGNER_DEV_MODE?:string}={PATH:'/usr/bin:/bin',NODE_ENV:'production',ISSUER_SIGNER_CONFIG:paths.configFile,ISSUER_SIGNER_EXPECTED_PUBLIC_KEY:config.issuerPublicKey};
+  if(config.devOnly===true&&process.env.FLEXSOAR_SIGNER_DEV_MODE==='1')env.ISSUER_SIGNER_DEV_MODE='1';
+  const child=spawn(paths.python,[paths.peerSocketScript,config.socketPath,String(config.allowedPeerUid),String(config.allowedPeerPid),String(config.socketGroupGid),paths.unshare,paths.node,paths.workerScript],{
+    stdio:['ignore','ignore','inherit'],windowsHide:true,env,
   });
   return child;
 }

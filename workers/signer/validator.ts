@@ -74,6 +74,8 @@ function openInstruction(permit:PermitV2,pins:SignerPins):TransactionInstruction
 async function validateOpen(request:Extract<SignRequest,{kind:'open-sale-pair'}>,pins:SignerPins):Promise<VersionedTransaction>{
   const permit=permitFromRequest(request.permitBase64url,pins),message=bytes(request.listingMessageBase64url,61),sellerSignature=bytes(request.sellerSignatureBase64url,64);
   assert(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(request.saleId));
+  const saleUuid=Buffer.from(request.saleId.replaceAll('-',''),'hex');
+  assert(equal(createHash('sha256').update(saleUuid).digest(),permit.saleId),'SIGNER_PERMIT_INVALID');
   const listing=decodeListingMessage(message),binding=await listingBinding({domain:permit.domain,program:permit.program,card:permit.card,saleId:permit.saleId,generation:permit.generation});
   assert(equal(listing.binding,binding)&&listing.minTotal<=permit.total&&listing.minTotal>BigInt('0'));
   const minAllowed=(permit.total*(BigInt('10000')-BigInt(pins.maxFloorToleranceBps))+BigInt('9999'))/BigInt('10000');

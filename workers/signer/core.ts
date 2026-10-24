@@ -1,9 +1,10 @@
-import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { Keypair } from '@solana/web3.js';
 import { base58Encode } from '@/lib/solana/base58';
 import { validateSignerRequest, signValidatedTransaction } from './validator';
 import type { SignRequest, SignResponse, SignerAlert, SignerAlertSink, SignerClock, SignerPins, SignerRuntimeConfig } from './types';
+import { assertCustodyFile, assertCustodyRoot, createRateJournalInitializationMarker, requireOrInitializeRateJournal } from './storage';
 
 const RATE_LIMITS={'open-sale-pair':2,'buy-sale':5} as const;
 const WINDOW_SECONDS=60;
@@ -17,9 +18,9 @@ function persistJournal(path:string,journal:{lastNow:number;accepted:Record<stri
   writeFileSync(temp,JSON.stringify(journal),{flag:'wx',mode:0o600});const fd=openSync(temp,'r');try{syncFd(fd)}finally{closeSync(fd)}
   renameSync(temp,path);if(process.platform==='linux'){const dir=openSync(dirname(path),'r');try{syncFd(dir)}finally{closeSync(dir)}}
 }
-function readJournal(path:string,assertOwnedFile:(path:string)=>void):{lastNow:number;accepted:Record<string,number[]>}{
-  if(!existsSync(path))return {lastNow:0,accepted:{'open-sale-pair':[],'buy-sale':[]}};
-  assertOwnedFile(path);
+function readJournal(path:string,custodyRoot:string,markerPath:string):{lastNow:number;accepted:Record<string,number[]>}{
+  requireOrInitializeRateJournal(path,markerPath,custodyRoot);
+  assertCustodyFile(path,custodyRoot);
   const parsed=JSON.parse(readFileSync(path,'utf8')) as {lastNow:number;accepted:Record<string,number[]>};
   if(!Number.isSafeInteger(parsed.lastNow)||!parsed.accepted||!Array.isArray(parsed.accepted['open-sale-pair'])||!Array.isArray(parsed.accepted['buy-sale']))throw new Error('SIGNER_RATE_JOURNAL_CORRUPT');
   return parsed;
@@ -31,9 +32,9 @@ function readJournal(path:string,assertOwnedFile:(path:string)=>void):{lastNow:n
  * and signer rate limit (issuer-service-design.md §11.1). There is no fallback mode. */
 export function loadSignerKeyFile(config:SignerRuntimeConfig):Keypair{
   if(config.custodyMode!=='key-file')throw new Error('SIGNER_CUSTODY_MODE_UNSUPPORTED');
-  const info=lstatSync(config.secretKeyPath,{bigint:true});
   const signerUid=process.getuid?.();
-  if(signerUid===undefined||!info.isFile()||(info.mode&BigInt('511'))!==BigInt('384')||info.uid!==BigInt(signerUid))throw new Error('SIGNER_KEY_FILE_PERMISSIONS');
+  if(signerUid===undefined)throw new Error('SIGNER_KEY_FILE_PERMISSIONS');
+  try{assertCustodyFile(config.secretKeyPath,config.custodyRoot,signerUid)}catch{throw new Error('SIGNER_KEY_FILE_PERMISSIONS')}
   const raw=JSON.parse(readFileSync(config.secretKeyPath,'utf8')) as unknown;
   if(!Array.isArray(raw)||raw.length!==64||raw.some(v=>!Number.isInteger(v)||v<0||v>255))throw new Error('SIGNER_KEY_FILE_INVALID');
   const keypair=Keypair.fromSecretKey(Uint8Array.from(raw as number[]));
@@ -42,12 +43,10 @@ export function loadSignerKeyFile(config:SignerRuntimeConfig):Keypair{
 }
 
 export interface SignerCore { sign(request:SignRequest):Promise<SignResponse>; publicKey:string }
-function assertPrivateOwnedFile(path:string):void{
-  const info=lstatSync(path,{bigint:true}),uid=process.getuid?.();
-  if(uid===undefined||!info.isFile()||(info.mode&BigInt('511'))!==BigInt('384')||info.uid!==BigInt(uid))throw new Error('SIGNER_PRIVATE_FILE_INVALID');
-}
-export function createSignerCore(keypair:Keypair,pins:SignerPins,options:{rateJournalPath:string;auditPath:string;alertQueuePath:string;alerts:SignerAlertSink;clock?:SignerClock;assertOwnedFile?:(path:string)=>void}):SignerCore{
+export function createSignerCore(keypair:Keypair,pins:SignerPins,options:{rateJournalPath:string;auditPath:string;alertQueuePath:string;alerts:SignerAlertSink;custodyRoot?:string;initializationMarkerPath?:string;clock?:SignerClock}):SignerCore{
   if(keypair.publicKey.toBase58()!==pins.issuer)throw new Error('SIGNER_KEY_MISMATCH');
+  const custodyRoot=options.custodyRoot??dirname(options.rateJournalPath),markerPath=options.initializationMarkerPath??join(custodyRoot,'.rate-journal-init');
+  assertCustodyRoot(custodyRoot);
   const clock=options.clock??{nowSeconds:()=>Math.floor(Date.now()/1000)};
   let enabled=true;
   const alert=async(event:SignerAlert):Promise<void>=>{
@@ -62,7 +61,7 @@ export function createSignerCore(keypair:Keypair,pins:SignerPins,options:{rateJo
     const requestId=typeof request.requestId==='string'&&request.requestId.length<=128?request.requestId:'invalid-request';
     if(!enabled)throw new Error('SIGNER_DISABLED');
     let journal:{lastNow:number;accepted:Record<string,number[]>};
-    try{journal=readJournal(options.rateJournalPath,options.assertOwnedFile??assertPrivateOwnedFile)}catch{enabled=false;await alert({operation:request.kind,requestId,refusalCode:'SIGNER_RATE_JOURNAL_CORRUPT'});throw new Error('SIGNER_RATE_JOURNAL_CORRUPT')}
+    try{journal=readJournal(options.rateJournalPath,custodyRoot,markerPath)}catch{enabled=false;await alert({operation:request.kind,requestId,refusalCode:'SIGNER_RATE_JOURNAL_CORRUPT'});throw new Error('SIGNER_RATE_JOURNAL_CORRUPT')}
     const now=clock.nowSeconds();
     if(now<journal.lastNow){enabled=false;await alert({operation:request.kind,requestId,refusalCode:'SIGNER_CLOCK_ROLLBACK'});throw new Error('SIGNER_CLOCK_ROLLBACK')}
     const old=journal.accepted[request.kind].filter(t=>t>now-WINDOW_SECONDS);

@@ -20,7 +20,7 @@ export interface IssuerDatabase {
   authorizeAttempt(attemptId: string): Promise<string>;
   openSaleQueue(limit: number): Promise<readonly IssuerContext[]>;
   claimOpenSale(limit: number): Promise<readonly IssuerContext[]>;
-  renewOpenSaleLease(operationId: string, leaseId: string, fencingToken: string): Promise<void>;
+  renewOpenSaleLease(operationId: string, leaseId: string, fencingToken: string): Promise<string>;
   finishOpenSale(operationId: string, leaseId: string, fencingToken: string, outcome: 'send_ack'|'send_unknown'|'preexisting_exact_pda'|'conflict'|'retryable_failure', signature: string | null): Promise<void>;
 }
 

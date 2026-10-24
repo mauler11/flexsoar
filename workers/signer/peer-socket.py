@@ -23,6 +23,7 @@ def read_exact(stream, length):
 class Handler(socketserver.BaseRequestHandler):
     def handle(self):
         try:
+            self.request.settimeout(2.0)
             pid, uid, gid = struct.unpack('3i', self.request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize('3i')))
             if uid != self.server.allowed_uid or pid != self.server.allowed_pid:
                 return
@@ -67,6 +68,8 @@ def main():
         'ISSUER_SIGNER_EXPECTED_PUBLIC_KEY': os.environ['ISSUER_SIGNER_EXPECTED_PUBLIC_KEY'],
         'ISSUER_SIGNER_PARENT_NETNS': parent_netns,
     }
+    if os.environ.get('ISSUER_SIGNER_DEV_MODE') == '1':
+        worker_env['ISSUER_SIGNER_DEV_MODE'] = '1'
     worker = subprocess.Popen([unshare_path, '--user', '--map-root-user', '--net', '--', node_path, worker_path], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr, text=True, bufsize=1, close_fds=True, env=worker_env)
     ready = json.loads(worker.stdout.readline())
     startup_ok = isinstance(ready, dict) and ready.get('ready') is True and ready.get('isolated') is True and ready.get('noDatabaseEnv') is True and ready.get('publicKey') == os.environ.get('ISSUER_SIGNER_EXPECTED_PUBLIC_KEY')

@@ -49,7 +49,8 @@ export function createIssuerDatabase(transport: PaymentRpc): IssuerDatabase {
       if(!Array.isArray(value))throw new Error('invalid open-sale lease result');return value.map(row=>object(row) as IssuerContext);
     },
     async renewOpenSaleLease(operationId,leaseId,fencingToken) {
-      await paymentRpc(transport,'fn_payment_v2_renew_open_sale_lease',{p_operation_id:operationId,p_lease_id:leaseId,p_fencing_token:fencingToken});
+      const value=await paymentRpc(transport,'fn_payment_v2_renew_open_sale_lease',{p_operation_id:operationId,p_lease_id:leaseId,p_fencing_token:fencingToken});
+      if(typeof value!=='string'||!Number.isFinite(Date.parse(value)))throw new Error('invalid renewed open-sale lease expiry');return value;
     },
     async finishOpenSale(operationId,leaseId,fencingToken,outcome,signature) {
       await paymentRpc(transport,'fn_payment_v2_finish_open_sale',{p_operation_id:operationId,p_lease_id:leaseId,p_fencing_token:fencingToken,p_outcome:outcome,p_signature:signature});
