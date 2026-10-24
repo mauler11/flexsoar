@@ -146,15 +146,29 @@ describe.skipIf(!container)('issuer real-login container integration',()=>{
     const sameA=signedRequest('/v1/prepare-sale',{listingId,requestId}),sameB=signedRequest('/v1/prepare-sale',{listingId,requestId});
     const pendingA=handleIssuerRequest(sameA.req,deps),pendingB=handleIssuerRequest(sameB.req,deps);await sameReady;
     const distinct=signedRequest('/v1/prepare-sale',{listingId,requestId:'33333333-3333-4333-8333-333333333333'}),pendingDistinct=handleIssuerRequest(distinct.req,deps);await distinctReady;
+    // Both requests have completed both FX reads. Hold their DB writers until
+    // both have passed the second recovery read, then serialize the real RPCs:
+    // the second call must take SQL's conflicting-idempotency-terms branch.
+    let releaseFirstWriter!:()=>void;const firstWriterDone=new Promise<void>(resolve=>{releaseFirstWriter=resolve});
+    const actualPrepareSale=db.prepareSale.bind(db);let writerArrivals=0,sqlConflictCount=0;
+    let releaseWriters!:()=>void;const bothWritersReady=new Promise<void>(resolve=>{releaseWriters=resolve});
+    db.prepareSale=async(...args)=>{
+      const arrival=++writerArrivals;if(arrival===2)releaseWriters();await bothWritersReady;
+      if(arrival===1){try{return await actualPrepareSale(...args)}finally{releaseFirstWriter()}}
+      await firstWriterDone;
+      try{return await actualPrepareSale(...args)}catch(error){if(error instanceof Error&&error.message.includes('PAYMENT_V2_SALE_IDEMPOTENCY_CONFLICT'))sqlConflictCount++;throw error}
+    };
     releaseSame();const [prepared,prepared2]=await Promise.all([pendingA,pendingB]);
+    db.prepareSale=actualPrepareSale;
     expect(prepared.status,JSON.stringify(prepared.body)).toBe(200);expect(prepared2.status,JSON.stringify(prepared2.body)).toBe(200);expect(prepared2.body).toEqual(prepared.body);
+    expect(writerArrivals).toBe(2);expect(sqlConflictCount).toBe(1);
     const saleBody=prepared.body as Record<string,unknown>,saleId=String(saleBody.saleId),stored=await db.subjectContext('prepare_recovery',requestId,null);
     expect(stored).toMatchObject({found:true,listingId,saleId});
     expect(saleBody.quote).toMatchObject({totalMicroUsdc:stored.quoteTotalUnits,validFrom:stored.quoteValidFrom,expiresAt:stored.quoteExpiresAt,fxSnapshot:stored.fxSnapshot});
     const fencedSnapshot=businessSnapshot();releaseDistinct();const fenceRace=await pendingDistinct;
     expect(fenceRace.body.error).toMatchObject({code:'ISSUER_LISTING_UNAVAILABLE'});expect(businessSnapshot()).toBe(fencedSnapshot);
     expectOneNonce(sameA.nonceHex);expectOneNonce(sameB.nonceHex);expectOneNonce(distinct.nonceHex);
-    console.log(`P2C1R8|prepare-same-request|PASS|responses-identical|stored-sale=${saleId}|different-fx-snapshots`);
+    console.log(`P2C1D|prepare-same-request|PASS|both-writers-entered|sql-idempotency-conflict=${sqlConflictCount}|responses-equal-stored-snapshot|stored-sale=${saleId}|different-fx-snapshots`);
     console.log('P2C1R8|prepare-price-race|PASS|ISSUER_LISTING_STALE|no-stale-sale-write');
     console.log('P2C1R8|prepare-fence-race|PASS|ISSUER_LISTING_UNAVAILABLE|no-second-sale-write');
 
