@@ -7194,4 +7194,4 @@ Confirmed directly in migration 086 `fn_payment_v2_renew_open_sale_lease`, line 
 
 Custody reads and writes use Linux descriptor-relative opens through a signer-owned directory FD, add `O_NOFOLLOW` to file opens, and validate the opened file descriptor's owner/mode/type. Journal atomic replacement, audit/alert append, key/config/pins reads, and initialization-marker handling use these helpers. A symlink vector refuses.
 
-Final-commit provenance evidence will be stored under `docs/handoff/evidence/<code-commit>/`; each integration and WSL transcript starts with the exact HEAD, dirty-tree state and UTC run time. The combined lifecycle E2E remains deferred to Phase 5.
+Final-commit provenance evidence for code commit `f10e73ff2814ea94d48f2cf3e0de7e94d2698e11`: [guarded container integration](evidence/f10e73ff2814ea94d48f2cf3e0de7e94d2698e11/container-integration.txt) and [WSL socket suite](evidence/f10e73ff2814ea94d48f2cf3e0de7e94d2698e11/wsl-socket.txt). Each transcript starts with exact HEAD, dirty-tree state and UTC run time. Container run passed 1/1; WSL passed 7/7. The combined lifecycle E2E remains deferred to Phase 5.

@@ -1,0 +1,29 @@
+﻿HEAD=f10e73ff2814ea94d48f2cf3e0de7e94d2698e11 TREE_DIRTY=false UTC=2026-10-24T17:14:08Z
+node.exe : (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to 
+become the default in a future major version of Vite:
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ((!) Your Vite c...ersion of Vite::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` 
+in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.11 C:/Users/Family/flexsoar-payment-security
+
+P2C1D|prepare-same-request|PASS|both-writers-entered|sql-idempotency-conflict=1|responses-equal-stored-snapshot|stored-sale=11111111-1111-4111-8111-111111111111|different-fx-snapshots
+P2C1R8|prepare-price-race|PASS|ISSUER_LISTING_STALE|no-stale-sale-write
+P2C1R8|prepare-fence-race|PASS|ISSUER_LISTING_UNAVAILABLE|no-second-sale-write
+P2C1R8|record-cancel-race|PASS|ISSUER_SALE_NOT_OPENING|no-stale-listing-write
+P2C2D|086-two-client-submit-race|PASS|clients=2|claim-count=1|positive-fencing-token|renew-finish=real-086-rpcs
+P2C1R8|record-writer-retry|PASS|exact-bytes-idempotent|conflicting-bytes-refused
+P2C1R8|enrollment-writer|PASS|auth_id|linked-wallet|non-MY|network|duplicate-wallet|duplicate-token|exact-retry|changed-proof-retry
+ ✓ workers/issuer/database.integration.test.ts > issuer real-login container integration > runs DB negative/retry/race cases and prepare → record-listing plus fake-RPC enrollment through the real login 99504ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  01:14:11
+   Duration  100.21s (transform 243ms, setup 0ms, import 520ms, tests 99.51s, environment 0ms)
+
