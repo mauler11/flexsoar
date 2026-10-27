@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import { manualOrderMessages, type ManualOrderEmail } from '@/lib/manual-checkout/order';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const FROM_EMAIL = process.env.FROM_EMAIL ?? 'FlexSoar <noreply@flexsoar.net>';
@@ -17,6 +18,17 @@ function getResend(): Resend {
     resend = new Resend(RESEND_API_KEY);
   }
   return resend;
+}
+
+/** One batch, stable provider idempotency key; failures never pretend success. */
+export async function sendManualOrderEmails(order: ManualOrderEmail): Promise<void> {
+  const messages = manualOrderMessages(order);
+  const result = await getResend().batch.send([
+    { from: FROM_EMAIL, to: SUPPORT_EMAIL, ...messages.support },
+    { from: FROM_EMAIL, to: order.email, ...messages.buyer },
+  ], { idempotencyKey: `manual-order/${order.reference}` });
+  if (result.error) throw new Error(`Order emails unavailable: ${result.error.message}`);
+  if (!result.data || result.data.data.length !== 2) throw new Error('Order email delivery could not be confirmed');
 }
 
 export interface SubmissionApprovedEmailInput {

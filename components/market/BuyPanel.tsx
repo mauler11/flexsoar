@@ -1,21 +1,13 @@
 /**
  * components/market/BuyPanel.tsx
  *
- * The purchase box for a listing the caller does not own. Gating happens
- * twice: once here, so the button can explain itself honestly (level required,
- * window not open), and again inside createCheckoutAction, which re-checks the
- * session and refuses to build a Stripe Session for anyone the database would
- * reject — the webhook's EARLY_ACCESS_LOCKED is the last line, not the first.
- *
- * When `checkoutActive` (the page is showing a just-returned checkout) the
- * panel hands off to OrderPoll, which watches the listing until the webhook
- * records the settlement.
+ * Server-selected manual request CTA plus recovery for historical payments.
+ * Submission rechecks availability and reads the current price on the server.
  */
 "use client";
 
 import { Badge } from "@/components/ui/Badge";
 import { Banner } from "@/components/market/Banner";
-import { OrderPoll } from "@/components/market/OrderPoll";
 import { CheckoutButton } from "@/components/market/CheckoutModal";
 import { FiatAmount } from "@/components/market/Fiat";
 
@@ -31,33 +23,20 @@ export interface BuyPanelListing {
 
 export interface BuyPanelProps {
   listing: BuyPanelListing;
-  /** The listing this page returned from checkout for; poll it to settle. */
-  checkoutActive: boolean;
+  manualStatus?: "open" | "reserved" | "unavailable";
   /**
    * True when the underlying item is still in the consignor's own custody
    * (items.custody = 'seller') — a first sale that hasn't reached the vault
-   * yet. Buying this listing freezes the card until the shoe physically
-   * reaches FlexSoar; the disclosure below says so before checkout, not
-   * after.
+   * yet. This disclosure is shown before a manual order request.
    */
   firstSalePending: boolean;
 }
 
 export function BuyPanel({
   listing,
-  checkoutActive,
+  manualStatus = "unavailable",
   firstSalePending,
 }: BuyPanelProps) {
-  if (checkoutActive) {
-    return (
-      <OrderPoll
-        listingId={listing.id}
-        cardId={listing.cardId}
-        priceCents={listing.priceCents}
-      />
-    );
-  }
-
   const underOracle =
     listing.oracleValueCents != null &&
     listing.priceCents < listing.oracleValueCents * 0.85;
@@ -87,18 +66,19 @@ export function BuyPanel({
       )}
 
       {firstSalePending && (
-        <Banner tone="warn" title="First sale — card freezes on purchase">
-          This shoe is still with the seller. Buying it locks the card as{" "}
-          <strong>pending vault</strong> until the physical shoe reaches
-          FlexSoar — no resale, trade, or redemption until then. The seller
-          has 48 hours to ship; if they miss it, the sale is cancelled and you
-          are refunded in full and in kind.
+        <Banner tone="info" title="Seller-held pair">
+          Held by the seller. FlexSoar collects and authenticates every pair before your card transfers. Full refund if it fails authentication or isn&apos;t delivered to us.
         </Banner>
       )}
 
+      {manualStatus === "open" ? (
+        <a className="rounded-xl bg-accent px-4 py-2 text-center font-semibold text-[#0B0B0B]" href={`/order/${listing.id}`}>Order now</a>
+      ) : (
+        <button type="button" disabled className="rounded-xl border border-line px-4 py-2 text-muted">{manualStatus === "reserved" ? "Reserved" : "Coming soon"}</button>
+      )}
       <CheckoutButton listing={listing} />
       <p className="text-[11px] text-muted">
-        Sale is recorded when payment settles — never by this page.
+        Order requests are reviewed manually. Payment status recovers past attempts only.
       </p>
     </div>
   );

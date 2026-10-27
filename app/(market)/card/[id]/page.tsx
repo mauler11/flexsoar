@@ -7,6 +7,7 @@
  * getCard/getListing; this page only renders what those made visible.
  */
 import type { Metadata } from "next";
+import { manualCheckoutStatus } from "@/lib/manual-checkout/config";
 import { notFound } from "next/navigation";
 import { getCard, getListing, getItem, getPayoutMethodForUser, getUser, listSkuModels, getPriceHistory, getModelRetail } from "@/lib/api/contract";
 import type { CardStatus } from "@/lib/db/types";
@@ -314,7 +315,7 @@ export default async function CardPage({
                 status: listing.status,
                 sellerId: listing.seller_id,
               }}
-              checkoutActive={sp.order === listing.id}
+              manualStatus={listing.status === "public" && !listing.order ? manualCheckoutStatus(listing.id) : "unavailable"}
               firstSalePending={firstSalePending}
             />
           ) : (
